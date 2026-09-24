@@ -1,0 +1,12 @@
+node_modules
+.next
+out
+.env
+.env.local
+.data/
+*.log
+*.tsbuildinfo
+.vercel/
+sources/
+AGENTS.md
+.superdesign/tmp
