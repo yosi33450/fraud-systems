@@ -16,6 +16,7 @@ import {
   Fingerprint,
   Gauge,
   Gift,
+  Info,
   LayoutDashboard,
   LockKeyhole,
   Mail,
@@ -64,7 +65,18 @@ const statusLabels: Record<CaseStatus, string> = {
   action: "דורש פעולה",
   fraud: "הונאה מאומתת",
   "false-positive": "לא חשוד",
-  resolved: "טופל",
+  resolved: "נסגר",
+};
+
+const isAutomaticallyResolved = (item: FraudCase) => item.status === "resolved" && (item.resolution?.source === "automatic-rule-change" || item.reason === "לא עומד עוד בחוקי הסיכון הפעילים");
+const caseStatusLabel = (item: FraudCase) => isAutomaticallyResolved(item) ? "נסגר אוטומטית" : item.status === "resolved" ? "נסגר ידנית" : statusLabels[item.status];
+const isPayPlusPlaceholder = (item: FraudCase) => /general customer payplus/i.test(item.customer) || /עסקת PayPlus/i.test(item.email);
+const customerDisplayName = (item: FraudCase) => {
+  if (isPayPlusPlaceholder(item)) return "פרטי הקונה לא הועברו";
+  if (!["ללא שם", "לקוח Shopify", ""].includes(item.customer.trim())) return item.customer;
+  if (item.context?.phone) return "לקוח מזוהה לפי טלפון";
+  if (item.email.includes("@")) return item.email;
+  return "פרטי הקונה לא הועברו";
 };
 
 const sourceLabels = { network: "רשת", shopify: "Shopify", behavior: "התנהגות", employee: "עובדים" };
@@ -339,7 +351,7 @@ function clusterCases(items: FraudCase[]): CaseCluster[] {
       isRealEmail(item.email) ? `email:${item.email.trim().toLowerCase()}` : "",
       item.context?.ip ? `ip:${item.context.ip}` : "",
       item.context?.phone ? `phone:${item.context.phone.replace(/\D/g, "")}` : "",
-      item.context?.customerId ? `customer:${item.context.customerId}` : "",
+      item.context?.customerId && !isPayPlusPlaceholder(item) ? `customer:${item.context.customerId}` : "",
     ].filter(Boolean);
     identities.forEach((identity) => {
       const owner = identityOwner.get(identity);
@@ -354,7 +366,7 @@ function clusterCases(items: FraudCase[]): CaseCluster[] {
     const emails = unique(cases.map((item) => isRealEmail(item.email) ? item.email.trim().toLowerCase() : undefined));
     const ips = unique(cases.map((item) => item.context?.ip));
     const phones = unique(cases.map((item) => item.context?.phone));
-    const customers = unique(cases.map((item) => item.context?.customerId));
+    const customers = unique(cases.map((item) => !isPayPlusPlaceholder(item) ? item.context?.customerId : undefined));
     const severity = cases.reduce<Severity>((highest, item) => severityOrder[item.severity] > severityOrder[highest] ? item.severity : highest, "low");
     return {
       id: cases.map((item) => item.id).sort()[0], cases, emails, ips, phones, customers, severity,
@@ -392,7 +404,7 @@ function Overview({ cases, query, setQuery, severity, setSeverity, store, setSto
         <Metric icon={<ShieldAlert />} label="ממתינים להחלטה" value={String(cases.filter((item) => ["new", "review", "action"].includes(item.status)).length)} detail={`${cases.filter((item) => item.severity === "critical" && ["new", "review", "action"].includes(item.status)).length} דורשים טיפול מיידי`} tone="critical" />
         <Metric icon={<Fingerprint />} label="סכום בהזמנות חשודות" value={formatCurrency(cases.filter((item) => ["new", "review", "action"].includes(item.status)).reduce((sum, item) => sum + item.amount, 0))} detail="בתיקים שעדיין פתוחים" />
         <Metric icon={<Mail />} label="התראות לבעלי החנות" value={String(deliveries.filter((item) => ["sent", "simulated"].includes(item.status)).length)} detail="נשלחו באימייל" tone="warning" />
-        <Metric icon={<CheckCircle2 />} label="תיקים שטופלו" value={String(cases.filter((item) => ["fraud", "false-positive", "resolved"].includes(item.status)).length)} detail="הסתיימו בהחלטה" tone="success" />
+        <Metric icon={<CheckCircle2 />} label="התראות סגורות" value={String(cases.filter((item) => ["fraud", "false-positive", "resolved"].includes(item.status)).length)} detail="אוטומטית או בהחלטת בעל החנות" tone="success" />
       </section>
       <section className="signal-row">
         <div className="signal-card"><div className="signal-kicker"><Mail size={16} /> התראות לבעלים</div><strong>התראה נשלחת מיד על סיכון גבוה או קריטי</strong><p>בעל החנות מקבל אימייל עם ההזמנה והסיבה, ואז מסמן בבדיקה, טופל, תקין או הונאה.</p><button onClick={onOpenNotifications}>הגדר נמענים <ChevronLeft size={14} /></button></div>
@@ -413,23 +425,24 @@ function Overview({ cases, query, setQuery, severity, setSeverity, store, setSto
         {clusters.map((cluster) => {
           const expanded = expandedClusters.has(cluster.id);
           const activeClusterCases = cluster.cases.filter((item) => ["new", "review", "action"].includes(item.status));
-          const closedByRules = activeClusterCases.length === 0 && cluster.cases.every((item) => item.status === "resolved");
+          const closedByRules = activeClusterCases.length === 0 && cluster.cases.every(isAutomaticallyResolved);
           const activeSeverity = activeClusterCases.reduce<Severity>((highest, item) => severityOrder[item.severity] > severityOrder[highest] ? item.severity : highest, "low");
+          const statusCase = activeClusterCases.find((item) => item.status === "action") ?? activeClusterCases.find((item) => item.status === "review") ?? activeClusterCases[0] ?? cluster.cases[0];
           const repeatedBy = cluster.cases.length > 1
             ? cluster.emails.length === 1 ? `אותו אימייל · ${cluster.emails[0]}`
               : cluster.ips.length === 1 ? `אותה כתובת IP · ${cluster.ips[0]}`
                 : cluster.phones.length === 1 ? `אותו טלפון · ${cluster.phones[0]}`
                   : "זהויות מקושרות"
-            : cluster.cases[0].customer;
+            : customerDisplayName(cluster.cases[0]);
           return <article className={`case-cluster ${cluster.cases.length > 1 ? "case-cluster-linked" : ""}`} key={cluster.id}>
             <button className="case-cluster-summary" onClick={() => cluster.cases.length === 1 ? onOpen(cluster.cases[0]) : toggleCluster(cluster.id)} aria-expanded={cluster.cases.length > 1 ? expanded : undefined}>
               <div className="cluster-severity">{closedByRules ? <span className="closed-by-rules"><CheckCircle2 size={15} /> נסגר לפי החוקים</span> : <SeverityBadge severity={activeClusterCases.length ? activeSeverity : cluster.severity} score={Math.max(...(activeClusterCases.length ? activeClusterCases : cluster.cases).map((item) => item.score))} />}</div>
               <div className="cluster-identity"><strong>{repeatedBy}</strong><span>{cluster.cases.length > 1 ? `${cluster.cases.length} הזמנות קושרו לאותה זהות` : `${cluster.cases[0].orderNumber} · ${cluster.cases[0].reason}`}</span><div className="cluster-signals">{cluster.emails.length > 1 ? <span><Mail size={13} /> {cluster.emails.length} אימיילים</span> : null}{cluster.ips.length === 1 && cluster.cases.length > 1 ? <span><Wifi size={13} /> IP משותף</span> : null}{cluster.phones.length === 1 && cluster.cases.length > 1 ? <span><Phone size={13} /> טלפון משותף</span> : null}{cluster.giftCardOrders > 0 ? <span><Gift size={13} /> {cluster.giftCardOrders} Gift Card</span> : null}</div></div>
               <div className="cluster-stat"><span>הזמנות</span><strong>{cluster.cases.length}</strong></div>
               <div className="cluster-stat"><span>סכום כולל</span><strong>{formatCurrency(cluster.totalAmount)}</strong></div>
-              <div className="cluster-status"><span className={`status status-${cluster.cases[0].status}`}>{statusLabels[cluster.cases[0].status]}</span>{cluster.cases.length > 1 ? expanded ? <ChevronUp size={18} /> : <ChevronDown size={18} /> : <ChevronLeft size={18} />}</div>
+              <div className="cluster-status"><span className={`status status-${statusCase.status}`}>{closedByRules ? "נסגר אוטומטית" : caseStatusLabel(statusCase)}</span>{cluster.cases.length > 1 ? expanded ? <ChevronUp size={18} /> : <ChevronDown size={18} /> : <ChevronLeft size={18} />}</div>
             </button>
-            {expanded ? <div className="cluster-orders">{cluster.cases.map((item) => <button key={item.id} className="cluster-order" onClick={() => onOpen(item)}><span className="cluster-order-index mono">{item.orderNumber}</span><span><strong>{item.customer}</strong><small>{item.email}</small></span><span className="reason-cell">{item.reason}</span><strong className="mono amount-cell">{formatCurrency(item.amount)}</strong><span className={`status status-${item.status}`}>{statusLabels[item.status]}</span><ChevronLeft size={16} /></button>)}</div> : null}
+            {expanded ? <div className="cluster-orders">{cluster.cases.map((item) => <button key={item.id} className="cluster-order" onClick={() => onOpen(item)}><span className="cluster-order-index mono">{item.orderNumber}</span><span><strong>{customerDisplayName(item)}</strong><small>{isPayPlusPlaceholder(item) ? "PayPlus · פרטי קשר לא התקבלו" : item.email}</small></span><span className="reason-cell">{isAutomaticallyResolved(item) ? item.resolution?.note ?? "לא עומד עוד בחוקי הסיכון הפעילים" : item.reason}</span><strong className="mono amount-cell">{formatCurrency(item.amount)}</strong><span className={`status status-${item.status}`}>{caseStatusLabel(item)}</span><ChevronLeft size={16} /></button>)}</div> : null}
           </article>;
         })}
         {displayCases.length === 0 ? <div className="empty-state"><Shield size={26} /><strong>{hasStores ? "אין כרגע התראות פעילות" : "אין נתונים להצגה"}</strong><span>{hasStores ? "שינויי החוקים חושבו מחדש. הזמנות חשודות חדשות יופיעו כאן." : "חבר חנות Shopify כדי להתחיל לקבל ולבדוק הזמנות."}</span></div> : null}
@@ -443,18 +456,19 @@ function Metric({ icon, label, value, detail, tone = "default" }: { icon: React.
 }
 
 function InvestigationDrawer({ item, onClose, onDecide }: { item: FraudCase; onClose: () => void; onDecide: (status: CaseStatus) => void }) {
-  const closedByRules = item.status === "resolved" && item.score === 0;
+  const closedByRules = isAutomaticallyResolved(item);
+  const missingBuyerIdentity = isPayPlusPlaceholder(item) || ["ללא שם", "לקוח Shopify", ""].includes(item.customer.trim());
   return <div className="drawer-backdrop" onMouseDown={(event) => { if (event.currentTarget === event.target) onClose(); }}>
     <aside className="investigation-drawer" role="dialog" aria-modal="true" aria-label={`חקירת הזמנה ${item.orderNumber}`}>
       <header className="drawer-header"><div><span className="eyebrow">INVESTIGATION CASE</span><div className="drawer-title"><h2>{item.orderNumber}</h2>{closedByRules ? <span className="closed-by-rules"><CheckCircle2 size={15} /> נסגר לפי החוקים</span> : <SeverityBadge severity={item.severity} score={item.score} />}</div><p>{item.storeName} · נפתח {item.createdAt}</p></div><button className="icon-button" onClick={onClose} aria-label="סגירת תיק"><X size={20} /></button></header>
       <div className="drawer-body">
-        <section className={`score-hero ${closedByRules ? "score-hero-resolved" : ""}`}>{closedByRules ? <div className="resolved-mark"><CheckCircle2 size={28} /></div> : <div className="score-ring"><strong>{item.score}</strong><span>/100</span></div>}<div><span>{closedByRules ? "תוצאת החישוב מחדש" : "רמת חשד"}</span><h3>{item.reason}</h3><p>{closedByRules ? "ההזמנה אינה עומדת כרגע באף חוק סיכון פעיל, ולכן ההתראה נסגרה ולא מוצג לה ציון סיכון." : `${item.evidence.length} תנאים זוהו בהזמנה. המערכת מתריעה בלבד — בעל החנות מקבל את ההחלטה.`}</p></div></section>
+        <section className={`score-hero ${closedByRules ? "score-hero-resolved" : ""}`}>{closedByRules ? <div className="resolved-mark"><CheckCircle2 size={28} /></div> : <div className="score-ring"><strong>{item.score}</strong><span>/100</span></div>}<div><span>{closedByRules ? "נסגר אוטומטית בחישוב חוקים" : "רמת חשד"}</span><h3>{closedByRules ? "ההתראה אינה פעילה" : item.reason}</h3><p>{closedByRules ? item.resolution?.note ?? "ההזמנה אינה עומדת כרגע באף חוק סיכון פעיל. לא התקבלה החלטה אנושית לגביה." : `${item.evidence.length} תנאים זוהו בהזמנה. המערכת מתריעה בלבד — בעל החנות מקבל את ההחלטה.`}</p></div></section>
         <div className="drawer-grid">
           <section><div className="section-heading"><div><h3>למה התקבלה ההתראה?</h3><span>כל תנאי מוצג בשפה ברורה לבדיקה</span></div></div><div className="evidence-ledger">{item.evidence.map((evidence) => <article key={evidence.id} className="evidence-node"><div className={`evidence-dot source-${evidence.source}`} /><div className="evidence-time mono">{evidence.timestamp}</div><div className="evidence-card"><div><span>{sourceLabels[evidence.source]}</span><strong className="condition-met">תנאי התקיים</strong></div><h4>{evidence.label}</h4><p>{evidence.description}</p></div></article>)}</div></section>
-          <section className="order-context"><h3>זהות והקשר להזמנה</h3><p className="context-note">הפרטים עוזרים לחבר בין עסקאות. כתובת IP לבדה אינה מזהה אדם בוודאות.</p><div className="identity-grid"><div><span><Wifi size={15} /> כתובת IP</span><strong className="mono">{item.context?.ip || "לא התקבל מ־Shopify"}</strong></div><div><span><CreditCard size={15} /> אמצעי תשלום</span><strong>{item.context?.paymentGateways.join(", ") || "לא זמין"}</strong></div><div><span><MapPin size={15} /> כתובת משלוח</span><strong>{item.context?.address || "לא זמין"}</strong></div><div><span><Phone size={15} /> טלפון</span><strong className="mono">{item.context?.phone || "לא זמין"}</strong></div></div>{item.context?.ip ? <p className="context-note">ב־2 השעות האחרונות זוהו מה־IP הזה <strong>{item.context.ipOrderCountLastTwoHours ?? 1} הזמנות</strong>, מתוכן <strong>{item.context.ipGiftCardOrderCountLastTwoHours ?? 0} רכישות Gift Card</strong>, באמצעות <strong>{item.context.ipDistinctEmailsLastTwoHours ?? 1} אימיילים שונים</strong>.</p> : null}{item.context?.riskFacts.length ? <div className="shopify-risk-facts"><strong>אותות סיכון מ־Shopify</strong><ul>{item.context.riskFacts.map((fact) => <li key={fact}>{fact}</li>)}</ul></div> : null}<h3>פרטי ההזמנה</h3><dl><div><dt>לקוח</dt><dd>{item.customer}</dd></div><div><dt>אימייל</dt><dd className="mono">{item.email}</dd></div><div><dt>סכום</dt><dd className="mono">{formatCurrency(item.amount)}</dd></div><div><dt>חנות</dt><dd>{item.storeName}</dd></div></dl><h4>פריטים</h4><ul>{item.items.map((product) => <li key={product.name}><span>{product.quantity}× {product.name}</span><strong className="mono">{formatCurrency(product.quantity * product.price)}</strong></li>)}</ul><button className="secondary-button full-button">פתח ב-Shopify <ExternalLink size={14} /></button></section>
+          <section className="order-context"><h3>זהות והקשר להזמנה</h3><p className="context-note">הפרטים עוזרים לחבר בין עסקאות. כתובת IP לבדה אינה מזהה אדם בוודאות.</p>{missingBuyerIdentity ? <div className="identity-data-notice"><Info size={18} /><div><strong>{isPayPlusPlaceholder(item) ? "PayPlus העבירה ל-Shopify לקוח טכני, לא את זהות הקונה" : "Shopify לא החזירה שם לקוח להזמנה"}</strong><span>{item.context?.phone ? "קיים מספר טלפון ולכן אפשר לזהות ולקשר לפי הטלפון." : "לא התקבלו מספיק פרטי קשר כדי לזהות את האדם או לקשר אותו להזמנות אחרות."}</span></div></div> : null}<div className="identity-grid"><div><span><Wifi size={15} /> כתובת IP</span><strong className="mono">{item.context?.ip || "לא התקבלה מ־Shopify"}</strong></div><div><span><CreditCard size={15} /> אמצעי תשלום</span><strong>{item.context?.paymentGateways.join(", ") || "לא התקבל"}</strong></div><div><span><MapPin size={15} /> כתובת משלוח</span><strong>{item.context?.address || "לא התקבלה מ־Shopify"}</strong></div><div><span><Phone size={15} /> טלפון</span><strong className="mono">{item.context?.phone || "לא התקבל מ־Shopify"}</strong></div></div>{item.context?.ip ? <p className="context-note">ב־2 השעות האחרונות זוהו מה־IP הזה <strong>{item.context.ipOrderCountLastTwoHours ?? 1} הזמנות</strong>, מתוכן <strong>{item.context.ipGiftCardOrderCountLastTwoHours ?? 0} רכישות Gift Card</strong>, באמצעות <strong>{item.context.ipDistinctEmailsLastTwoHours ?? 1} אימיילים שונים</strong>.</p> : null}{item.context?.riskFacts.length ? <div className="shopify-risk-facts"><strong>אותות סיכון מ־Shopify</strong><ul>{item.context.riskFacts.map((fact) => <li key={fact}>{fact}</li>)}</ul></div> : null}<h3>פרטי ההזמנה</h3><dl><div><dt>לקוח</dt><dd>{customerDisplayName(item)}</dd></div><div><dt>אימייל</dt><dd className="mono">{isRealEmail(item.email) ? item.email : "לא התקבל מ־Shopify"}</dd></div><div><dt>סכום</dt><dd className="mono">{formatCurrency(item.amount)}</dd></div><div><dt>חנות</dt><dd>{item.storeName}</dd></div></dl><h4>פריטים</h4><ul>{item.items.map((product) => <li key={product.name}><span>{product.quantity}× {product.name}</span><strong className="mono">{formatCurrency(product.quantity * product.price)}</strong></li>)}</ul><button className="secondary-button full-button">פתח ב-Shopify <ExternalLink size={14} /></button></section>
         </div>
       </div>
-      <footer className="decision-bar"><div><span>סטטוס נוכחי</span><strong>{closedByRules ? "נסגר לפי החוקים" : statusLabels[item.status]}</strong></div>{closedByRules ? <span className="decision-explanation">שינוי בחוקים שיחזיר התאמה יפתח את ההתראה מחדש אוטומטית.</span> : <div className="decision-actions">{item.status === "new" ? <button className="secondary-button" onClick={() => onDecide("review")}>העבר לבדיקה</button> : null}<button className="secondary-button" onClick={() => onDecide("false-positive")}>לא חשוד</button><button className="secondary-button" onClick={() => onDecide("resolved")}><CheckCircle2 size={16} /> סגור כטופל</button><button className="danger-button" onClick={() => onDecide("fraud")}><ShieldAlert size={16} /> אשר הונאה והוסף לחסימה</button></div>}</footer>
+      <footer className="decision-bar"><div><span>סטטוס נוכחי</span><strong>{closedByRules ? "נסגר לפי החוקים" : caseStatusLabel(item)}</strong></div>{closedByRules ? <span className="decision-explanation">שינוי בחוקים שיחזיר התאמה יפתח את ההתראה מחדש אוטומטית.</span> : <div className="decision-actions">{item.status === "new" ? <button className="secondary-button" onClick={() => onDecide("review")}>העבר לבדיקה</button> : null}<button className="secondary-button" onClick={() => onDecide("false-positive")}>לא חשוד</button><button className="secondary-button" onClick={() => onDecide("resolved")}><CheckCircle2 size={16} /> סגור כטופל</button><button className="danger-button" onClick={() => onDecide("fraud")}><ShieldAlert size={16} /> אשר הונאה והוסף לחסימה</button></div>}</footer>
     </aside>
   </div>;
 }

@@ -619,6 +619,11 @@ h1, h2, h3, h4, .brand-block strong {
 .identity-grid > div { min-width: 0; padding: 13px 14px; border: 1px solid #d9e3de; border-radius: 11px; background: #f7faf8; }
 .identity-grid span { display: flex; align-items: center; gap: 7px; margin-bottom: 6px; color: var(--slate); font-size: 12px; }
 .identity-grid strong { display: block; overflow: hidden; color: var(--ink); font-size: 13px; font-weight: 650; text-overflow: ellipsis; }
+.identity-data-notice { display: flex; align-items: flex-start; gap: 10px; margin: 0 0 14px; padding: 13px 14px; border: 1px solid rgb(181 118 24 / .18); border-radius: 11px; color: #80520d; background: rgb(255 247 226 / .82); }
+.identity-data-notice > svg { flex: 0 0 auto; margin-top: 2px; }
+.identity-data-notice > div { display: flex; flex-direction: column; gap: 2px; }
+.identity-data-notice strong { font-size: 13px; }
+.identity-data-notice span { color: var(--slate); font-size: 12px; line-height: 1.55; }
 .shopify-risk-facts { margin: 0 0 22px; padding: 14px 16px; border-right: 4px solid var(--warning); border-radius: 10px; background: var(--warning-soft); }
 .shopify-risk-facts > strong { font-size: 14px; }
 .shopify-risk-facts ul { margin: 7px 0 0; padding-right: 20px; color: var(--slate); font-size: 13px; }

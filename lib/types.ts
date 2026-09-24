@@ -36,6 +36,11 @@ export interface FraudCase {
   severity: Severity;
   status: CaseStatus;
   reason: string;
+  resolution?: {
+    source: "automatic-rule-change" | "merchant";
+    at: string;
+    note: string;
+  };
   createdAt: string;
   occurredAt?: string;
   assignee?: string;

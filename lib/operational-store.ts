@@ -297,6 +297,17 @@ export function decideCase(tenantId: string, caseId: string, status: CaseStatus)
   const item = state.cases.find((candidate) => candidate.tenantId === tenantId && candidate.id === caseId);
   if (!item) throw new Error("CASE_NOT_FOUND");
   item.status = status;
+  if (["fraud", "false-positive", "resolved"].includes(status)) {
+    item.resolution = {
+      source: "merchant",
+      at: new Date().toISOString(),
+      note: status === "fraud" ? "בעל החנות אישר שמדובר בהונאה."
+        : status === "false-positive" ? "בעל החנות סימן את ההתראה כלא חשודה."
+          : "בעל החנות סגר את ההתראה כטופלה.",
+    };
+  } else {
+    item.resolution = undefined;
+  }
 
   if (status === "fraud") {
     const identities: Array<{ type: IdentityKind; value?: string }> = [
@@ -366,12 +377,13 @@ const fallbackSignalsForCase = (item: FraudCase, tenantCases: FraudCase[]): Orde
     : 0;
   const averageOrderValue = tenantCases.length ? tenantCases.reduce((sum, candidate) => sum + candidate.amount, 0) / tenantCases.length : item.amount;
   const hasEvidence = (pattern: RegExp) => item.evidence.some((evidence) => pattern.test(`${evidence.label} ${evidence.description}`));
+  const purchaseSignalsApply = item.amount > 0 || giftCardValue > 0;
   return {
-    ordersByEmailLastHour: item.email.includes("@") ? Math.max(1, tenantCases.filter((candidate) => normalizeEmail(candidate.email) === normalizeEmail(item.email)).length) : 1,
-    ordersByIpLastTwoHours: item.context?.ipOrderCountLastTwoHours ?? 1,
-    giftCardOrdersByIpLastTwoHours: item.context?.ipGiftCardOrderCountLastTwoHours ?? (giftCardValue > 0 ? 1 : 0),
-    emailsByIpLastTwoHours: item.context?.ipDistinctEmailsLastTwoHours ?? 1,
-    identitiesByPhoneLastDay: samePhoneEmails,
+    ordersByEmailLastHour: purchaseSignalsApply ? (item.email.includes("@") ? Math.max(1, tenantCases.filter((candidate) => normalizeEmail(candidate.email) === normalizeEmail(item.email)).length) : 1) : 0,
+    ordersByIpLastTwoHours: purchaseSignalsApply ? (item.context?.ipOrderCountLastTwoHours ?? 1) : 0,
+    giftCardOrdersByIpLastTwoHours: purchaseSignalsApply ? (item.context?.ipGiftCardOrderCountLastTwoHours ?? (giftCardValue > 0 ? 1 : 0)) : 0,
+    emailsByIpLastTwoHours: purchaseSignalsApply ? (item.context?.ipDistinctEmailsLastTwoHours ?? 1) : 0,
+    identitiesByPhoneLastDay: purchaseSignalsApply ? samePhoneEmails : 0,
     orderAmount: item.amount,
     averageOrderValue,
     giftCardValue,
@@ -390,17 +402,33 @@ const fallbackSignalsForCase = (item: FraudCase, tenantCases: FraudCase[]): Orde
 export function reevaluateOpenCases(tenantId: string) {
   const tenantCases = state.cases.filter((item) => item.tenantId === tenantId);
   const rules = state.rulesByTenant.get(tenantId) ?? [];
-  const candidates = tenantCases.filter((item) => activeStatuses.has(item.status) || (item.status === "resolved" && item.reason === autoResolvedReason));
+  const candidates = tenantCases.filter((item) => activeStatuses.has(item.status) || (item.status === "resolved" && (item.reason === autoResolvedReason || item.resolution?.source === "automatic-rule-change")));
   let resolved = 0;
   let updated = 0;
   let reopened = 0;
 
   for (const item of candidates) {
-    const wasAutoResolved = item.status === "resolved" && item.reason === autoResolvedReason;
+    const wasAutoResolved = item.status === "resolved" && (item.reason === autoResolvedReason || item.resolution?.source === "automatic-rule-change");
     const result = evaluateRisk(item.signals ?? fallbackSignalsForCase(item, tenantCases), new Date(item.occurredAt ?? Date.now()), rules);
     if (result.score < 25) {
       item.status = "resolved";
       item.reason = autoResolvedReason;
+      const amountThresholds = rules
+        .filter((rule) => rule.enabled)
+        .flatMap((rule) => rule.conditions)
+        .filter((condition) => condition.field === "order_amount" && typeof condition.value === "number")
+        .map((condition) => condition.value as number)
+        .sort((left, right) => left - right);
+      const threshold = amountThresholds[0];
+      item.resolution = {
+        source: "automatic-rule-change",
+        at: new Date().toISOString(),
+        note: item.amount <= 0
+          ? "ההזמנה בסכום אפס ואינה נחשבת לרכישה לצורך חוקי תדירות."
+          : threshold !== undefined && item.amount <= threshold
+            ? `סכום ההזמנה (${item.amount.toLocaleString("he-IL", { style: "currency", currency: "ILS", maximumFractionDigits: 0 })}) נמוך מסף הסכום הפעיל (${threshold.toLocaleString("he-IL", { style: "currency", currency: "ILS", maximumFractionDigits: 0 })}), ולא התקיים חוק סיכון אחר.`
+            : "ההזמנה אינה עומדת כרגע באף חוק סיכון פעיל.",
+      };
       item.score = 0;
       item.severity = "low";
       item.evidence = [];
@@ -411,6 +439,7 @@ export function reevaluateOpenCases(tenantId: string) {
       item.status = "new";
       reopened += 1;
     }
+    item.resolution = undefined;
     item.score = result.score;
     item.severity = result.severity;
     item.evidence = result.evidence;
@@ -599,6 +628,13 @@ export function ingestShopifyOrder(input: { storeId: string; webhookId: string; 
       customer: Boolean(customerId && state.globalDigests.has(digestKey("customer", customerId))),
     },
   };
+
+  if (amount <= 0 && giftCardValue <= 0) {
+    signals.ordersByEmailLastHour = 0;
+    signals.ordersByIpLastTwoHours = 0;
+    signals.giftCardOrdersByIpLastTwoHours = 0;
+    signals.emailsByIpLastTwoHours = 0;
+  }
 
   const order: StoredOrder = {
     tenantId: store.tenantId, storeId: store.id,
