@@ -1,6 +1,7 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { get, put } from "@vercel/blob";
 import { exportOperationalState, restoreOperationalState, type PersistedOperationalState } from "@/lib/operational-store";
 
 type EncryptedState = {
@@ -13,6 +14,7 @@ const stateId = "global";
 const localDirectory = path.join(process.cwd(), ".data");
 const localFile = path.join(localDirectory, "shield-ledger-state.enc.json");
 const temporaryFile = path.join(localDirectory, "shield-ledger-state.enc.tmp");
+const blobPath = "private/shield-ledger-state.enc.json";
 
 declare global {
   // eslint-disable-next-line no-var
@@ -65,7 +67,14 @@ const supabaseHeaders = (configuration: NonNullable<ReturnType<typeof supabaseCo
   ...(configuration.persistenceApiKey ? { "x-shield-key": configuration.persistenceApiKey } : {}),
 });
 
+const blobConfigured = () => Boolean(process.env.BLOB_READ_WRITE_TOKEN || process.env.BLOB_STORE_ID);
+
 async function loadEncryptedState(): Promise<EncryptedState | null> {
+  if (blobConfigured()) {
+    const result = await get(blobPath, { access: "private", useCache: false });
+    if (!result || result.statusCode !== 200 || !result.stream) return null;
+    return JSON.parse(await new Response(result.stream).text()) as EncryptedState;
+  }
   const supabase = supabaseConfiguration();
   if (supabase) {
     const response = await fetch(`${supabase.url}/rest/v1/shield_ledger_state?id=eq.${stateId}&select=ciphertext,iv,auth_tag&limit=1`, {
@@ -86,6 +95,16 @@ async function loadEncryptedState(): Promise<EncryptedState | null> {
 }
 
 async function saveEncryptedState(payload: EncryptedState) {
+  if (blobConfigured()) {
+    await put(blobPath, JSON.stringify(payload), {
+      access: "private",
+      allowOverwrite: true,
+      addRandomSuffix: false,
+      contentType: "application/json",
+      cacheControlMaxAge: 60,
+    });
+    return;
+  }
   const supabase = supabaseConfiguration();
   if (supabase) {
     const response = await fetch(`${supabase.url}/rest/v1/shield_ledger_state`, {

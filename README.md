@@ -26,11 +26,12 @@ Copy `.env.example` to `.env.local` and set:
 - `EMAIL_FROM`: verified sender address used for risk alerts.
 - `APP_URL`: public dashboard URL included in alert emails.
 - `STATE_ENCRYPTION_KEY`: at least 32 characters; encrypts the durable operational snapshot, including Shopify access tokens and customer data.
+- `BLOB_READ_WRITE_TOKEN`: private Vercel Blob store token for the zero-cost single-store pilot. Blob is preferred automatically when configured.
 - `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`: preferred production persistence. The service-role key is server-only and must never use a `NEXT_PUBLIC_` prefix.
 - `SUPABASE_PUBLISHABLE_KEY` and `PERSISTENCE_API_KEY`: alternative server-only RLS credential used by the pilot deployment when a service-role key isn't provisioned.
 - `DASHBOARD_PASSWORD` and `AUTH_SECRET`: protect the owner dashboard when it is publicly deployed.
 
-Local development stores the same encrypted snapshot under `.data/`. The directory is excluded from Git. Production deployments fail closed when Supabase persistence is not configured, preventing accidental use of ephemeral serverless memory.
+Local development stores the same encrypted snapshot under `.data/`. The directory is excluded from Git. Production deployments fail closed when neither private Vercel Blob nor Supabase persistence is configured, preventing accidental use of ephemeral serverless memory.
 
 ## Database setup
 
