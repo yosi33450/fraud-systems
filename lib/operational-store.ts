@@ -152,6 +152,7 @@ export function restoreOperationalState(snapshot: PersistedOperationalState) {
   state.orders = clone(snapshot.orders ?? []);
   state.audit = clone(snapshot.audit ?? []);
   state.storeConnections = new Map(clone(snapshot.storeConnections ?? []));
+  migrateLegacyRules();
 }
 
 const normalizeEmail = (value: string) => value.trim().toLowerCase();
@@ -220,9 +221,9 @@ const baselineRules = (): RiskRule[] => [
     action: { severity: "high", openCase: true, emailOwner: true },
   },
   {
-    id: "recommended-order-spike", label: "סכום חריג ביחס לחנות", description: "פותח התראה כאשר סכום ההזמנה גבוה לפחות פי 3 מהממוצע.",
+    id: "recommended-order-spike", label: "סכום הזמנה חריג", description: "פותח התראה כאשר סכום ההזמנה גבוה מ־₪1,000.",
     category: "payment", enabled: true, logic: "all", recommended: true, matches: 0,
-    conditions: [{ id: "order-spike", field: "order_amount_vs_average", operator: "gte", value: 3 }],
+    conditions: [{ id: "order-spike", field: "order_amount", operator: "gt", value: 1000 }],
     action: { severity: "medium", openCase: true, emailOwner: false },
   },
   {
@@ -241,6 +242,18 @@ const baselineRules = (): RiskRule[] => [
     action: { severity: "critical", openCase: true, emailOwner: true },
   },
 ];
+
+const migrateLegacyRules = () => {
+  for (const rules of state.rulesByTenant.values()) {
+    const legacy = rules.find((rule) => rule.id === "recommended-order-spike");
+    const condition = legacy?.conditions[0];
+    if (!legacy || legacy.conditions.length !== 1 || condition?.field !== "order_amount_vs_average") continue;
+    const threshold = typeof condition.value === "number" && condition.value >= 100 ? condition.value : 1000;
+    legacy.label = "סכום הזמנה חריג";
+    legacy.description = `פותח התראה כאשר סכום ההזמנה גבוה מ־₪${threshold.toLocaleString("he-IL")}.`;
+    legacy.conditions = [{ id: condition.id, field: "order_amount", operator: "gt", value: threshold }];
+  }
+};
 
 const ensureBaselineRules = (tenantId: string) => {
   if ((state.rulesByTenant.get(tenantId) ?? []).length === 0) state.rulesByTenant.set(tenantId, baselineRules());
@@ -323,6 +336,74 @@ export function updateRule(tenantId: string, ruleId: string, patch: Partial<Pick
     resourceId: ruleId, createdAt: new Date().toISOString(), metadata: {},
   });
   return clone(rule);
+}
+
+const activeStatuses = new Set<CaseStatus>(["new", "review", "action"]);
+
+const fallbackSignalsForCase = (item: FraudCase, tenantCases: FraudCase[]): OrderSignals => {
+  const giftCardValue = item.items.reduce((total, line) => /gift\s*card|כרטיס\s*מתנה/i.test(line.name) ? total + line.price * line.quantity : total, 0);
+  const samePhoneEmails = item.context?.phone
+    ? new Set(tenantCases.filter((candidate) => candidate.context?.phone === item.context?.phone && candidate.email.includes("@")).map((candidate) => normalizeEmail(candidate.email))).size
+    : 0;
+  const averageOrderValue = tenantCases.length ? tenantCases.reduce((sum, candidate) => sum + candidate.amount, 0) / tenantCases.length : item.amount;
+  const hasEvidence = (pattern: RegExp) => item.evidence.some((evidence) => pattern.test(`${evidence.label} ${evidence.description}`));
+  return {
+    ordersByEmailLastHour: item.email.includes("@") ? Math.max(1, tenantCases.filter((candidate) => normalizeEmail(candidate.email) === normalizeEmail(item.email)).length) : 1,
+    ordersByIpLastTwoHours: item.context?.ipOrderCountLastTwoHours ?? 1,
+    giftCardOrdersByIpLastTwoHours: item.context?.ipGiftCardOrderCountLastTwoHours ?? (giftCardValue > 0 ? 1 : 0),
+    emailsByIpLastTwoHours: item.context?.ipDistinctEmailsLastTwoHours ?? 1,
+    identitiesByPhoneLastDay: samePhoneEmails,
+    orderAmount: item.amount,
+    averageOrderValue,
+    giftCardValue,
+    giftCardBaseline: giftCardValue,
+    paymentFailures: hasEvidence(/כשל|failed payment/i) ? 3 : 0,
+    billingShippingMismatch: hasEvidence(/כתובות החיוב והמשלוח שונות/i),
+    shopifyRisk: item.context?.shopifyRisk === "high" ? "high" : item.context?.shopifyRisk === "medium" ? "medium" : item.context?.shopifyRisk === "low" ? "low" : "none",
+    employeeMatch: item.evidence.some((evidence) => evidence.source === "employee"),
+    refundAfterFulfillment: hasEvidence(/זיכוי לאחר/i),
+    blacklist: {
+      email: hasEvidence(/מאגר ההונאות|רשת הגנה/i), phone: false, address: false, ip: false, customer: false,
+    },
+  };
+};
+
+export function reevaluateOpenCases(tenantId: string) {
+  const tenantCases = state.cases.filter((item) => item.tenantId === tenantId);
+  const rules = state.rulesByTenant.get(tenantId) ?? [];
+  let resolved = 0;
+  let updated = 0;
+
+  for (const item of tenantCases) {
+    if (!activeStatuses.has(item.status)) continue;
+    const result = evaluateRisk(item.signals ?? fallbackSignalsForCase(item, tenantCases), new Date(item.occurredAt ?? Date.now()), rules);
+    if (result.score < 25) {
+      item.status = "resolved";
+      item.reason = "לא עומד עוד בחוקי הסיכון הפעילים";
+      item.score = 0;
+      item.severity = "low";
+      item.evidence = [];
+      resolved += 1;
+      continue;
+    }
+    item.score = result.score;
+    item.severity = result.severity;
+    item.evidence = result.evidence;
+    item.reason = result.evidence[0]?.label ?? item.reason;
+    updated += 1;
+  }
+
+  state.audit.unshift({
+    id: randomUUID(), tenantId, action: "cases.reevaluated", resourceType: "risk_rules", resourceId: tenantId,
+    createdAt: new Date().toISOString(), metadata: { reviewed: tenantCases.filter((item) => activeStatuses.has(item.status)).length + resolved, updated, resolved },
+  });
+  return {
+    reviewed: tenantCases.filter((item) => activeStatuses.has(item.status)).length + resolved,
+    updated,
+    resolved,
+    active: tenantCases.filter((item) => activeStatuses.has(item.status)).length,
+    cases: clone(tenantCases),
+  };
 }
 
 export function createRule(tenantId: string, input: Omit<RiskRule, "id" | "matches">) {
@@ -521,10 +602,12 @@ export function ingestShopifyOrder(input: { storeId: string; webhookId: string; 
     orderNumber: payload.name ?? `#${String(payload.id ?? "NEW")}`, customer, email: email || (sharedServiceEmail ? "לא זמין — עסקת PayPlus" : "לא זמין"),
     amount, score: result.score, severity: result.severity, status: "new",
     reason: result.evidence[0]?.label ?? "חריגה במנוע הסיכון",
+    occurredAt: createdAt,
     createdAt: input.topic === "HISTORICAL_SYNC"
       ? new Intl.DateTimeFormat("he-IL", { dateStyle: "short", timeStyle: "short", timeZone: "Asia/Jerusalem" }).format(new Date(createdAt))
       : "עכשיו",
     evidence: result.evidence,
+    signals: clone(signals),
     items: lineItems.map((item) => ({ name: item.title ?? item.name ?? "פריט", quantity: Number(item.quantity ?? 1), price: Number(item.price ?? 0) })),
     context: {
       ip: ip || undefined,

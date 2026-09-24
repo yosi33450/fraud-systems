@@ -37,9 +37,27 @@ export interface FraudCase {
   status: CaseStatus;
   reason: string;
   createdAt: string;
+  occurredAt?: string;
   assignee?: string;
   evidence: Evidence[];
   items: { name: string; quantity: number; price: number }[];
+  signals?: {
+    ordersByEmailLastHour: number;
+    ordersByIpLastTwoHours: number;
+    giftCardOrdersByIpLastTwoHours: number;
+    emailsByIpLastTwoHours: number;
+    identitiesByPhoneLastDay: number;
+    orderAmount: number;
+    averageOrderValue: number;
+    giftCardValue: number;
+    giftCardBaseline: number;
+    paymentFailures: number;
+    billingShippingMismatch: boolean;
+    shopifyRisk: "none" | "low" | "medium" | "high";
+    employeeMatch: boolean;
+    refundAfterFulfillment: boolean;
+    blacklist: { email: boolean; phone: boolean; address: boolean; ip: boolean; customer: boolean };
+  };
   context?: {
     ip?: string;
     customerId?: string;
@@ -72,7 +90,7 @@ export interface RiskRule {
   matches: number;
 }
 
-export type RiskConditionField = "orders_by_email" | "orders_by_ip" | "gift_card_orders_by_ip" | "emails_by_ip" | "identities_by_phone" | "order_amount_vs_average" | "gift_card_value" | "payment_failures" | "network_match" | "employee_match" | "refund_after_fulfillment";
+export type RiskConditionField = "orders_by_email" | "orders_by_ip" | "gift_card_orders_by_ip" | "emails_by_ip" | "identities_by_phone" | "order_amount" | "order_amount_vs_average" | "gift_card_value" | "payment_failures" | "network_match" | "employee_match" | "refund_after_fulfillment";
 export type RiskConditionOperator = "gte" | "gt" | "eq";
 
 export interface RiskCondition {

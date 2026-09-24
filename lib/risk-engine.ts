@@ -37,6 +37,7 @@ const signalValue = (condition: RiskCondition, signals: OrderSignals): number | 
     case "gift_card_orders_by_ip": return signals.giftCardOrdersByIpLastTwoHours;
     case "emails_by_ip": return signals.emailsByIpLastTwoHours;
     case "identities_by_phone": return signals.identitiesByPhoneLastDay;
+    case "order_amount": return signals.orderAmount;
     case "order_amount_vs_average": return signals.averageOrderValue > 0 ? signals.orderAmount / signals.averageOrderValue : 0;
     case "gift_card_value": return signals.giftCardValue;
     case "payment_failures": return signals.paymentFailures;

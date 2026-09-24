@@ -7,6 +7,7 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronLeft,
+  ChevronUp,
   CircleUserRound,
   ClipboardList,
   ExternalLink,
@@ -44,6 +45,7 @@ import { cases as initialCases, employees, rules, stores } from "@/lib/initial-s
 import type { BlacklistReport, CaseStatus, DashboardSnapshot, Employee, FraudCase, NotificationDelivery, NotificationSettings, RiskCondition, RiskConditionField, RiskRule, Severity, Store } from "@/lib/types";
 
 type View = "overview" | "cases" | "stores" | "employees" | "rules" | "notifications" | "network" | "team" | "platform";
+type RuleReconciliation = { reviewed: number; updated: number; resolved: number; active: number };
 
 const nav = [
   { id: "overview", label: "מרכז בקרה", Icon: LayoutDashboard },
@@ -150,9 +152,14 @@ export function FraudCommandCenter() {
         method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled }),
       });
       if (!response.ok) throw new Error();
+      const payload = await response.json() as { rule: RiskRule; cases: FraudCase[]; reconciliation: RuleReconciliation };
+      setRuleData((current) => current.map((item) => item.id === payload.rule.id ? payload.rule : item));
+      setCaseData(payload.cases);
+      return payload.reconciliation;
     } catch {
       setRuleData((current) => current.map((item) => item.id === rule.id ? rule : item));
       setSyncState("error");
+      throw new Error("RULE_UPDATE_FAILED");
     }
   };
 
@@ -186,8 +193,10 @@ export function FraudCommandCenter() {
       method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(rule),
     });
     if (!response.ok) throw new Error("RULE_UPDATE_FAILED");
-    const payload = await response.json() as { rule: RiskRule };
+    const payload = await response.json() as { rule: RiskRule; cases: FraudCase[]; reconciliation: RuleReconciliation };
     setRuleData((current) => current.map((item) => item.id === payload.rule.id ? payload.rule : item));
+    setCaseData(payload.cases);
+    return payload.reconciliation;
   };
 
   const createRule = async (rule: Omit<RiskRule, "id" | "matches">) => {
@@ -304,6 +313,57 @@ function PageHeading({ eyebrow, title, description, action }: { eyebrow: string;
   return <div className="page-heading"><div><span className="eyebrow">{eyebrow}</span><h1>{title}</h1><p>{description}</p></div>{action}</div>;
 }
 
+type CaseCluster = {
+  id: string;
+  cases: FraudCase[];
+  emails: string[];
+  ips: string[];
+  phones: string[];
+  customers: string[];
+  totalAmount: number;
+  giftCardOrders: number;
+  severity: Severity;
+};
+
+const severityOrder: Record<Severity, number> = { low: 0, medium: 1, high: 2, critical: 3 };
+const isRealEmail = (value: string) => value.includes("@") && !value.startsWith("לא זמין");
+
+function clusterCases(items: FraudCase[]): CaseCluster[] {
+  const parents = items.map((_, index) => index);
+  const find = (index: number): number => parents[index] === index ? index : (parents[index] = find(parents[index]));
+  const union = (left: number, right: number) => { const a = find(left); const b = find(right); if (a !== b) parents[b] = a; };
+  const identityOwner = new Map<string, number>();
+
+  items.forEach((item, index) => {
+    const identities = [
+      isRealEmail(item.email) ? `email:${item.email.trim().toLowerCase()}` : "",
+      item.context?.ip ? `ip:${item.context.ip}` : "",
+      item.context?.phone ? `phone:${item.context.phone.replace(/\D/g, "")}` : "",
+      item.context?.customerId ? `customer:${item.context.customerId}` : "",
+    ].filter(Boolean);
+    identities.forEach((identity) => {
+      const owner = identityOwner.get(identity);
+      if (owner === undefined) identityOwner.set(identity, index); else union(index, owner);
+    });
+  });
+
+  const groups = new Map<number, FraudCase[]>();
+  items.forEach((item, index) => { const root = find(index); (groups.get(root) ?? groups.set(root, []).get(root)!).push(item); });
+  return [...groups.values()].map((cases) => {
+    const unique = (values: Array<string | undefined>) => [...new Set(values.filter((value): value is string => Boolean(value)))];
+    const emails = unique(cases.map((item) => isRealEmail(item.email) ? item.email.trim().toLowerCase() : undefined));
+    const ips = unique(cases.map((item) => item.context?.ip));
+    const phones = unique(cases.map((item) => item.context?.phone));
+    const customers = unique(cases.map((item) => item.context?.customerId));
+    const severity = cases.reduce<Severity>((highest, item) => severityOrder[item.severity] > severityOrder[highest] ? item.severity : highest, "low");
+    return {
+      id: cases.map((item) => item.id).sort()[0], cases, emails, ips, phones, customers, severity,
+      totalAmount: cases.reduce((sum, item) => sum + item.amount, 0),
+      giftCardOrders: cases.filter((item) => item.items.some((line) => /gift\s*card|כרטיס\s*מתנה/i.test(line.name))).length,
+    };
+  }).sort((left, right) => severityOrder[right.severity] - severityOrder[left.severity] || right.cases.length - left.cases.length);
+}
+
 function Overview({ cases, query, setQuery, severity, setSeverity, store, setStore, stores, onOpen, casesOnly, onRefresh, refreshing, deliveries, onShowAll, onOpenNotifications, onOpenStores }: {
   cases: FraudCase[]; query: string; setQuery: (value: string) => void; severity: Severity | "all"; setSeverity: (value: Severity | "all") => void;
   store: string; setStore: (value: string) => void; stores: Store[]; onOpen: (item: FraudCase) => void; casesOnly: boolean;
@@ -312,6 +372,16 @@ function Overview({ cases, query, setQuery, severity, setSeverity, store, setSto
   onShowAll: () => void; onOpenNotifications: () => void; onOpenStores: () => void;
 }) {
   const hasStores = stores.length > 0;
+  const [showClosed, setShowClosed] = useState(false);
+  const [expandedClusters, setExpandedClusters] = useState<Set<string>>(new Set());
+  const activeCases = cases.filter((item) => ["new", "review", "action"].includes(item.status));
+  const displayCases = casesOnly && showClosed ? cases : activeCases;
+  const clusters = useMemo(() => clusterCases(displayCases), [displayCases]);
+  const toggleCluster = (id: string) => setExpandedClusters((current) => {
+    const next = new Set(current);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
   return <div className="page-content">
     <PageHeading eyebrow={casesOnly ? "תור החלטות" : "מרכז החלטות"} title={casesOnly ? "התראות וחקירות" : hasStores ? "מה דורש טיפול עכשיו" : "חבר את חנות Shopify הראשונה"} description={casesOnly ? "כל הזמנה חשודה נשארת כאן עד שבעל החנות מקבל החלטה." : hasStores ? `יש ${cases.filter((item) => ["new", "review", "action"].includes(item.status)).length} תיקים פתוחים. המערכת מתריעה — ההחלטה תמיד נשארת אצלך.` : "לא נטען מידע לדוגמה. לאחר החיבור יוצגו כאן רק הזמנות ונתונים אמיתיים מהחנות שלך."} action={hasStores ? <button className="secondary-button" onClick={() => void onRefresh()} disabled={refreshing}><RefreshCcw size={15} className={refreshing ? "spin" : ""} /> {refreshing ? "מסנכרן…" : "רענון נתונים"}</button> : <button className="primary-button" onClick={onOpenStores}><Plus size={16} /> חיבור חנות</button>} />
 
@@ -332,27 +402,34 @@ function Overview({ cases, query, setQuery, severity, setSeverity, store, setSto
     </> : null}
 
     <section className="case-section">
-      <div className="section-heading"><div><h2>{casesOnly ? "כל התיקים" : "תור החלטות"}</h2><span>{cases.length} תוצאות</span></div>{!casesOnly ? <button className="text-button" onClick={onShowAll}>הצג הכל <ChevronLeft size={14} /></button> : null}</div>
+      <div className="section-heading"><div><h2>{casesOnly ? "התראות לפי זהות" : "תור החלטות"}</h2><span>{clusters.length} קבוצות · {displayCases.length} הזמנות</span></div>{casesOnly ? <button className="secondary-button" onClick={() => setShowClosed((value) => !value)}>{showClosed ? "הצג פעילות בלבד" : `הצג גם ${cases.length - activeCases.length} שטופלו`}</button> : <button className="text-button" onClick={onShowAll}>הצג הכל <ChevronLeft size={14} /></button>}</div>
       <div className="filter-bar">
         <label className="search-box"><Search size={16} /><span className="sr-only">חיפוש</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="חיפוש הזמנה, לקוח או סיבה" /></label>
         <select value={severity} onChange={(event) => setSeverity(event.target.value as Severity | "all")} aria-label="סינון לפי חומרה"><option value="all">כל החומרות</option><option value="critical">קריטי</option><option value="high">גבוה</option><option value="medium">בינוני</option><option value="low">נמוך</option></select>
         <select value={store} onChange={(event) => setStore(event.target.value)} aria-label="סינון לפי חנות"><option value="all">כל החנויות</option>{stores.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select>
         <button className="filter-button"><Filter size={15} /> מסננים נוספים</button>
       </div>
-      <div className="table-wrap">
-        <table className="case-table">
-          <thead><tr><th>חומרה</th><th>הזמנה</th><th>לקוח</th><th>סיבת הדגל</th><th>סכום</th><th>סטטוס</th><th>גיל התיק</th><th><span className="sr-only">פתיחה</span></th></tr></thead>
-          <tbody>{cases.map((item) => <tr key={item.id} onClick={() => onOpen(item)} tabIndex={0} onKeyDown={(event) => { if (event.key === "Enter") onOpen(item); }}>
-            <td><SeverityBadge severity={item.severity} score={item.score} /></td>
-            <td><strong className="mono">{item.orderNumber}</strong><small>{item.storeName}</small></td>
-            <td><strong>{item.customer}</strong><small>{item.email}</small></td>
-            <td><span className="reason-cell">{item.reason}</span></td>
-            <td className="mono amount-cell">{formatCurrency(item.amount)}</td>
-            <td><span className={`status status-${item.status}`}>{statusLabels[item.status]}</span></td>
-            <td>{item.createdAt}</td><td><ChevronLeft size={17} /></td>
-          </tr>)}</tbody>
-        </table>
-        {cases.length === 0 ? <div className="empty-state"><Shield size={26} /><strong>{hasStores ? "אין כרגע התראות" : "אין נתונים להצגה"}</strong><span>{hasStores ? "הזמנות חשודות שיזוהו בחנות יופיעו כאן." : "חבר חנות Shopify כדי להתחיל לקבל ולבדוק הזמנות."}</span></div> : null}
+      <div className="case-cluster-list">
+        {clusters.map((cluster) => {
+          const expanded = expandedClusters.has(cluster.id);
+          const repeatedBy = cluster.cases.length > 1
+            ? cluster.emails.length === 1 ? `אותו אימייל · ${cluster.emails[0]}`
+              : cluster.ips.length === 1 ? `אותה כתובת IP · ${cluster.ips[0]}`
+                : cluster.phones.length === 1 ? `אותו טלפון · ${cluster.phones[0]}`
+                  : "זהויות מקושרות"
+            : cluster.cases[0].customer;
+          return <article className={`case-cluster ${cluster.cases.length > 1 ? "case-cluster-linked" : ""}`} key={cluster.id}>
+            <button className="case-cluster-summary" onClick={() => cluster.cases.length === 1 ? onOpen(cluster.cases[0]) : toggleCluster(cluster.id)} aria-expanded={cluster.cases.length > 1 ? expanded : undefined}>
+              <div className="cluster-severity"><SeverityBadge severity={cluster.severity} score={Math.max(...cluster.cases.map((item) => item.score))} /></div>
+              <div className="cluster-identity"><strong>{repeatedBy}</strong><span>{cluster.cases.length > 1 ? `${cluster.cases.length} הזמנות קושרו לאותה זהות` : `${cluster.cases[0].orderNumber} · ${cluster.cases[0].reason}`}</span><div className="cluster-signals">{cluster.emails.length > 1 ? <span><Mail size={13} /> {cluster.emails.length} אימיילים</span> : null}{cluster.ips.length === 1 && cluster.cases.length > 1 ? <span><Wifi size={13} /> IP משותף</span> : null}{cluster.phones.length === 1 && cluster.cases.length > 1 ? <span><Phone size={13} /> טלפון משותף</span> : null}{cluster.giftCardOrders > 0 ? <span><Gift size={13} /> {cluster.giftCardOrders} Gift Card</span> : null}</div></div>
+              <div className="cluster-stat"><span>הזמנות</span><strong>{cluster.cases.length}</strong></div>
+              <div className="cluster-stat"><span>סכום כולל</span><strong>{formatCurrency(cluster.totalAmount)}</strong></div>
+              <div className="cluster-status"><span className={`status status-${cluster.cases[0].status}`}>{statusLabels[cluster.cases[0].status]}</span>{cluster.cases.length > 1 ? expanded ? <ChevronUp size={18} /> : <ChevronDown size={18} /> : <ChevronLeft size={18} />}</div>
+            </button>
+            {expanded ? <div className="cluster-orders">{cluster.cases.map((item) => <button key={item.id} className="cluster-order" onClick={() => onOpen(item)}><span className="cluster-order-index mono">{item.orderNumber}</span><span><strong>{item.customer}</strong><small>{item.email}</small></span><span className="reason-cell">{item.reason}</span><strong className="mono amount-cell">{formatCurrency(item.amount)}</strong><span className={`status status-${item.status}`}>{statusLabels[item.status]}</span><ChevronLeft size={16} /></button>)}</div> : null}
+          </article>;
+        })}
+        {displayCases.length === 0 ? <div className="empty-state"><Shield size={26} /><strong>{hasStores ? "אין כרגע התראות פעילות" : "אין נתונים להצגה"}</strong><span>{hasStores ? "שינויי החוקים חושבו מחדש. הזמנות חשודות חדשות יופיעו כאן." : "חבר חנות Shopify כדי להתחיל לקבל ולבדוק הזמנות."}</span></div> : null}
       </div>
     </section>
   </div>;
@@ -461,6 +538,7 @@ const conditionFields: { value: RiskConditionField; label: string; boolean?: boo
   { value: "gift_card_orders_by_ip", label: "רכישות Gift Card מאותה כתובת IP", suffix: "הזמנות" },
   { value: "emails_by_ip", label: "מספר אימיילים שונים מאותה כתובת IP", suffix: "אימיילים" },
   { value: "identities_by_phone", label: "מספר אימיילים לאותו טלפון", suffix: "זהויות" },
+  { value: "order_amount", label: "סכום ההזמנה", suffix: "₪" },
   { value: "order_amount_vs_average", label: "סכום ביחס לממוצע החנות", suffix: "פי הממוצע" },
   { value: "gift_card_value", label: "שווי Gift Cards", suffix: "₪" },
   { value: "payment_failures", label: "ניסיונות תשלום כושלים", suffix: "ניסיונות" },
@@ -490,17 +568,18 @@ const recommendedTemplates: Omit<RiskRule, "id" | "matches">[] = [
   },
 ];
 
-function RulesScreen({ rules, onToggle, onSave, onCreate }: { rules: RiskRule[]; onToggle: (rule: RiskRule) => Promise<void>; onSave: (rule: RiskRule) => Promise<void>; onCreate: (rule: Omit<RiskRule, "id" | "matches">) => Promise<void> }) {
+function RulesScreen({ rules, onToggle, onSave, onCreate }: { rules: RiskRule[]; onToggle: (rule: RiskRule) => Promise<RuleReconciliation>; onSave: (rule: RiskRule) => Promise<RuleReconciliation>; onCreate: (rule: Omit<RiskRule, "id" | "matches">) => Promise<void> }) {
   const [editing, setEditing] = useState<RiskRule | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
 
   const updateCondition = (id: string, patch: Partial<RiskCondition>) => setEditing((current) => current ? { ...current, conditions: current.conditions.map((condition) => condition.id === id ? { ...condition, ...patch } : condition) } : current);
   const addCondition = () => setEditing((current) => current ? { ...current, conditions: [...current.conditions, { id: crypto.randomUUID(), field: "orders_by_email", operator: "gte", value: 3, windowMinutes: 60 }] } : current);
   const save = async () => {
     if (!editing) return;
     setSaving(true); setError("");
-    try { await onSave(editing); setEditing(null); } catch { setError("החוק לא נשמר. בדוק שכל התנאים מלאים ונסה שוב."); }
+    try { const result = await onSave(editing); setNotice(`החוק נשמר ונבדקו ${result.reviewed} תיקים · ${result.resolved} התראות נסגרו · ${result.active} נשארו פעילות`); setEditing(null); } catch { setError("החוק לא נשמר. בדוק שכל התנאים מלאים ונסה שוב."); }
     finally { setSaving(false); }
   };
   const addTemplate = async (template: Omit<RiskRule, "id" | "matches">) => {
@@ -515,9 +594,10 @@ function RulesScreen({ rules, onToggle, onSave, onCreate }: { rules: RiskRule[];
 
     <section className="recommendations"><div className="recommendation-heading"><div><Sparkles size={18} /><div><strong>המלצות מוכנות</strong><span>שילובים נפוצים שמפחיתים התראות שווא</span></div></div></div><div className="recommendation-grid">{recommendedTemplates.map((template) => <article key={template.label}><div><strong>{template.label}</strong><p>{template.description}</p></div><button className="secondary-button" onClick={() => void addTemplate(template)} disabled={saving}><PlusCircle size={15} /> הוסף לחנות</button></article>)}</div></section>
 
+    {notice ? <div className="rule-recalculation-notice" role="status"><CheckCircle2 size={17} /><div><strong>ההתראות חושבו מחדש</strong><span>{notice}</span></div></div> : null}
     {error ? <div className="inline-error" role="alert">{error}</div> : null}
     <div className="rules-list condition-rules">{rules.map((rule) => <article key={rule.id} className={!rule.enabled ? "rule-disabled" : ""}>
-      <button className={`switch ${rule.enabled ? "switch-on" : ""}`} onClick={() => void onToggle(rule)} aria-label={`${rule.enabled ? "כיבוי" : "הפעלת"} ${rule.label}`}><span /></button>
+      <button className={`switch ${rule.enabled ? "switch-on" : ""}`} onClick={() => void onToggle(rule).then((result) => setNotice(`החוק ${rule.enabled ? "כובה" : "הופעל"} ונבדקו ${result.reviewed} תיקים · ${result.resolved} התראות נסגרו · ${result.active} נשארו פעילות`)).catch(() => setError("החוק לא עודכן. נסה שוב."))} aria-label={`${rule.enabled ? "כיבוי" : "הפעלת"} ${rule.label}`}><span /></button>
       <div className="rule-main"><div><h3>{rule.label}</h3>{rule.locked ? <span className="locked-chip"><LockKeyhole size={12} /> חוק מערכת</span> : null}{rule.recommended ? <span className="recommended-chip">מומלץ</span> : null}</div><p>{rule.description}</p><div className="condition-preview"><span className="logic-word">אם {rule.logic === "all" ? "כל" : "לפחות אחד"}</span>{rule.conditions.map((condition) => <span key={condition.id}>{conditionSentence(condition)}</span>)}</div></div>
       <div className="rule-action"><span>אז</span><strong>פתח תיק · {rule.action.severity === "critical" ? "קריטי" : rule.action.severity === "high" ? "גבוה" : rule.action.severity === "medium" ? "בינוני" : "נמוך"}</strong><small>{rule.action.emailOwner ? "ושלח אימייל לבעלים" : "ללא אימייל"}</small></div>
       <div className="rule-matches"><span>הופעל</span><strong className="mono">{rule.matches}</strong><small>פעמים</small></div>
