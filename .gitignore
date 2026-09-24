@@ -10,3 +10,6 @@ out
 sources/
 AGENTS.md
 .superdesign/tmp
+
+.vercel
+.env*
