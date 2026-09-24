@@ -51,20 +51,25 @@ const decrypt = (payload: EncryptedState): PersistedOperationalState => {
 const supabaseConfiguration = () => {
   const url = process.env.SUPABASE_URL?.replace(/\/$/, "");
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  return url && serviceRoleKey ? { url, serviceRoleKey } : null;
+  const publishableKey = process.env.SUPABASE_PUBLISHABLE_KEY;
+  const persistenceApiKey = process.env.PERSISTENCE_API_KEY;
+  if (url && serviceRoleKey) return { url, apiKey: serviceRoleKey, authorization: serviceRoleKey, persistenceApiKey: undefined };
+  if (url && publishableKey && persistenceApiKey) return { url, apiKey: publishableKey, authorization: publishableKey, persistenceApiKey };
+  return null;
 };
 
-const supabaseHeaders = (serviceRoleKey: string) => ({
-  apikey: serviceRoleKey,
-  Authorization: `Bearer ${serviceRoleKey}`,
+const supabaseHeaders = (configuration: NonNullable<ReturnType<typeof supabaseConfiguration>>) => ({
+  apikey: configuration.apiKey,
+  Authorization: `Bearer ${configuration.authorization}`,
   "Content-Type": "application/json",
+  ...(configuration.persistenceApiKey ? { "x-shield-key": configuration.persistenceApiKey } : {}),
 });
 
 async function loadEncryptedState(): Promise<EncryptedState | null> {
   const supabase = supabaseConfiguration();
   if (supabase) {
     const response = await fetch(`${supabase.url}/rest/v1/shield_ledger_state?id=eq.${stateId}&select=ciphertext,iv,auth_tag&limit=1`, {
-      headers: supabaseHeaders(supabase.serviceRoleKey),
+      headers: supabaseHeaders(supabase),
       cache: "no-store",
     });
     if (!response.ok) throw new Error(`PERSISTENCE_READ_FAILED_${response.status}`);
@@ -86,7 +91,7 @@ async function saveEncryptedState(payload: EncryptedState) {
     const response = await fetch(`${supabase.url}/rest/v1/shield_ledger_state`, {
       method: "POST",
       headers: {
-        ...supabaseHeaders(supabase.serviceRoleKey),
+        ...supabaseHeaders(supabase),
         Prefer: "resolution=merge-duplicates,return=minimal",
       },
       body: JSON.stringify({ id: stateId, ...payload, updated_at: new Date().toISOString() }),
