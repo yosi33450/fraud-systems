@@ -45,7 +45,7 @@ import { cases as initialCases, employees, rules, stores } from "@/lib/initial-s
 import type { BlacklistReport, CaseStatus, DashboardSnapshot, Employee, FraudCase, NotificationDelivery, NotificationSettings, RiskCondition, RiskConditionField, RiskRule, Severity, Store } from "@/lib/types";
 
 type View = "overview" | "cases" | "stores" | "employees" | "rules" | "notifications" | "network" | "team" | "platform";
-type RuleReconciliation = { reviewed: number; updated: number; resolved: number; active: number };
+type RuleReconciliation = { reviewed: number; updated: number; resolved: number; reopened: number; active: number };
 
 const nav = [
   { id: "overview", label: "מרכז בקרה", Icon: LayoutDashboard },
@@ -412,6 +412,9 @@ function Overview({ cases, query, setQuery, severity, setSeverity, store, setSto
       <div className="case-cluster-list">
         {clusters.map((cluster) => {
           const expanded = expandedClusters.has(cluster.id);
+          const activeClusterCases = cluster.cases.filter((item) => ["new", "review", "action"].includes(item.status));
+          const closedByRules = activeClusterCases.length === 0 && cluster.cases.every((item) => item.status === "resolved");
+          const activeSeverity = activeClusterCases.reduce<Severity>((highest, item) => severityOrder[item.severity] > severityOrder[highest] ? item.severity : highest, "low");
           const repeatedBy = cluster.cases.length > 1
             ? cluster.emails.length === 1 ? `אותו אימייל · ${cluster.emails[0]}`
               : cluster.ips.length === 1 ? `אותה כתובת IP · ${cluster.ips[0]}`
@@ -420,7 +423,7 @@ function Overview({ cases, query, setQuery, severity, setSeverity, store, setSto
             : cluster.cases[0].customer;
           return <article className={`case-cluster ${cluster.cases.length > 1 ? "case-cluster-linked" : ""}`} key={cluster.id}>
             <button className="case-cluster-summary" onClick={() => cluster.cases.length === 1 ? onOpen(cluster.cases[0]) : toggleCluster(cluster.id)} aria-expanded={cluster.cases.length > 1 ? expanded : undefined}>
-              <div className="cluster-severity"><SeverityBadge severity={cluster.severity} score={Math.max(...cluster.cases.map((item) => item.score))} /></div>
+              <div className="cluster-severity">{closedByRules ? <span className="closed-by-rules"><CheckCircle2 size={15} /> נסגר לפי החוקים</span> : <SeverityBadge severity={activeClusterCases.length ? activeSeverity : cluster.severity} score={Math.max(...(activeClusterCases.length ? activeClusterCases : cluster.cases).map((item) => item.score))} />}</div>
               <div className="cluster-identity"><strong>{repeatedBy}</strong><span>{cluster.cases.length > 1 ? `${cluster.cases.length} הזמנות קושרו לאותה זהות` : `${cluster.cases[0].orderNumber} · ${cluster.cases[0].reason}`}</span><div className="cluster-signals">{cluster.emails.length > 1 ? <span><Mail size={13} /> {cluster.emails.length} אימיילים</span> : null}{cluster.ips.length === 1 && cluster.cases.length > 1 ? <span><Wifi size={13} /> IP משותף</span> : null}{cluster.phones.length === 1 && cluster.cases.length > 1 ? <span><Phone size={13} /> טלפון משותף</span> : null}{cluster.giftCardOrders > 0 ? <span><Gift size={13} /> {cluster.giftCardOrders} Gift Card</span> : null}</div></div>
               <div className="cluster-stat"><span>הזמנות</span><strong>{cluster.cases.length}</strong></div>
               <div className="cluster-stat"><span>סכום כולל</span><strong>{formatCurrency(cluster.totalAmount)}</strong></div>
@@ -440,17 +443,18 @@ function Metric({ icon, label, value, detail, tone = "default" }: { icon: React.
 }
 
 function InvestigationDrawer({ item, onClose, onDecide }: { item: FraudCase; onClose: () => void; onDecide: (status: CaseStatus) => void }) {
+  const closedByRules = item.status === "resolved" && item.score === 0;
   return <div className="drawer-backdrop" onMouseDown={(event) => { if (event.currentTarget === event.target) onClose(); }}>
     <aside className="investigation-drawer" role="dialog" aria-modal="true" aria-label={`חקירת הזמנה ${item.orderNumber}`}>
-      <header className="drawer-header"><div><span className="eyebrow">INVESTIGATION CASE</span><div className="drawer-title"><h2>{item.orderNumber}</h2><SeverityBadge severity={item.severity} score={item.score} /></div><p>{item.storeName} · נפתח {item.createdAt}</p></div><button className="icon-button" onClick={onClose} aria-label="סגירת תיק"><X size={20} /></button></header>
+      <header className="drawer-header"><div><span className="eyebrow">INVESTIGATION CASE</span><div className="drawer-title"><h2>{item.orderNumber}</h2>{closedByRules ? <span className="closed-by-rules"><CheckCircle2 size={15} /> נסגר לפי החוקים</span> : <SeverityBadge severity={item.severity} score={item.score} />}</div><p>{item.storeName} · נפתח {item.createdAt}</p></div><button className="icon-button" onClick={onClose} aria-label="סגירת תיק"><X size={20} /></button></header>
       <div className="drawer-body">
-        <section className="score-hero"><div className="score-ring"><strong>{item.score}</strong><span>/100</span></div><div><span>רמת חשד</span><h3>{item.reason}</h3><p>{item.evidence.length} תנאים זוהו בהזמנה. המערכת מתריעה בלבד — בעל החנות מקבל את ההחלטה.</p></div></section>
+        <section className={`score-hero ${closedByRules ? "score-hero-resolved" : ""}`}>{closedByRules ? <div className="resolved-mark"><CheckCircle2 size={28} /></div> : <div className="score-ring"><strong>{item.score}</strong><span>/100</span></div>}<div><span>{closedByRules ? "תוצאת החישוב מחדש" : "רמת חשד"}</span><h3>{item.reason}</h3><p>{closedByRules ? "ההזמנה אינה עומדת כרגע באף חוק סיכון פעיל, ולכן ההתראה נסגרה ולא מוצג לה ציון סיכון." : `${item.evidence.length} תנאים זוהו בהזמנה. המערכת מתריעה בלבד — בעל החנות מקבל את ההחלטה.`}</p></div></section>
         <div className="drawer-grid">
           <section><div className="section-heading"><div><h3>למה התקבלה ההתראה?</h3><span>כל תנאי מוצג בשפה ברורה לבדיקה</span></div></div><div className="evidence-ledger">{item.evidence.map((evidence) => <article key={evidence.id} className="evidence-node"><div className={`evidence-dot source-${evidence.source}`} /><div className="evidence-time mono">{evidence.timestamp}</div><div className="evidence-card"><div><span>{sourceLabels[evidence.source]}</span><strong className="condition-met">תנאי התקיים</strong></div><h4>{evidence.label}</h4><p>{evidence.description}</p></div></article>)}</div></section>
           <section className="order-context"><h3>זהות והקשר להזמנה</h3><p className="context-note">הפרטים עוזרים לחבר בין עסקאות. כתובת IP לבדה אינה מזהה אדם בוודאות.</p><div className="identity-grid"><div><span><Wifi size={15} /> כתובת IP</span><strong className="mono">{item.context?.ip || "לא התקבל מ־Shopify"}</strong></div><div><span><CreditCard size={15} /> אמצעי תשלום</span><strong>{item.context?.paymentGateways.join(", ") || "לא זמין"}</strong></div><div><span><MapPin size={15} /> כתובת משלוח</span><strong>{item.context?.address || "לא זמין"}</strong></div><div><span><Phone size={15} /> טלפון</span><strong className="mono">{item.context?.phone || "לא זמין"}</strong></div></div>{item.context?.ip ? <p className="context-note">ב־2 השעות האחרונות זוהו מה־IP הזה <strong>{item.context.ipOrderCountLastTwoHours ?? 1} הזמנות</strong>, מתוכן <strong>{item.context.ipGiftCardOrderCountLastTwoHours ?? 0} רכישות Gift Card</strong>, באמצעות <strong>{item.context.ipDistinctEmailsLastTwoHours ?? 1} אימיילים שונים</strong>.</p> : null}{item.context?.riskFacts.length ? <div className="shopify-risk-facts"><strong>אותות סיכון מ־Shopify</strong><ul>{item.context.riskFacts.map((fact) => <li key={fact}>{fact}</li>)}</ul></div> : null}<h3>פרטי ההזמנה</h3><dl><div><dt>לקוח</dt><dd>{item.customer}</dd></div><div><dt>אימייל</dt><dd className="mono">{item.email}</dd></div><div><dt>סכום</dt><dd className="mono">{formatCurrency(item.amount)}</dd></div><div><dt>חנות</dt><dd>{item.storeName}</dd></div></dl><h4>פריטים</h4><ul>{item.items.map((product) => <li key={product.name}><span>{product.quantity}× {product.name}</span><strong className="mono">{formatCurrency(product.quantity * product.price)}</strong></li>)}</ul><button className="secondary-button full-button">פתח ב-Shopify <ExternalLink size={14} /></button></section>
         </div>
       </div>
-      <footer className="decision-bar"><div><span>סטטוס נוכחי</span><strong>{statusLabels[item.status]}</strong></div><div className="decision-actions">{item.status === "new" ? <button className="secondary-button" onClick={() => onDecide("review")}>העבר לבדיקה</button> : null}<button className="secondary-button" onClick={() => onDecide("false-positive")}>לא חשוד</button><button className="secondary-button" onClick={() => onDecide("resolved")}><CheckCircle2 size={16} /> סגור כטופל</button><button className="danger-button" onClick={() => onDecide("fraud")}><ShieldAlert size={16} /> אשר הונאה והוסף לחסימה</button></div></footer>
+      <footer className="decision-bar"><div><span>סטטוס נוכחי</span><strong>{closedByRules ? "נסגר לפי החוקים" : statusLabels[item.status]}</strong></div>{closedByRules ? <span className="decision-explanation">שינוי בחוקים שיחזיר התאמה יפתח את ההתראה מחדש אוטומטית.</span> : <div className="decision-actions">{item.status === "new" ? <button className="secondary-button" onClick={() => onDecide("review")}>העבר לבדיקה</button> : null}<button className="secondary-button" onClick={() => onDecide("false-positive")}>לא חשוד</button><button className="secondary-button" onClick={() => onDecide("resolved")}><CheckCircle2 size={16} /> סגור כטופל</button><button className="danger-button" onClick={() => onDecide("fraud")}><ShieldAlert size={16} /> אשר הונאה והוסף לחסימה</button></div>}</footer>
     </aside>
   </div>;
 }
@@ -579,7 +583,7 @@ function RulesScreen({ rules, onToggle, onSave, onCreate }: { rules: RiskRule[];
   const save = async () => {
     if (!editing) return;
     setSaving(true); setError("");
-    try { const result = await onSave(editing); setNotice(`החוק נשמר ונבדקו ${result.reviewed} תיקים · ${result.resolved} התראות נסגרו · ${result.active} נשארו פעילות`); setEditing(null); } catch { setError("החוק לא נשמר. בדוק שכל התנאים מלאים ונסה שוב."); }
+    try { const result = await onSave(editing); setNotice(`החוק נשמר ונבדקו ${result.reviewed} תיקים · ${result.resolved} נסגרו · ${result.reopened} נפתחו מחדש · ${result.active} פעילות`); setEditing(null); } catch { setError("החוק לא נשמר. בדוק שכל התנאים מלאים ונסה שוב."); }
     finally { setSaving(false); }
   };
   const addTemplate = async (template: Omit<RiskRule, "id" | "matches">) => {
@@ -597,7 +601,7 @@ function RulesScreen({ rules, onToggle, onSave, onCreate }: { rules: RiskRule[];
     {notice ? <div className="rule-recalculation-notice" role="status"><CheckCircle2 size={17} /><div><strong>ההתראות חושבו מחדש</strong><span>{notice}</span></div></div> : null}
     {error ? <div className="inline-error" role="alert">{error}</div> : null}
     <div className="rules-list condition-rules">{rules.map((rule) => <article key={rule.id} className={!rule.enabled ? "rule-disabled" : ""}>
-      <button className={`switch ${rule.enabled ? "switch-on" : ""}`} onClick={() => void onToggle(rule).then((result) => setNotice(`החוק ${rule.enabled ? "כובה" : "הופעל"} ונבדקו ${result.reviewed} תיקים · ${result.resolved} התראות נסגרו · ${result.active} נשארו פעילות`)).catch(() => setError("החוק לא עודכן. נסה שוב."))} aria-label={`${rule.enabled ? "כיבוי" : "הפעלת"} ${rule.label}`}><span /></button>
+      <button className={`switch ${rule.enabled ? "switch-on" : ""}`} onClick={() => void onToggle(rule).then((result) => setNotice(`החוק ${rule.enabled ? "כובה" : "הופעל"} ונבדקו ${result.reviewed} תיקים · ${result.resolved} נסגרו · ${result.reopened} נפתחו מחדש · ${result.active} פעילות`)).catch(() => setError("החוק לא עודכן. נסה שוב."))} aria-label={`${rule.enabled ? "כיבוי" : "הפעלת"} ${rule.label}`}><span /></button>
       <div className="rule-main"><div><h3>{rule.label}</h3>{rule.locked ? <span className="locked-chip"><LockKeyhole size={12} /> חוק מערכת</span> : null}{rule.recommended ? <span className="recommended-chip">מומלץ</span> : null}</div><p>{rule.description}</p><div className="condition-preview"><span className="logic-word">אם {rule.logic === "all" ? "כל" : "לפחות אחד"}</span>{rule.conditions.map((condition) => <span key={condition.id}>{conditionSentence(condition)}</span>)}</div></div>
       <div className="rule-action"><span>אז</span><strong>פתח תיק · {rule.action.severity === "critical" ? "קריטי" : rule.action.severity === "high" ? "גבוה" : rule.action.severity === "medium" ? "בינוני" : "נמוך"}</strong><small>{rule.action.emailOwner ? "ושלח אימייל לבעלים" : "ללא אימייל"}</small></div>
       <div className="rule-matches"><span>הופעל</span><strong className="mono">{rule.matches}</strong><small>פעמים</small></div>

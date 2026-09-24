@@ -25,6 +25,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ tenan
       reviewed: reconciliation.reviewed,
       updated: reconciliation.updated,
       resolved: reconciliation.resolved,
+      reopened: reconciliation.reopened,
       active: reconciliation.active,
     } });
   } catch (error) {

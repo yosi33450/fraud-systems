@@ -1,8 +1,6 @@
 import type { Metadata } from "next";
 import "@fontsource-variable/heebo";
 import "@fontsource-variable/noto-sans-hebrew";
-import "@fontsource/ibm-plex-mono/400.css";
-import "@fontsource/ibm-plex-mono/600.css";
 import "./globals.css";
 
 export const metadata: Metadata = {

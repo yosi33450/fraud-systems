@@ -227,6 +227,18 @@ const baselineRules = (): RiskRule[] => [
     action: { severity: "medium", openCase: true, emailOwner: false },
   },
   {
+    id: "recommended-order-high", label: "סכום הזמנה חריג מאוד", description: "מעלה את ההתראה לגבוהה כאשר סכום ההזמנה גבוה מ־₪5,000.",
+    category: "payment", enabled: true, logic: "all", recommended: true, matches: 0,
+    conditions: [{ id: "order-high", field: "order_amount", operator: "gt", value: 5000 }],
+    action: { severity: "high", openCase: true, emailOwner: true },
+  },
+  {
+    id: "recommended-order-critical", label: "סכום הזמנה קיצוני", description: "מעלה את ההתראה לקריטית כאשר סכום ההזמנה גבוה מ־₪15,000.",
+    category: "payment", enabled: true, logic: "all", recommended: true, matches: 0,
+    conditions: [{ id: "order-critical", field: "order_amount", operator: "gt", value: 15000 }],
+    action: { severity: "critical", openCase: true, emailOwner: true },
+  },
+  {
     id: "recommended-gift-card", label: "גיפט קארד עם כשלי תשלום", description: "פותח התראה קריטית על רכישת גיפט קארד בסכום גבוה לאחר כמה כשלי תשלום.",
     category: "gift-card", enabled: true, logic: "all", recommended: true, matches: 0,
     conditions: [
@@ -247,11 +259,17 @@ const migrateLegacyRules = () => {
   for (const rules of state.rulesByTenant.values()) {
     const legacy = rules.find((rule) => rule.id === "recommended-order-spike");
     const condition = legacy?.conditions[0];
-    if (!legacy || legacy.conditions.length !== 1 || condition?.field !== "order_amount_vs_average") continue;
-    const threshold = typeof condition.value === "number" && condition.value >= 100 ? condition.value : 1000;
-    legacy.label = "סכום הזמנה חריג";
-    legacy.description = `פותח התראה כאשר סכום ההזמנה גבוה מ־₪${threshold.toLocaleString("he-IL")}.`;
-    legacy.conditions = [{ id: condition.id, field: "order_amount", operator: "gt", value: threshold }];
+    if (legacy && legacy.conditions.length === 1 && condition?.field === "order_amount_vs_average") {
+      const threshold = typeof condition.value === "number" && condition.value >= 100 ? condition.value : 1000;
+      legacy.label = "סכום הזמנה חריג";
+      legacy.description = `פותח התראה כאשר סכום ההזמנה גבוה מ־₪${threshold.toLocaleString("he-IL")}.`;
+      legacy.conditions = [{ id: condition.id, field: "order_amount", operator: "gt", value: threshold }];
+    }
+
+    const amountTiers = baselineRules().filter((rule) => ["recommended-order-high", "recommended-order-critical"].includes(rule.id));
+    for (const tier of amountTiers) {
+      if (!rules.some((rule) => rule.id === tier.id)) rules.push(clone(tier));
+    }
   }
 };
 
@@ -339,6 +357,7 @@ export function updateRule(tenantId: string, ruleId: string, patch: Partial<Pick
 }
 
 const activeStatuses = new Set<CaseStatus>(["new", "review", "action"]);
+const autoResolvedReason = "לא עומד עוד בחוקי הסיכון הפעילים";
 
 const fallbackSignalsForCase = (item: FraudCase, tenantCases: FraudCase[]): OrderSignals => {
   const giftCardValue = item.items.reduce((total, line) => /gift\s*card|כרטיס\s*מתנה/i.test(line.name) ? total + line.price * line.quantity : total, 0);
@@ -371,20 +390,26 @@ const fallbackSignalsForCase = (item: FraudCase, tenantCases: FraudCase[]): Orde
 export function reevaluateOpenCases(tenantId: string) {
   const tenantCases = state.cases.filter((item) => item.tenantId === tenantId);
   const rules = state.rulesByTenant.get(tenantId) ?? [];
+  const candidates = tenantCases.filter((item) => activeStatuses.has(item.status) || (item.status === "resolved" && item.reason === autoResolvedReason));
   let resolved = 0;
   let updated = 0;
+  let reopened = 0;
 
-  for (const item of tenantCases) {
-    if (!activeStatuses.has(item.status)) continue;
+  for (const item of candidates) {
+    const wasAutoResolved = item.status === "resolved" && item.reason === autoResolvedReason;
     const result = evaluateRisk(item.signals ?? fallbackSignalsForCase(item, tenantCases), new Date(item.occurredAt ?? Date.now()), rules);
     if (result.score < 25) {
       item.status = "resolved";
-      item.reason = "לא עומד עוד בחוקי הסיכון הפעילים";
+      item.reason = autoResolvedReason;
       item.score = 0;
       item.severity = "low";
       item.evidence = [];
-      resolved += 1;
+      if (!wasAutoResolved) resolved += 1;
       continue;
+    }
+    if (wasAutoResolved) {
+      item.status = "new";
+      reopened += 1;
     }
     item.score = result.score;
     item.severity = result.severity;
@@ -395,12 +420,13 @@ export function reevaluateOpenCases(tenantId: string) {
 
   state.audit.unshift({
     id: randomUUID(), tenantId, action: "cases.reevaluated", resourceType: "risk_rules", resourceId: tenantId,
-    createdAt: new Date().toISOString(), metadata: { reviewed: tenantCases.filter((item) => activeStatuses.has(item.status)).length + resolved, updated, resolved },
+    createdAt: new Date().toISOString(), metadata: { reviewed: candidates.length, updated, resolved, reopened },
   });
   return {
-    reviewed: tenantCases.filter((item) => activeStatuses.has(item.status)).length + resolved,
+    reviewed: candidates.length,
     updated,
     resolved,
+    reopened,
     active: tenantCases.filter((item) => activeStatuses.has(item.status)).length,
     cases: clone(tenantCases),
   };
