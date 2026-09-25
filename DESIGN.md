@@ -22,6 +22,13 @@ not only through the historical layout layer. Preserve mobile overlay behavior.
   title and counts together, and give the queue more of the first viewport.
 - Backend, rule evaluation, order linking, calculations and stored data are unchanged.
 
+QA: verified the footer toggle at 1280px and 1920px (252px expanded / 80px rail,
+with equal content offsets), persistence after reload, working search and severity
+filters, real store navigation, all desktop destinations, and stacked group/order
+dialogs. At 375px, verified no page overflow, full mobile navigation, focus transfer,
+background inertness and dismissal after choosing a destination. Build/typecheck and
+all 16 existing evidence/money-summary tests passed. No live decisions or forms submitted.
+
 ## Mosaic-inspired workspace revision
 
 Reference requested by the merchant: https://github.com/cruip/tailwind-dashboard-template

@@ -435,7 +435,7 @@ function Overview({ cases, ledger, query, setQuery, severity, setSeverity, store
         <div className="attention-summary">
           <div className="brief-label"><h2>התראות פתוחות</h2><ShieldAlert size={20} aria-hidden="true" /></div>
           <strong className="attention-total">{activeCases.length}</strong>
-          <div className="attention-context"><span className="urgent-count"><ShieldAlert size={14} aria-hidden="true" />{activeCases.filter((item) => item.severity === "critical").length} קריטיות</span></div>
+          <div className="attention-context"><span className="urgent-count"><ShieldAlert size={14} aria-hidden="true" />קריטיות: {activeCases.filter((item) => item.severity === "critical").length}</span></div>
           <button className="text-button" onClick={onShowAll}>לבדיקת ההתראות <ChevronLeft size={17} /></button>
         </div>
         <div className="exposure-summary">
