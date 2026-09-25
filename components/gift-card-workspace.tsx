@@ -75,9 +75,15 @@ export function GiftCardWorkspace({ ledger = empty, stores, cases, onOpenCase, o
         do {
           if (stopped.current) break;
           setProgress(`${store.name} · נבדקו ${total.toLocaleString("he-IL")} הזמנות`);
-          const response: Response = await fetch(`/api/tenants/${encodeURIComponent(store.tenantId)}/stores/${encodeURIComponent(store.id)}/gift-cards`, {
+          const requestPage = () => fetch(`/api/tenants/${encodeURIComponent(store.tenantId)}/stores/${encodeURIComponent(store.id)}/gift-cards`, {
             method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mode, after, since, until }),
           });
+          let response: Response = await requestPage();
+          for (let retry = 0; response.status >= 500 && retry < 2 && !stopped.current; retry++) {
+            await new Promise((resolve) => setTimeout(resolve, 1500 * (retry + 1)));
+            if (stopped.current) break;
+            response = await requestPage();
+          }
           const result: { scanned: number; after: string | null; liveSetup: boolean; error?: string } = await response.json();
           if (!response.ok) throw new Error(result.error || "הסריקה לא הושלמה");
           total += result.scanned; after = result.after;

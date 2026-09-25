@@ -20,7 +20,7 @@ async function read(tenantId: string, storeId: string) {
 export async function persistGiftEvidence(tenantId: string, storeId: string, incoming: GiftCardOrderEvidence[]) {
   if (!incoming.length) return;
   if (!configured()) { await persistOperationalState(); return; }
-  for (let attempt = 0; attempt < 5; attempt++) {
+  for (let attempt = 0; attempt < 7; attempt++) {
     const current = await read(tenantId, storeId);
     const merged = new Map(current.orders.map((order) => [order.orderId, order]));
     for (const order of incoming) {
@@ -41,7 +41,9 @@ export async function persistGiftEvidence(tenantId: string, storeId: string, inc
       return;
     } catch (error) {
       // Retry only conflicts, not permission/configuration errors.
-      if (attempt === 4 || !/precondition|already exists|etag|condition.*match/i.test(error instanceof Error ? error.message : "")) throw error;
+      if (attempt === 6 || !/precondition|already exists|etag|condition.*match|conflicting operation/i.test(error instanceof Error ? error.message : "")) throw error;
+      // Multiple scans/live webhooks can otherwise retry in lockstep and starve.
+      await new Promise((resolve) => setTimeout(resolve, Math.min(150 * 2 ** attempt, 2000) + Math.random() * 150));
     }
   }
 }
