@@ -40,7 +40,7 @@ import {
   UsersRound,
   X,
 } from "lucide-react";
-import { useDeferredValue, useEffect, useMemo, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { SeverityBadge } from "@/components/severity-badge";
 import { cases as initialCases, employees, rules, stores } from "@/lib/initial-state";
 import type { BlacklistReport, CaseStatus, DashboardSnapshot, Employee, FraudCase, NotificationDelivery, NotificationSettings, RiskCondition, RiskConditionField, RiskRule, Severity, Store } from "@/lib/types";
@@ -278,6 +278,7 @@ export function FraudCommandCenter() {
           <div className="user-block"><div className="user-avatar"><CircleUserRound size={17} /></div><div><strong>חשבון בעלים</strong><span>בעל הפלטפורמה</span></div><ChevronLeft size={15} /></div>
         </div>
       </aside>
+      {mobileNav ? <button className="mobile-nav-backdrop" aria-label="סגירת תפריט" onClick={() => setMobileNav(false)} /> : null}
 
       <main className="main-content" id="main-content">
         <header className="topbar">
@@ -399,7 +400,7 @@ function Overview({ cases, query, setQuery, severity, setSeverity, store, setSto
     if (next.has(id)) next.delete(id); else next.add(id);
     return next;
   });
-  return <div className="page-content">
+  return <div className={`page-content ${casesOnly ? "evidence-workspace" : ""}`}>
     <PageHeading eyebrow={casesOnly ? "תור החלטות" : "מרכז החלטות"} title={casesOnly ? "התראות וחקירות" : hasStores ? "מה דורש טיפול עכשיו" : "חבר את חנות Shopify הראשונה"} description={casesOnly ? "כל הזמנה חשודה נשארת כאן עד שבעל החנות מקבל החלטה." : hasStores ? `יש ${cases.filter((item) => ["new", "review", "action"].includes(item.status)).length} תיקים פתוחים. המערכת מתריעה — ההחלטה תמיד נשארת אצלך.` : "לא נטען מידע לדוגמה. לאחר החיבור יוצגו כאן רק הזמנות ונתונים אמיתיים מהחנות שלך."} action={hasStores ? <button className="secondary-button" onClick={() => void onRefresh()} disabled={refreshing}><RefreshCcw size={15} className={refreshing ? "spin" : ""} /> {refreshing ? "מסנכרן…" : "רענון נתונים"}</button> : <button className="primary-button" onClick={onOpenStores}><Plus size={16} /> חיבור חנות</button>} />
 
     {!casesOnly && !hasStores ? <section className="connection-empty"><div className="connection-empty-icon"><StoreIcon size={28} /></div><div><span className="eyebrow">מתחילים מנתונים אמיתיים</span><h2>סביבת העבודה נקייה ומוכנה לחיבור</h2><p>לא יופיעו עסקאות, עובדים, התראות או נתוני לקוחות עד שחנות Shopify אמיתית תחובר.</p></div><ol><li><strong>1</strong><span>מחברים חנות ומאשרים גישה להזמנות</span></li><li><strong>2</strong><span>בוחרים חוקי סיכון ונמעני אימייל</span></li><li><strong>3</strong><span>הזמנות חדשות נבדקות בזמן אמת</span></li></ol><button className="primary-button" onClick={onOpenStores}>עבור לחיבור חנות <ChevronLeft size={15} /></button></section> : null}
@@ -418,6 +419,13 @@ function Overview({ cases, query, setQuery, severity, setSeverity, store, setSto
       </section>
     </> : null}
 
+    {casesOnly && hasStores ? <section className="triage-summary" aria-label="סיכום תור ההתראות">
+      <div><span>פתוחות</span><strong>{activeCases.length}</strong></div>
+      <div><span>קריטיות</span><strong>{activeCases.filter((item) => item.severity === "critical").length}</strong></div>
+      <div><span>גבוהות</span><strong>{activeCases.filter((item) => item.severity === "high").length}</strong></div>
+      <p>ההתראות מקובצות לפי אימייל, IP או טלפון כדי שתבדוק דפוס אחד במקום עשרות שורות.</p>
+    </section> : null}
+
     <section className="case-section">
       <div className="section-heading"><div><h2>{casesOnly ? "התראות לפי זהות" : "תור החלטות"}</h2><span>{clusters.length} קבוצות · {displayCases.length} הזמנות</span></div>{casesOnly ? <button className="secondary-button" onClick={() => setShowClosed((value) => !value)}>{showClosed ? "הצג פעילות בלבד" : `הצג גם ${cases.length - activeCases.length} שטופלו`}</button> : <button className="text-button" onClick={onShowAll}>הצג הכל <ChevronLeft size={14} /></button>}</div>
       <div className="filter-bar">
@@ -427,6 +435,7 @@ function Overview({ cases, query, setQuery, severity, setSeverity, store, setSto
         <button className="filter-button"><Filter size={15} /> מסננים נוספים</button>
       </div>
       <div className="case-cluster-list">
+        {displayCases.length > 0 ? <div className="case-queue-head" aria-hidden="true"><span>חומרה</span><span>זהות וסיבת ההתראה</span><span>הזמנות</span><span>סכום</span><span>מצב</span></div> : null}
         {clusters.map((cluster) => {
           const expanded = expandedClusters.has(cluster.id);
           const activeClusterCases = cluster.cases.filter((item) => ["new", "review", "action"].includes(item.status));
@@ -463,13 +472,26 @@ function Metric({ icon, label, value, detail, tone = "default" }: { icon: React.
 function InvestigationDrawer({ item, onClose, onDecide }: { item: FraudCase; onClose: () => void; onDecide: (status: CaseStatus) => void }) {
   const closedByRules = isAutomaticallyResolved(item);
   const missingBuyerIdentity = isPayPlusPlaceholder(item) || ["ללא שם", "לקוח Shopify", ""].includes(item.customer.trim());
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    closeButtonRef.current?.focus();
+    const handleKeyDown = (event: KeyboardEvent) => { if (event.key === "Escape") onClose(); };
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", handleKeyDown);
+    return () => { document.body.style.overflow = previousOverflow; window.removeEventListener("keydown", handleKeyDown); };
+  }, [onClose]);
+  const formatEvidenceTime = (value: string) => {
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat("he-IL", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }).format(date);
+  };
   return <div className="drawer-backdrop" onMouseDown={(event) => { if (event.currentTarget === event.target) onClose(); }}>
     <aside className="investigation-drawer" role="dialog" aria-modal="true" aria-label={`חקירת הזמנה ${item.orderNumber}`}>
-      <header className="drawer-header"><div><span className="eyebrow">INVESTIGATION CASE</span><div className="drawer-title"><h2>{item.orderNumber}</h2>{closedByRules ? <span className="closed-by-rules"><CheckCircle2 size={15} /> נסגר לפי החוקים</span> : <SeverityBadge severity={item.severity} score={item.score} />}</div><p>{item.storeName} · נפתח {item.createdAt}</p></div><button className="icon-button" onClick={onClose} aria-label="סגירת תיק"><X size={20} /></button></header>
+      <header className="drawer-header"><div><span className="case-kicker">תיק חקירה</span><div className="drawer-title"><h2>{item.orderNumber}</h2>{closedByRules ? <span className="closed-by-rules"><CheckCircle2 size={15} /> נסגר לפי החוקים</span> : <SeverityBadge severity={item.severity} score={item.score} />}</div><p>{item.storeName} · נפתח {item.createdAt}</p></div><button ref={closeButtonRef} className="icon-button" onClick={onClose} aria-label="סגירת תיק"><X size={20} /></button></header>
       <div className="drawer-body">
-        <section className={`score-hero ${closedByRules ? "score-hero-resolved" : ""}`}>{closedByRules ? <div className="resolved-mark"><CheckCircle2 size={28} /></div> : <div className="score-ring"><strong>{item.score}</strong><span>/100</span></div>}<div><span>{closedByRules ? "נסגר אוטומטית בחישוב חוקים" : "רמת חשד"}</span><h3>{closedByRules ? "ההתראה אינה פעילה" : item.reason}</h3><p>{closedByRules ? item.resolution?.note ?? "ההזמנה אינה עומדת כרגע באף חוק סיכון פעיל. לא התקבלה החלטה אנושית לגביה." : `${item.evidence.length} תנאים זוהו בהזמנה. המערכת מתריעה בלבד — בעל החנות מקבל את ההחלטה.`}</p></div></section>
+        <section className={`case-summary-strip ${closedByRules ? "case-summary-resolved" : ""}`}><div><span>{closedByRules ? "מצב התראה" : "סיבת ההתראה"}</span><h3>{closedByRules ? "ההתראה אינה פעילה" : item.reason}</h3><p>{closedByRules ? item.resolution?.note ?? "ההזמנה אינה עומדת כרגע באף חוק סיכון פעיל. לא התקבלה החלטה אנושית לגביה." : "המערכת מציגה את העובדות שנמצאו. ההחלטה נשארת בידי בעל החנות."}</p></div><dl><div><dt>ציון</dt><dd>{item.score}</dd></div><div><dt>תנאים</dt><dd>{item.evidence.length}</dd></div><div><dt>סכום</dt><dd>{formatCurrency(item.amount)}</dd></div></dl></section>
         <div className="drawer-grid">
-          <section><div className="section-heading"><div><h3>למה התקבלה ההתראה?</h3><span>כל תנאי מוצג בשפה ברורה לבדיקה</span></div></div><div className="evidence-ledger">{item.evidence.map((evidence) => <article key={evidence.id} className="evidence-node"><div className={`evidence-dot source-${evidence.source}`} /><div className="evidence-time mono">{evidence.timestamp}</div><div className="evidence-card"><div><span>{sourceLabels[evidence.source]}</span><strong className="condition-met">תנאי התקיים</strong></div><h4>{evidence.label}</h4><p>{evidence.description}</p></div></article>)}</div></section>
+          <section className="evidence-section"><div className="section-heading"><div><h3>ספר הראיות</h3><span>התנאים שהתקיימו בפועל, לפי זמן ומקור</span></div></div><div className="evidence-columns" aria-hidden="true"><span>מקור</span><span>תנאי ותוצאה</span><span>זמן</span></div><div className="evidence-ledger">{item.evidence.map((evidence) => <article key={evidence.id} className="evidence-node"><span className={`evidence-source source-${evidence.source}`}>{sourceLabels[evidence.source]}</span><div className="evidence-finding"><h4>{evidence.label}</h4><p>{evidence.description}</p></div><time className="evidence-time mono">{formatEvidenceTime(evidence.timestamp)}</time></article>)}</div></section>
           <section className="order-context"><h3>זהות והקשר להזמנה</h3><p className="context-note">הפרטים עוזרים לחבר בין עסקאות. כתובת IP לבדה אינה מזהה אדם בוודאות.</p>{missingBuyerIdentity ? <div className="identity-data-notice"><Info size={18} /><div><strong>{isPayPlusPlaceholder(item) ? "PayPlus העבירה ל-Shopify לקוח טכני, לא את זהות הקונה" : "Shopify לא החזירה שם לקוח להזמנה"}</strong><span>{item.context?.phone ? "קיים מספר טלפון ולכן אפשר לזהות ולקשר לפי הטלפון." : "לא התקבלו מספיק פרטי קשר כדי לזהות את האדם או לקשר אותו להזמנות אחרות."}</span></div></div> : null}<div className="identity-grid"><div><span><Wifi size={15} /> כתובת IP</span><strong className="mono">{item.context?.ip || "לא התקבלה מ־Shopify"}</strong></div><div><span><CreditCard size={15} /> אמצעי תשלום</span><strong>{item.context?.paymentGateways.join(", ") || "לא התקבל"}</strong></div><div><span><MapPin size={15} /> כתובת משלוח</span><strong>{item.context?.address || "לא התקבלה מ־Shopify"}</strong></div><div><span><Phone size={15} /> טלפון</span><strong className="mono">{item.context?.phone || "לא התקבל מ־Shopify"}</strong></div></div>{item.context?.ip ? <p className="context-note">ב־2 השעות האחרונות זוהו מה־IP הזה <strong>{item.context.ipOrderCountLastTwoHours ?? 1} הזמנות</strong>, מתוכן <strong>{item.context.ipGiftCardOrderCountLastTwoHours ?? 0} רכישות Gift Card</strong>, באמצעות <strong>{item.context.ipDistinctEmailsLastTwoHours ?? 1} אימיילים שונים</strong>.</p> : null}{item.context?.riskFacts.length ? <div className="shopify-risk-facts"><strong>אותות סיכון מ־Shopify</strong><ul>{item.context.riskFacts.map((fact) => <li key={fact}>{fact}</li>)}</ul></div> : null}<h3>פרטי ההזמנה</h3><dl><div><dt>לקוח</dt><dd>{customerDisplayName(item)}</dd></div><div><dt>אימייל</dt><dd className="mono">{isRealEmail(item.email) ? item.email : "לא התקבל מ־Shopify"}</dd></div><div><dt>סכום</dt><dd className="mono">{formatCurrency(item.amount)}</dd></div><div><dt>חנות</dt><dd>{item.storeName}</dd></div></dl><h4>פריטים</h4><ul>{item.items.map((product) => <li key={product.name}><span>{product.quantity}× {product.name}</span><strong className="mono">{formatCurrency(product.quantity * product.price)}</strong></li>)}</ul><button className="secondary-button full-button">פתח ב-Shopify <ExternalLink size={14} /></button></section>
         </div>
       </div>
