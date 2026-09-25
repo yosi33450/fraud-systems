@@ -46,7 +46,7 @@ import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { SeverityBadge } from "@/components/severity-badge";
 import { GiftCardWorkspace } from "@/components/gift-card-workspace";
 import { CenteredDialog } from "@/components/centered-dialog";
-import { SidebarItem, WorkspaceQuickNavigation, useWorkspaceNavigation } from "@/components/workspace-navigation";
+import { SidebarItem, useWorkspaceNavigation } from "@/components/workspace-navigation";
 import { summarizeGiftCluster, type MoneyTotal } from "@/lib/gift-cluster-summary";
 import type { GiftLedger } from "@/lib/gift-card-evidence";
 import { cases as initialCases, employees, rules, stores } from "@/lib/initial-state";
@@ -109,7 +109,7 @@ export function FraudCommandCenter() {
   const [deliveries, setDeliveries] = useState<NotificationDelivery[]>([]);
   const [syncState, setSyncState] = useState<"loading" | "live" | "error">("loading");
   const [mobileNav, setMobileNav] = useState(false);
-  const { collapsed, toggleCollapsed, searchOpen, setSearchOpen } = useWorkspaceNavigation(mobileNav, setMobileNav);
+  const { collapsed, toggleCollapsed } = useWorkspaceNavigation(mobileNav, setMobileNav);
   const [connectOpen, setConnectOpen] = useState(false);
   const deferredQuery = useDeferredValue(query.trim().toLowerCase());
   const realtimeActive = storeData.some((item) => item.realtimeStatus === "active");
@@ -271,13 +271,13 @@ export function FraudCommandCenter() {
       <aside className={`sidebar ${mobileNav ? "sidebar-open" : ""}`} id="primary-navigation" aria-label="ניווט ראשי">
         <div className="brand-block">
           <div className="brand-mark" aria-hidden="true"><Shield size={21} /></div>
-          <div className="brand-copy"><strong>Shield Ledger</strong><span>מרכז מניעת הונאות</span></div>
+          <div className="brand-copy"><strong>Shield Ledger</strong></div>
           <button className="icon-button mobile-only" onClick={() => setMobileNav(false)} aria-label="סגירת תפריט"><X size={18} /></button>
         </div>
-        <button className="tenant-switcher" aria-label="הארגון שלי" title="הארגון שלי">
+        <button className="tenant-switcher" onClick={() => { setView("stores"); setMobileNav(false); }} aria-label="ניהול החנויות שלי" title="ניהול החנויות שלי">
           <span className="tenant-avatar"><Shield size={16} /></span>
-          <span className="tenant-copy"><strong>הארגון שלי</strong><small>{storeData.length ? `${storeData.length} חנויות מחוברות` : "טרם חוברה חנות"}</small></span>
-          <ChevronDown size={15} aria-hidden="true" />
+          <span className="tenant-copy"><strong>{storeData.length === 1 ? storeData[0].name : "החנויות שלי"}</strong><small>{storeData.length === 1 ? "חנות אחת מחוברת" : storeData.length ? `${storeData.length} חנויות מחוברות` : "חיבור חנות"}</small></span>
+          <ChevronLeft size={15} aria-hidden="true" />
         </button>
         <nav className="nav-list">
           {[{ title: "ניטור וחקירות", items: nav.slice(0, 3) }, { title: "ניהול החנות", items: nav.slice(3) }].map((group) => <div className="nav-group" key={group.title}>
@@ -290,7 +290,8 @@ export function FraudCommandCenter() {
         <div className="sidebar-footer">
           <SidebarItem label="ניהול הפלטפורמה" Icon={Gauge} active={view === "platform"} collapsed={collapsed} onClick={() => { setView("platform"); setMobileNav(false); }} />
           <SidebarItem label="הגדרות התראות" Icon={Settings} collapsed={collapsed} onClick={() => { setView("notifications"); setMobileNav(false); }} />
-          <div className="user-block" title="חשבון בעלים"><div className="user-avatar"><CircleUserRound size={17} /></div><div className="user-copy"><strong>חשבון בעלים</strong><span>בעל הפלטפורמה</span></div><ChevronLeft size={15} /></div>
+          <div className="user-block" title="חשבון בעלים"><div className="user-avatar"><CircleUserRound size={17} /></div><div className="user-copy"><strong>חשבון בעלים</strong></div></div>
+          <button className="sidebar-collapse-control" onClick={toggleCollapsed} aria-label={collapsed ? "הרחבת סרגל הצד" : "קיפול סרגל הצד"} title={collapsed ? "הרחבת סרגל הצד" : "קיפול סרגל הצד"} aria-expanded={!collapsed} aria-controls="primary-navigation">{collapsed ? <PanelRightOpen size={20} aria-hidden="true" /> : <PanelRightClose size={20} aria-hidden="true" />}<span className="nav-label">קיפול סרגל הצד</span></button>
         </div>
       </aside>
       {mobileNav ? <button className="mobile-nav-backdrop" aria-label="סגירת תפריט" onClick={() => setMobileNav(false)} /> : null}
@@ -298,18 +299,14 @@ export function FraudCommandCenter() {
       <main className="main-content" id="main-content">
         <header className="topbar">
           <div className="workspace-location">
-            <button className="icon-button desktop-sidebar-toggle" onClick={toggleCollapsed} aria-label={collapsed ? "הרחבת סרגל הצד" : "צמצום סרגל הצד"} title={collapsed ? "הרחבת סרגל הצד" : "צמצום סרגל הצד"} aria-expanded={!collapsed} aria-controls="primary-navigation">{collapsed ? <PanelRightOpen size={20} /> : <PanelRightClose size={20} />}</button>
             <button id="mobile-navigation-trigger" className="icon-button mobile-menu" onClick={() => setMobileNav(true)} aria-label="פתיחת תפריט" aria-expanded={mobileNav} aria-controls="primary-navigation"><Menu size={20} /></button>
             <span className="workspace-current">{nav.find((item) => item.id === view)?.label ?? "ניהול הפלטפורמה"}</span>
           </div>
-          <div className={`topbar-context sync-${syncState} ${realtimeNeedsSetup && storeData.length ? "sync-warning" : ""}`}><span className="live-dot" />{syncState === "error" ? "בעיית סנכרון — הנתונים האחרונים נשמרו" : syncState === "loading" ? "מסנכרן נתונים…" : realtimeActive ? "אירועים חדשים נקלטים בזמן אמת" : realtimeRegistered ? "קליטה בזמן אמת הוגדרה — ממתין להזמנה חדשה" : storeData.length ? "נדרש חיבור מחדש לקליטה בזמן אמת" : "ממתין לחיבור חנות"}</div>
+          <div className={`topbar-context sync-${syncState} ${realtimeNeedsSetup && storeData.length ? "sync-warning" : ""}`}><span className="live-dot" />{syncState === "error" ? "בעיית סנכרון — המידע נשמר" : syncState === "loading" ? "מסנכרן…" : realtimeActive ? "ניטור בזמן אמת" : realtimeRegistered ? "ממתין להזמנה חדשה" : storeData.length ? "נדרש חיבור מחדש" : "אין חנות מחוברת"}</div>
           <div className="topbar-actions">
-            <button className="quick-navigation-trigger" onClick={() => setSearchOpen(true)} aria-label="חיפוש מסך במערכת" aria-haspopup="dialog"><Search size={18} aria-hidden="true" /><span>מעבר מהיר</span><kbd dir="ltr">Ctrl K</kbd></button>
-            <button className="store-pill"><StoreIcon size={15} /> {storeData.length ? "כל החנויות" : "אין חנות מחוברת"} <ChevronDown size={14} /></button>
             <button className="icon-button notification-button" onClick={() => setView("notifications")} aria-label="הגדרות התראות"><Bell size={19} /><span /></button>
           </div>
         </header>
-        {searchOpen ? <WorkspaceQuickNavigation destinations={[...nav, { id: "platform", label: "ניהול הפלטפורמה", Icon: Gauge }]} current={view} onNavigate={(id) => setView(id as View)} onClose={() => setSearchOpen(false)} /> : null}
 
         {view === "overview" || view === "cases" ? (
           <Overview
@@ -348,8 +345,8 @@ export function FraudCommandCenter() {
   );
 }
 
-function PageHeading({ eyebrow, title, description, action }: { eyebrow: string; title: string; description: string; action?: React.ReactNode }) {
-  return <div className="page-heading"><div><span className="eyebrow">{eyebrow}</span><h1>{title}</h1><p>{description}</p></div>{action}</div>;
+function PageHeading({ title, description, action }: { eyebrow: string; title: string; description?: string; action?: React.ReactNode }) {
+  return <div className="page-heading"><div><h1>{title}</h1>{description ? <p>{description}</p> : null}</div>{action}</div>;
 }
 
 type CaseCluster = {
@@ -429,32 +426,31 @@ function Overview({ cases, ledger, query, setQuery, severity, setSeverity, store
   const clusters = useMemo(() => clusterCases(displayCases), [displayCases]);
   const selectedCluster = clusters.find((cluster) => cluster.id === selectedClusterId);
   return <div className={`page-content product-page ${casesOnly ? "evidence-workspace" : "overview-workspace"}`}>
-    <PageHeading eyebrow={casesOnly ? "תור החלטות" : "מרכז החלטות"} title={casesOnly ? "התראות וחקירות" : hasStores ? "תמונת המצב שלך" : "חבר את חנות Shopify הראשונה"} description={casesOnly ? "כל הזמנה חשודה נשארת כאן עד שבעל החנות מקבל החלטה." : hasStores ? "ההתראות, ההזמנות וההחלטות — במקום אחד." : "לא נטען מידע לדוגמה. לאחר החיבור יוצגו כאן רק הזמנות ונתונים אמיתיים מהחנות שלך."} action={hasStores ? <button className="secondary-button" onClick={() => void onRefresh()} disabled={refreshing}><RefreshCcw size={15} className={refreshing ? "spin" : ""} /> {refreshing ? "מסנכרן…" : "רענון נתונים"}</button> : <button className="primary-button" onClick={onOpenStores}><Plus size={16} /> חיבור חנות</button>} />
+    <PageHeading eyebrow="" title={casesOnly ? "התראות וחקירות" : hasStores ? "תמונת מצב" : "חיבור חנות Shopify"} description={hasStores ? undefined : "חבר חנות כדי להתחיל לנטר הזמנות."} action={hasStores ? <button className="secondary-button" onClick={() => void onRefresh()} disabled={refreshing}><RefreshCcw size={15} className={refreshing ? "spin" : ""} /> {refreshing ? "מסנכרן…" : "רענון נתונים"}</button> : <button className="primary-button" onClick={onOpenStores}><Plus size={16} /> חיבור חנות</button>} />
 
     {!casesOnly && !hasStores ? <section className="connection-empty"><div className="connection-empty-icon"><StoreIcon size={28} /></div><div><span className="eyebrow">מתחילים מנתונים אמיתיים</span><h2>סביבת העבודה נקייה ומוכנה לחיבור</h2><p>לא יופיעו עסקאות, עובדים, התראות או נתוני לקוחות עד שחנות Shopify אמיתית תחובר.</p></div><ol><li><strong>1</strong><span>מחברים חנות ומאשרים גישה להזמנות</span></li><li><strong>2</strong><span>בוחרים חוקי סיכון ונמעני אימייל</span></li><li><strong>3</strong><span>הזמנות חדשות נבדקות בזמן אמת</span></li></ol><button className="primary-button" onClick={onOpenStores}>עבור לחיבור חנות <ChevronLeft size={15} /></button></section> : null}
 
     {!casesOnly && hasStores ? <>
       <section className="overview-brief" aria-label="תמונת מצב">
         <div className="attention-summary">
-          <div className="brief-label"><span className="brief-icon"><ShieldAlert size={21} aria-hidden="true" /></span><h2>ממתינים לבדיקה שלך</h2></div>
+          <div className="brief-label"><h2>התראות פתוחות</h2><ShieldAlert size={20} aria-hidden="true" /></div>
           <strong className="attention-total">{activeCases.length}</strong>
-          <div className="attention-context"><span>תיקים פתוחים</span><span className="urgent-count"><ShieldAlert size={14} aria-hidden="true" />{activeCases.filter((item) => item.severity === "critical").length} ברמה קריטית</span></div>
-          <button className="primary-button" onClick={onShowAll}>פתיחת ההתראות <ChevronLeft size={17} /></button>
+          <div className="attention-context"><span className="urgent-count"><ShieldAlert size={14} aria-hidden="true" />{activeCases.filter((item) => item.severity === "critical").length} קריטיות</span></div>
+          <button className="text-button" onClick={onShowAll}>לבדיקת ההתראות <ChevronLeft size={17} /></button>
         </div>
         <div className="exposure-summary">
-          <div className="brief-label"><h2>סכום ההזמנות החשודות</h2><Fingerprint size={20} aria-hidden="true" /></div>
+          <div className="brief-label"><h2>סכום הזמנות פתוחות</h2><CreditCard size={20} aria-hidden="true" /></div>
           <strong className="exposure-total"><bdi>{formatCurrency(activeCases.reduce((sum, item) => sum + item.amount, 0))}</bdi></strong>
-          <p>סכום ההזמנות בתיקים הפתוחים.<br />לא סכום נזק או הונאה מאומתת.</p>
-          <span className="brief-footnote">פירוט רכישה ומימוש גיפטקארדים מוצג בכל תיק</span>
+          <p>סכום ההזמנות בהתראות פתוחות, לא נזק מאומת.</p>
         </div>
         <div className="activity-summary">
-          <div className="activity-stat"><span className="activity-icon"><CheckCircle2 size={20} aria-hidden="true" /></span><div><span>נסגרו אוטומטית לפי החוקים</span><strong>{automaticallyClosed}</strong><small>{merchantDecisions} נסגרו בהחלטת בעל החנות</small></div></div>
-          <div className="activity-stat"><span className="activity-icon"><Mail size={20} aria-hidden="true" /></span><div><span>התראות שנשלחו באימייל</span><strong>{deliveries.filter((item) => ["sent", "simulated"].includes(item.status)).length}</strong><button className="text-button" onClick={onOpenNotifications}>הגדרות משלוח <ChevronLeft size={14} /></button></div></div>
+          <div className="activity-stat"><CheckCircle2 size={18} aria-hidden="true" /><div><span>נסגרו לפי החוקים</span><strong>{automaticallyClosed}</strong><small>{merchantDecisions} בהחלטת בעל החנות</small></div></div>
+          <div className="activity-stat"><Mail size={18} aria-hidden="true" /><div><span>התראות אימייל שנשלחו</span><strong>{deliveries.filter((item) => ["sent", "simulated"].includes(item.status)).length}</strong><button className="text-button" onClick={onOpenNotifications}>הגדרות <ChevronLeft size={14} /></button></div></div>
         </div>
       </section>
       <section className="overview-notes" aria-label="ניטור והתראות">
-        <button onClick={onOpenNotifications}><Mail size={19} aria-hidden="true" /><span><strong>מי מקבל התראה?</strong><small>ניהול נמענים ורמות סיכון לשליחה</small></span><ChevronLeft size={17} aria-hidden="true" /></button>
-        <button onClick={onShowAll}><UsersRound size={19} aria-hidden="true" /><span><strong>ניטור רכישות עובדים</strong><small>{cases.some((item) => item.evidence.some((evidence) => evidence.source === "employee")) ? "נמצאו תיקים עם התאמה לעובדים" : "לא נמצאו תיקים עם התאמה לעובדים"}</small></span><ChevronLeft size={17} aria-hidden="true" /></button>
+        <button onClick={onOpenNotifications}><Mail size={18} aria-hidden="true" /><span><strong>נמעני התראות</strong></span><ChevronLeft size={16} aria-hidden="true" /></button>
+        <button onClick={onShowAll}><UsersRound size={18} aria-hidden="true" /><span><strong>רכישות עובדים</strong><small>{cases.some((item) => item.evidence.some((evidence) => evidence.source === "employee")) ? "נמצאו התאמות" : "ללא התאמות"}</small></span><ChevronLeft size={16} aria-hidden="true" /></button>
       </section>
     </> : null}
 
@@ -462,7 +458,7 @@ function Overview({ cases, ledger, query, setQuery, severity, setSeverity, store
       <div><span>פתוחות</span><strong>{activeCases.length}</strong></div>
       <div><span>קריטיות</span><strong>{activeCases.filter((item) => item.severity === "critical").length}</strong></div>
       <div><span>גבוהות</span><strong>{activeCases.filter((item) => item.severity === "high").length}</strong></div>
-      <p>ההתראות מקובצות לפי אימייל, IP או טלפון כדי שתבדוק דפוס אחד במקום עשרות שורות.</p>
+      <p>מקובצות לפי פרטי זיהוי משותפים</p>
     </section> : null}
 
     <section className="case-section">
@@ -471,7 +467,6 @@ function Overview({ cases, ledger, query, setQuery, severity, setSeverity, store
         <label className="search-box"><Search size={16} /><span className="sr-only">חיפוש</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="חיפוש הזמנה, לקוח או סיבה" /></label>
         <select value={severity} onChange={(event) => setSeverity(event.target.value as Severity | "all")} aria-label="סינון לפי חומרה"><option value="all">כל החומרות</option><option value="critical">קריטי</option><option value="high">גבוה</option><option value="medium">בינוני</option><option value="low">נמוך</option></select>
         <select value={store} onChange={(event) => setStore(event.target.value)} aria-label="סינון לפי חנות"><option value="all">כל החנויות</option>{stores.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select>
-        <button className="filter-button"><Filter size={15} /> מסננים נוספים</button>
       </div>
       <div className="case-cluster-list">
         {displayCases.length > 0 ? <div className="case-queue-head" aria-hidden="true"><span>חומרה</span><span>זהות וסיבת ההתראה</span><span>הזמנות</span><span>סכום</span><span>מצב</span></div> : null}

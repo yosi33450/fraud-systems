@@ -1,5 +1,27 @@
 # Shield Ledger — soft-focus merchant workspace
 
+## Merchant refinement — explicit navigation, less copy
+
+This revision supersedes the quick-navigation and overview details below.
+The previous collapse action worked at 1280px and 1920px, but lived outside the
+sidebar and was difficult to discover. Move it into the persistent sidebar footer,
+with a visible Hebrew label in expanded mode and an accessible expand icon in rail
+mode. Define sidebar width and matching content margin in the authoritative CSS,
+not only through the historical layout layer. Preserve mobile overlay behavior.
+
+- Remove the quick-navigation control, dialog, keyboard listener and unused styles.
+- Replace the inert organization control with real navigation to the existing stores
+  screen. Remove the inert store dropdown, unused extra-filter control and decorative
+  account chevron; the working store/severity filters and all destinations remain.
+- Follow Mosaic's compact summary, persistent sidebar expansion control, and continuous
+  table pattern, with the existing Hebrew type, restrained green, rounded surfaces
+  and real data. No reference assets, template code or fabricated charts are imported.
+- Shorten the overview heading and connection copy. Keep financial and automatic-
+  closure qualifications visible. Secondary shortcuts become quiet inline actions.
+- Reduce summary height, align supporting activity figures side by side, keep table
+  title and counts together, and give the queue more of the first viewport.
+- Backend, rule evaluation, order linking, calculations and stored data are unchanged.
+
 ## Mosaic-inspired workspace revision
 
 Reference requested by the merchant: https://github.com/cruip/tailwind-dashboard-template

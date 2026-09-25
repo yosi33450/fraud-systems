@@ -2,15 +2,13 @@
 
 import { useEffect, useState, type Dispatch, type SetStateAction } from "react";
 import { createPortal } from "react-dom";
-import { ChevronLeft, Search, X, type LucideIcon } from "lucide-react";
-import { CenteredDialog } from "@/components/centered-dialog";
+import type { LucideIcon } from "lucide-react";
 
 const sidebarPreferenceKey = "shield-ledger:sidebar-collapsed";
 
 /** Presentation preferences only; no tenant records or account settings are changed. */
 export function useWorkspaceNavigation(mobileOpen: boolean, setMobileOpen: Dispatch<SetStateAction<boolean>>) {
   const [collapsed, setCollapsed] = useState(false);
-  const [searchOpen, setSearchOpen] = useState(false);
 
   useEffect(() => {
     try { setCollapsed(localStorage.getItem(sidebarPreferenceKey) === "true"); } catch { /* Storage may be disabled. */ }
@@ -21,18 +19,6 @@ export function useWorkspaceNavigation(mobileOpen: boolean, setMobileOpen: Dispa
     setCollapsed(next);
     try { localStorage.setItem(sidebarPreferenceKey, String(next)); } catch { /* Keep the session preference. */ }
   };
-
-  useEffect(() => {
-    const shortcut = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k" && !document.querySelector("dialog[open]")) {
-        event.preventDefault();
-        setMobileOpen(false);
-        setSearchOpen(true);
-      }
-    };
-    document.addEventListener("keydown", shortcut);
-    return () => document.removeEventListener("keydown", shortcut);
-  }, [setMobileOpen]);
 
   useEffect(() => {
     if (!mobileOpen) return;
@@ -75,7 +61,7 @@ export function useWorkspaceNavigation(mobileOpen: boolean, setMobileOpen: Dispa
     };
   }, [mobileOpen, setMobileOpen]);
 
-  return { collapsed, toggleCollapsed, searchOpen, setSearchOpen };
+  return { collapsed, toggleCollapsed };
 }
 
 export function SidebarItem({ label, Icon, active, count, collapsed, onClick }: {
@@ -107,33 +93,4 @@ export function SidebarItem({ label, Icon, active, count, collapsed, onClick }: 
     </button>
     {tooltip && collapsed ? createPortal(<span className="sidebar-tooltip" style={tooltip} aria-hidden="true">{label}{count ? ` · ${count}` : ""}</span>, document.body) : null}
   </>;
-}
-
-export type WorkspaceDestination = { id: string; label: string; Icon: LucideIcon };
-
-export function WorkspaceQuickNavigation({ destinations, current, onNavigate, onClose }: {
-  destinations: WorkspaceDestination[]; current: string; onNavigate: (id: string) => void; onClose: () => void;
-}) {
-  const [query, setQuery] = useState("");
-  const matches = destinations.filter((item) => item.label.includes(query.trim()));
-  const select = (id: string) => { onNavigate(id); onClose(); };
-  return <CenteredDialog label="מעבר מהיר בין מסכים" className="workspace-search-dialog" onClose={onClose}>
-    <header className="workspace-search-header"><Search size={21} aria-hidden="true" /><input autoFocus aria-label="חיפוש מסך במערכת" placeholder="לאן לעבור?" value={query} onChange={(event) => setQuery(event.target.value)}
-      onKeyDown={(event) => {
-        if (event.key === "Enter" && matches.length) { event.preventDefault(); select(matches[0].id); }
-        if (event.key === "ArrowDown") { event.preventDefault(); event.currentTarget.closest("dialog")?.querySelector<HTMLButtonElement>(".workspace-search-result")?.focus(); }
-      }} /><button className="icon-button" onClick={onClose} aria-label="סגירת חיפוש"><X size={18} /></button></header>
-    <div className="workspace-search-results" onKeyDown={(event) => {
-      if (!["ArrowDown", "ArrowUp"].includes(event.key)) return;
-      event.preventDefault();
-      const buttons = [...event.currentTarget.querySelectorAll<HTMLButtonElement>(".workspace-search-result")];
-      const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
-      buttons[(index + (event.key === "ArrowDown" ? 1 : -1) + buttons.length) % buttons.length]?.focus();
-    }}>
-      <p>מסכי המערכת</p>
-      {matches.map(({ id, label, Icon }) => <button className="workspace-search-result" key={id} onClick={() => select(id)}><Icon size={19} aria-hidden="true" /><span>{label}</span>{id === current ? <small>המסך הנוכחי</small> : null}<ChevronLeft size={16} aria-hidden="true" /></button>)}
-      {!matches.length ? <div className="workspace-search-empty">לא נמצא מסך בשם הזה. נסה למשל ״גיפט״ או ״חוק״.</div> : null}
-    </div>
-    <footer className="workspace-search-footer">חצים למעבר · Enter לפתיחה · Esc לסגירה</footer>
-  </CenteredDialog>;
 }
