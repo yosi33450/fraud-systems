@@ -1,4 +1,40 @@
-# Shield Ledger — merchant operations UI
+# Shield Ledger — soft-focus merchant workspace
+
+## Revision after merchant feedback (2026-09-25)
+
+The previous flat-ledger direction was rejected: excessive lines, square controls,
+and equal-weight headings/numbers made the overview difficult to parse. This revision
+supersedes its radius, elevation and overview layout rules below.
+
+Direction: **soft focus**. Apply Apple's clarity, hierarchy and generous target-size
+principles to a Hebrew merchant tool, not an imitation of a native Apple application.
+Impeccable's product guidance keeps real evidence, actions and predictable behavior
+central. Keep locally bundled Heebo: its Hebrew and numerals share a consistent voice,
+without depending on proprietary system fonts or loading a second decorative family.
+
+- Open work is the visual anchor: a soft sage surface, 52px count, explicitly labeled
+  critical count, and a single action into the existing investigation queue.
+- Money has its own white surface, 34px tabular figure, and a clear distinction between
+  order totals and confirmed loss. Calculations are unchanged.
+- Automatic rule closures and email delivery are secondary, grouped in one surface.
+  Never describe automatic closures as merchant decisions.
+- Replace the unused chart placeholder and repeated count with two compact navigation
+  rows for email configuration and employee-linked cases. No functional chart existed.
+- Radius: 24px primary surfaces/dialogs, 18px supporting groups, 12px inputs, capsule
+  action buttons, circular icon targets. Keep internal table rows continuous.
+- Surfaces: #f3f5f6 canvas, white content/navigation, #e3efe8 open-work emphasis.
+  Primary green and semantic risk colors remain unchanged. Solid surfaces, no glass.
+- Modest surface elevation (3px / 16px at 3.5% opacity); no border + heavy shadow stack.
+- Keep a light-only theme in this revision to preserve the existing product's scope.
+- Desktop uses a three-part brief; tablet groups supporting activity below; mobile
+  places the primary action beside the count and retains all supporting figures.
+- The same round controls, grouped summaries and surface tokens propagate to the
+  ledger, rules, stores, settings, forms and centered investigation windows.
+- Motion is limited to 160ms state transitions and subtle button press feedback.
+  Existing keyboard focus, reduced-motion handling and native dialog behavior remain.
+
+Verification for this revision is separate from the prior QA record below. No API,
+data, risk, matching, case grouping, authentication or persistence code is changed.
 
 ## Scope and audit (2026-09-25)
 

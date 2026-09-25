@@ -419,21 +419,32 @@ function Overview({ cases, ledger, query, setQuery, severity, setSeverity, store
   const clusters = useMemo(() => clusterCases(displayCases), [displayCases]);
   const selectedCluster = clusters.find((cluster) => cluster.id === selectedClusterId);
   return <div className={`page-content product-page ${casesOnly ? "evidence-workspace" : "overview-workspace"}`}>
-    <PageHeading eyebrow={casesOnly ? "תור החלטות" : "מרכז החלטות"} title={casesOnly ? "התראות וחקירות" : hasStores ? "מה דורש טיפול עכשיו" : "חבר את חנות Shopify הראשונה"} description={casesOnly ? "כל הזמנה חשודה נשארת כאן עד שבעל החנות מקבל החלטה." : hasStores ? `יש ${cases.filter((item) => ["new", "review", "action"].includes(item.status)).length} תיקים פתוחים. המערכת מתריעה — ההחלטה תמיד נשארת אצלך.` : "לא נטען מידע לדוגמה. לאחר החיבור יוצגו כאן רק הזמנות ונתונים אמיתיים מהחנות שלך."} action={hasStores ? <button className="secondary-button" onClick={() => void onRefresh()} disabled={refreshing}><RefreshCcw size={15} className={refreshing ? "spin" : ""} /> {refreshing ? "מסנכרן…" : "רענון נתונים"}</button> : <button className="primary-button" onClick={onOpenStores}><Plus size={16} /> חיבור חנות</button>} />
+    <PageHeading eyebrow={casesOnly ? "תור החלטות" : "מרכז החלטות"} title={casesOnly ? "התראות וחקירות" : hasStores ? "תמונת המצב שלך" : "חבר את חנות Shopify הראשונה"} description={casesOnly ? "כל הזמנה חשודה נשארת כאן עד שבעל החנות מקבל החלטה." : hasStores ? "ההתראות, ההזמנות וההחלטות — במקום אחד." : "לא נטען מידע לדוגמה. לאחר החיבור יוצגו כאן רק הזמנות ונתונים אמיתיים מהחנות שלך."} action={hasStores ? <button className="secondary-button" onClick={() => void onRefresh()} disabled={refreshing}><RefreshCcw size={15} className={refreshing ? "spin" : ""} /> {refreshing ? "מסנכרן…" : "רענון נתונים"}</button> : <button className="primary-button" onClick={onOpenStores}><Plus size={16} /> חיבור חנות</button>} />
 
     {!casesOnly && !hasStores ? <section className="connection-empty"><div className="connection-empty-icon"><StoreIcon size={28} /></div><div><span className="eyebrow">מתחילים מנתונים אמיתיים</span><h2>סביבת העבודה נקייה ומוכנה לחיבור</h2><p>לא יופיעו עסקאות, עובדים, התראות או נתוני לקוחות עד שחנות Shopify אמיתית תחובר.</p></div><ol><li><strong>1</strong><span>מחברים חנות ומאשרים גישה להזמנות</span></li><li><strong>2</strong><span>בוחרים חוקי סיכון ונמעני אימייל</span></li><li><strong>3</strong><span>הזמנות חדשות נבדקות בזמן אמת</span></li></ol><button className="primary-button" onClick={onOpenStores}>עבור לחיבור חנות <ChevronLeft size={15} /></button></section> : null}
 
     {!casesOnly && hasStores ? <>
-      <section className="metric-grid" aria-label="מדדי סיכון">
-        <Metric icon={<ShieldAlert />} label="ממתינים להחלטה" value={String(cases.filter((item) => ["new", "review", "action"].includes(item.status)).length)} detail={`${cases.filter((item) => item.severity === "critical" && ["new", "review", "action"].includes(item.status)).length} דורשים טיפול מיידי`} tone="critical" />
-        <Metric icon={<Fingerprint />} label="סכום בהזמנות חשודות" value={formatCurrency(cases.filter((item) => ["new", "review", "action"].includes(item.status)).reduce((sum, item) => sum + item.amount, 0))} detail="בתיקים שעדיין פתוחים" />
-        <Metric icon={<Mail />} label="התראות לבעלי החנות" value={String(deliveries.filter((item) => ["sent", "simulated"].includes(item.status)).length)} detail="נשלחו באימייל" tone="warning" />
-        <Metric icon={<CheckCircle2 />} label="נסגרו אוטומטית" value={String(automaticallyClosed)} detail={`${merchantDecisions} נסגרו בהחלטת בעל החנות`} tone="success" />
+      <section className="overview-brief" aria-label="תמונת מצב">
+        <div className="attention-summary">
+          <div className="brief-label"><span className="brief-icon"><ShieldAlert size={21} aria-hidden="true" /></span><h2>ממתינים לבדיקה שלך</h2></div>
+          <strong className="attention-total">{activeCases.length}</strong>
+          <div className="attention-context"><span>תיקים פתוחים</span><span className="urgent-count"><ShieldAlert size={14} aria-hidden="true" />{activeCases.filter((item) => item.severity === "critical").length} קריטיים</span></div>
+          <button className="primary-button" onClick={onShowAll}>פתיחת ההתראות <ChevronLeft size={17} /></button>
+        </div>
+        <div className="exposure-summary">
+          <div className="brief-label"><h2>סכום ההזמנות החשודות</h2><Fingerprint size={20} aria-hidden="true" /></div>
+          <strong className="exposure-total"><bdi>{formatCurrency(activeCases.reduce((sum, item) => sum + item.amount, 0))}</bdi></strong>
+          <p>סכום ההזמנות בתיקים הפתוחים.<br />לא סכום נזק או הונאה מאומתת.</p>
+          <span className="brief-footnote">פירוט רכישה ומימוש גיפטקארדים מוצג בכל תיק</span>
+        </div>
+        <div className="activity-summary">
+          <div className="activity-stat"><span className="activity-icon"><CheckCircle2 size={20} aria-hidden="true" /></span><div><span>נסגרו אוטומטית לפי החוקים</span><strong>{automaticallyClosed}</strong><small>{merchantDecisions} נסגרו בהחלטת בעל החנות</small></div></div>
+          <div className="activity-stat"><span className="activity-icon"><Mail size={20} aria-hidden="true" /></span><div><span>התראות שנשלחו באימייל</span><strong>{deliveries.filter((item) => ["sent", "simulated"].includes(item.status)).length}</strong><button className="text-button" onClick={onOpenNotifications}>הגדרות משלוח <ChevronLeft size={14} /></button></div></div>
+        </div>
       </section>
-      <section className="signal-row">
-        <div className="signal-card"><div className="signal-kicker"><Mail size={16} /> התראות לבעלים</div><strong>התראה נשלחת מיד על סיכון גבוה או קריטי</strong><p>בעל החנות מקבל אימייל עם ההזמנה והסיבה, ואז מסמן בבדיקה, טופל, תקין או הונאה.</p><button onClick={onOpenNotifications}>הגדר נמענים <ChevronLeft size={14} /></button></div>
-        <div className="signal-card employee-signal"><div className="signal-kicker"><UsersRound size={16} /> ניטור עובדים</div><strong>{cases.some((item) => item.evidence.some((evidence) => evidence.source === "employee")) ? "נמצאו מקרים הקשורים לעובדים" : "לא נמצאו מקרים הקשורים לעובדים"}</strong><p>מקרים יוצגו רק לאחר הוספת כתובות עובדים וזיהוי התאמה להזמנה אמיתית.</p><button onClick={() => onShowAll()}>לכל התיקים <ChevronLeft size={14} /></button></div>
-        <div className="mini-chart-card"><div><span>התראות פתוחות</span><strong>{cases.filter((item) => ["new", "review", "action"].includes(item.status)).length}</strong></div><div className="empty-mini-chart">התרשים יתמלא עם קבלת הזמנות</div></div>
+      <section className="overview-notes" aria-label="ניטור והתראות">
+        <button onClick={onOpenNotifications}><Mail size={19} aria-hidden="true" /><span><strong>מי מקבל התראה?</strong><small>ניהול נמענים ורמות סיכון לשליחה</small></span><ChevronLeft size={17} aria-hidden="true" /></button>
+        <button onClick={onShowAll}><UsersRound size={19} aria-hidden="true" /><span><strong>ניטור רכישות עובדים</strong><small>{cases.some((item) => item.evidence.some((evidence) => evidence.source === "employee")) ? "נמצאו תיקים עם התאמה לעובדים" : "לא נמצאו תיקים עם התאמה לעובדים"}</small></span><ChevronLeft size={17} aria-hidden="true" /></button>
       </section>
     </> : null}
 
