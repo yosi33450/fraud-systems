@@ -939,3 +939,281 @@ body { font-family: "Noto Sans Hebrew Variable", "Segoe UI", sans-serif; }
   .decision-actions button { width: 100%; padding-inline: 8px; font-size: 11px; }
   .decision-actions .danger-button { grid-column: 1 / -1; }
 }
+
+/* Unified product system — every operational screen follows the Evidence Ledger language. */
+:root {
+  --product-canvas: #f4f6f4;
+  --product-surface: #ffffff;
+  --product-subtle: #eef2ef;
+  --product-ink: #14231d;
+  --product-secondary: #4d5f57;
+  --product-muted: #66776f;
+  --product-border: #d6ded9;
+  --product-border-strong: #c5d0ca;
+  --product-action: #08785a;
+  --product-action-hover: #06684e;
+  --radius-control: 6px;
+  --radius-panel: 10px;
+}
+
+html, body { background: var(--product-canvas); }
+body { color: var(--product-ink); }
+h1, h2, h3 { text-wrap: balance; }
+p { text-wrap: pretty; }
+
+.topbar { border-color: var(--product-border); background: rgb(244 246 244 / .96); box-shadow: none; }
+.topbar-context { color: var(--product-secondary); }
+.icon-button, .store-pill { border-color: var(--product-border); border-radius: var(--radius-control); box-shadow: none; }
+.icon-button:hover, .store-pill:hover { border-color: var(--product-border-strong); background: var(--product-subtle); }
+
+.product-page { width: min(1560px, 100%); padding: 30px 32px 44px; }
+.product-page .page-heading { align-items: center; margin-bottom: 20px; }
+.product-page .page-heading .eyebrow { display: none; }
+.product-page .page-heading h1 { margin: 0 0 4px; font-size: 28px; line-height: 1.25; font-weight: 740; letter-spacing: -.035em; }
+.product-page .page-heading p { max-width: 72ch; color: var(--product-secondary); font-size: 14px; line-height: 1.55; }
+.product-page .page-heading > button { flex: 0 0 auto; }
+
+.primary-button, .secondary-button, .danger-button, .filter-button,
+.store-actions button, .rule-editor button, .connect-dialog button {
+  border-radius: var(--radius-control);
+  box-shadow: none;
+  transition: color .18s ease, background-color .18s ease, border-color .18s ease, opacity .18s ease;
+}
+.primary-button { border-color: var(--product-action); background: var(--product-action); }
+.primary-button:hover { border-color: var(--product-action-hover); background: var(--product-action-hover); filter: none; }
+.primary-button:active, .danger-button:active { transform: translateY(1px); }
+.primary-button:disabled, .secondary-button:disabled, .danger-button:disabled { opacity: .48; cursor: not-allowed; }
+.secondary-button { border-color: var(--product-border); }
+.secondary-button:hover { border-color: var(--product-border-strong); background: var(--product-subtle); }
+
+.product-page .compact-overview,
+.product-page .metric-grid {
+  display: grid;
+  gap: 0;
+  margin-bottom: 16px;
+  overflow: hidden;
+  border: 1px solid var(--product-border);
+  border-radius: var(--radius-panel);
+  background: var(--product-surface);
+}
+.product-page .compact-overview { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.product-page .compact-overview > div {
+  min-height: 88px;
+  padding: 16px 20px;
+  border: 0;
+  border-left: 1px solid var(--product-border);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.product-page .compact-overview > div:last-child { border-left: 0; }
+.product-page .compact-overview span { color: var(--product-muted); font-size: 12px; }
+.product-page .compact-overview strong { margin: 2px 0; font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 21px; font-weight: 500; }
+.product-page .compact-overview small { color: var(--product-secondary); font-size: 11px; }
+
+.product-page .metric-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.product-page .metric-card {
+  min-height: 106px;
+  padding: 18px 20px;
+  border: 0;
+  border-left: 1px solid var(--product-border);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.product-page .metric-card:last-child { border-left: 0; }
+.product-page .metric-icon { width: 38px; height: 38px; border-radius: 7px; }
+.product-page .metric-card strong { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 22px; font-weight: 500; }
+.product-page .metric-card span { color: var(--product-muted); font-size: 12px; }
+.product-page .metric-card small { color: var(--product-secondary); font-size: 11px; }
+
+.product-page .case-section,
+.product-page .recommendations,
+.product-page .notification-settings,
+.product-page .delivery-panel {
+  overflow: hidden;
+  border: 1px solid var(--product-border);
+  border-radius: var(--radius-panel);
+  background: var(--product-surface);
+  box-shadow: none;
+  backdrop-filter: none;
+}
+.product-page .section-heading { min-height: 64px; padding: 13px 20px; }
+.product-page .section-heading h2,
+.product-page .section-heading h3 { font-size: 17px; font-weight: 720; }
+.product-page .section-heading span { color: var(--product-muted); font-size: 12px; }
+.product-page .empty-state { min-height: 280px; gap: 7px; padding: 32px; color: var(--product-muted); text-align: center; }
+.product-page .empty-state svg { margin-bottom: 5px; color: var(--product-action); }
+.product-page .empty-state strong { font-size: 16px; }
+.product-page .empty-state span { max-width: 54ch; font-size: 13px; line-height: 1.55; }
+
+.overview-workspace .metric-grid { margin-bottom: 12px; }
+.overview-workspace .signal-row { gap: 12px; margin-bottom: 18px; }
+.overview-workspace .signal-card,
+.overview-workspace .mini-chart-card {
+  min-height: 142px;
+  padding: 18px 20px;
+  border: 1px solid var(--product-border);
+  border-radius: var(--radius-panel);
+  background: var(--product-surface);
+  box-shadow: none;
+}
+.overview-workspace .signal-card::after { display: none; }
+.overview-workspace .signal-kicker { margin-bottom: 10px; }
+.overview-workspace .signal-card p { font-size: 12px; }
+.overview-workspace .empty-mini-chart { border-radius: 6px; background: #fafbfa; }
+
+.product-page .case-table th { height: 42px; padding-inline: 18px; color: var(--product-muted); background: #f8faf8; border-color: var(--product-border); font-size: 11px; }
+.product-page .case-table td { height: 62px; padding-inline: 18px; border-color: #e4e9e6; color: var(--product-secondary); font-size: 13px; }
+.product-page .case-table tbody tr:hover { background: #f7faf8; }
+
+/* Stores become an operational ledger rather than a gallery of cards. */
+.stores-page .store-grid { display: block; overflow: hidden; border: 1px solid var(--product-border); border-radius: var(--radius-panel); background: #fff; }
+.stores-page .store-card { display: grid; grid-template-columns: minmax(220px, .65fr) minmax(0, 1.35fr); gap: 0 28px; padding: 22px 24px; border: 0; border-bottom: 1px solid var(--product-border); border-radius: 0; background: transparent; box-shadow: none; }
+.stores-page .store-card:last-child { border-bottom: 0; }
+.stores-page .store-card:hover { border-color: var(--product-border); box-shadow: none; }
+.stores-page .store-card-top { grid-column: 1 / -1; align-items: center; margin-bottom: 15px; padding-bottom: 14px; border-bottom: 1px solid #e3e9e5; }
+.stores-page .store-logo { width: 38px; height: 38px; border-radius: 7px; }
+.stores-page .connection-state { min-height: 28px; border-radius: 5px; font-size: 11px; }
+.stores-page .store-card h2 { grid-column: 1; margin: 3px 0; font-size: 20px; }
+.stores-page .store-card > p { grid-column: 1; margin-bottom: 18px; font-size: 11px; }
+.stores-page .store-stats { grid-column: 2; grid-row: 2 / span 3; display: grid; grid-template-columns: 1fr 1fr; gap: 0; margin: 0; border: 1px solid var(--product-border); border-radius: 8px; }
+.stores-page .store-stats > div { min-height: 66px; padding: 12px 14px; border-bottom: 1px solid #e3e9e5; border-left: 1px solid #e3e9e5; border-radius: 0; background: transparent; }
+.stores-page .store-stats > div:nth-child(even) { border-left: 0; }
+.stores-page .store-stats > div:nth-last-child(-n+2) { border-bottom: 0; }
+.stores-page .store-stats span { font-size: 11px; }
+.stores-page .store-stats strong { font-size: 13px; }
+.stores-page .store-actions { grid-column: 1; align-self: end; }
+.stores-page .store-actions button { min-height: 40px; border-color: var(--product-border); }
+.stores-page .realtime-notice { grid-column: 1; padding: 12px; border-radius: 6px; }
+.stores-page .security-note { padding: 15px 18px; border-color: #cddbd4; border-radius: 8px; background: #edf6f2; }
+.stores-page .security-note strong { font-size: 13px; }
+.stores-page .security-note p { font-size: 12px; }
+
+/* Employee monitoring and forms */
+.employees-page .employee-form { padding: 18px 20px; border-color: var(--product-border); border-radius: var(--radius-panel); box-shadow: none; }
+.employees-page .employee-form label { color: var(--product-secondary); font-size: 12px; }
+.employees-page .employee-form input { min-height: 42px; border-color: var(--product-border-strong); border-radius: var(--radius-control); font-size: 14px; }
+
+/* Rules are shown as one configurable rulebook. */
+.rules-page .rule-summary { min-height: 76px; grid-template-columns: repeat(3, 1fr) auto; gap: 0; margin-bottom: 14px; padding: 0 18px; border-color: var(--product-border); border-radius: var(--radius-panel); box-shadow: none; }
+.rules-page .rule-summary > div { justify-content: center; min-height: 52px; padding-inline: 18px; border-color: var(--product-border); }
+.rules-page .rule-summary span { font-size: 11px; }
+.rules-page .rule-summary strong { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 18px; font-weight: 500; }
+.rules-page .recommendations { margin-bottom: 14px; padding: 0; }
+.rules-page .recommendation-heading { min-height: 62px; display: flex; align-items: center; padding: 13px 18px; border-bottom: 1px solid var(--product-border); }
+.rules-page .recommendation-heading strong { font-size: 15px; }
+.rules-page .recommendation-heading span { font-size: 12px; }
+.rules-page .recommendation-grid { display: block; margin: 0; }
+.rules-page .recommendation-grid article { min-height: 72px; padding: 13px 18px; border: 0; border-bottom: 1px solid #e3e9e5; border-radius: 0; background: transparent; }
+.rules-page .recommendation-grid article:last-child { border-bottom: 0; }
+.rules-page .recommendation-grid strong { font-size: 13px; }
+.rules-page .recommendation-grid p { font-size: 11px; }
+.rules-page .rules-list { gap: 0; overflow: hidden; border: 1px solid var(--product-border); border-radius: var(--radius-panel); background: #fff; }
+.rules-page .condition-rules article { min-height: 118px; padding: 16px 18px; border: 0; border-bottom: 1px solid var(--product-border); border-radius: 0; box-shadow: none; }
+.rules-page .condition-rules article:last-child { border-bottom: 0; }
+.rules-page .condition-rules article:hover { border-color: var(--product-border); background: #f9fbfa; box-shadow: none; }
+.rules-page .condition-preview > span { border-radius: 4px; background: #f6f8f7; }
+.rules-page .condition-preview .logic-word { background: #e8f4ef; }
+.rules-page .rule-main h3 { font-size: 14px; }
+.rules-page .rule-main p { font-size: 11px; }
+.rules-page .rule-recalculation-notice { border-radius: 8px; box-shadow: none; }
+
+.rule-editor { background: var(--product-canvas); box-shadow: 18px 0 54px rgb(13 25 20 / .18); }
+.rule-editor > header, .rule-editor > footer { border-color: var(--product-border); background: #fff; }
+.rule-editor > header .eyebrow { color: var(--product-action); font-size: 11px; letter-spacing: 0; }
+.rule-editor h2 { font-size: 20px; }
+.condition-editor { border-color: var(--product-border); border-radius: 8px; }
+.condition-number { border-radius: 5px; font-family: "IBM Plex Mono", ui-monospace, monospace; }
+.rule-outcome { border-color: #cbded5; border-radius: 8px; background: #edf6f2; }
+.field-label input, .field-label select, .field-label textarea,
+.condition-editor select, .condition-editor input, .rule-outcome select { border-radius: var(--radius-control); }
+
+/* Notification settings use the same form and ledger patterns. */
+.notifications-page .notification-layout { gap: 14px; }
+.notifications-page .notification-settings { margin: 0; padding: 20px; }
+.notifications-page .delivery-panel { margin: 0; }
+.notifications-page .notification-master { margin-bottom: 20px; border-color: var(--product-border); }
+.notifications-page .notification-master strong { font-size: 15px; }
+.notifications-page .notification-master span { font-size: 12px; }
+.notifications-page .severity-options { gap: 0; overflow: hidden; border: 1px solid var(--product-border); border-radius: 8px; }
+.notifications-page .severity-option { min-height: 64px; padding: 10px 12px; border: 0; border-left: 1px solid var(--product-border); border-radius: 0; }
+.notifications-page .severity-option:last-child { border-left: 0; }
+.notifications-page .severity-option.selected { box-shadow: inset 0 -2px var(--product-action); background: #f2f8f5; }
+.notifications-page .notification-example { border: 1px solid var(--product-border); border-radius: 7px; background: #f8faf8; }
+.notifications-page .delivery-list article { min-height: 62px; padding: 12px 16px; border-color: #e3e9e5; }
+.notifications-page .delivery-icon { border-radius: 6px; }
+.notifications-page .delivery-list strong { font-size: 12px; }
+.notifications-page .delivery-list span { font-size: 11px; }
+
+/* Shared fraud network: one strong explanatory surface, then the report ledger. */
+.network-page .network-hero { min-height: 248px; gap: 30px; margin-bottom: 14px; padding: 28px 32px; border: 0; border-radius: var(--radius-panel); background: #15271f; box-shadow: none; }
+.network-page .network-hero h2 { font-size: 22px; }
+.network-page .network-hero p { font-size: 13px; }
+.network-page .network-hero .eyebrow { color: #8fd2b8; font-size: 11px; letter-spacing: 0; }
+.network-page .network-center { width: 96px; height: 96px; border-color: #456258; background: #1d342a; box-shadow: 0 0 0 16px rgb(255 255 255 / .025); }
+.network-page .network-node { border-radius: 6px; background: #1b3027; }
+.network-page .report-row { min-height: 76px; padding: 13px 18px; border-color: #e3e9e5; }
+.network-page .report-icon { border-radius: 6px; }
+.network-page .identity-chips span { border-radius: 4px; }
+
+.team-page .case-section, .platform-page .case-section { margin-top: 14px; }
+.platform-page .metric-grid { margin-bottom: 14px; }
+
+.empty-panel { border-color: var(--product-border-strong); border-radius: var(--radius-panel); background: #fafbfa; }
+.empty-panel-icon { border-radius: 8px; }
+
+@media (max-width: 1100px) {
+  .product-page .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .product-page .metric-card:nth-child(2) { border-left: 0; }
+  .product-page .metric-card:nth-child(-n+2) { border-bottom: 1px solid var(--product-border); }
+  .stores-page .store-card { grid-template-columns: 1fr; }
+  .stores-page .store-stats { grid-column: 1; grid-row: auto; margin: 12px 0; }
+  .stores-page .store-actions { grid-column: 1; }
+}
+
+@media (max-width: 820px) {
+  .product-page { padding: 24px 18px 36px; }
+  .product-page .page-heading { align-items: flex-start; }
+  .product-page .page-heading h1 { font-size: 26px; }
+  .product-page .signal-row { grid-template-columns: 1fr; }
+  .product-page .mini-chart-card { grid-column: auto; }
+  .network-page .network-hero { grid-template-columns: 1fr; min-height: 0; }
+  .network-page .network-visual { display: none; }
+}
+
+@media (max-width: 600px) {
+  .product-page { padding: 18px 12px 30px; }
+  .product-page .page-heading { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; }
+  .product-page .page-heading h1 { font-size: 23px; }
+  .product-page .page-heading p { font-size: 13px; }
+  .product-page .page-heading > button { display: inline-flex; align-self: start; max-width: 132px; min-height: 40px; padding-inline: 11px; font-size: 12px; }
+  .product-page .compact-overview { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .product-page .compact-overview > div { min-width: 0; min-height: 82px; padding: 12px 9px; }
+  .product-page .compact-overview strong { font-size: 16px; }
+  .product-page .compact-overview span, .product-page .compact-overview small { font-size: 10px; }
+  .product-page .metric-grid { grid-template-columns: 1fr 1fr; }
+  .product-page .metric-card { min-height: 98px; padding: 14px; }
+  .product-page .metric-icon { display: none; }
+  .product-page .metric-card strong { font-size: 18px; }
+  .product-page .section-heading { align-items: flex-start; padding: 13px 14px; }
+  .product-page .section-heading > div { display: block; }
+  .product-page .section-heading span { display: block; margin-top: 3px; }
+  .stores-page .store-card { padding: 16px 14px; }
+  .stores-page .store-stats { grid-template-columns: 1fr; }
+  .stores-page .store-stats > div { border-left: 0; border-bottom: 1px solid #e3e9e5 !important; }
+  .stores-page .store-stats > div:last-child { border-bottom: 0 !important; }
+  .stores-page .store-actions { flex-direction: column; }
+  .rules-page .rule-summary { grid-template-columns: repeat(3, 1fr); padding: 12px 8px; }
+  .rules-page .rule-summary > div { padding-inline: 9px; }
+  .rules-page .rule-summary > button { grid-column: 1 / -1; margin-top: 9px; }
+  .rules-page .recommendation-grid article { align-items: flex-start; flex-direction: column; }
+  .rules-page .condition-rules article { padding: 14px; }
+  .notifications-page .severity-options { display: block; }
+  .notifications-page .severity-option { border-left: 0; border-bottom: 1px solid var(--product-border); }
+  .notifications-page .severity-option:last-child { border-bottom: 0; }
+  .network-page .network-hero { padding: 22px 20px; }
+  .network-page .report-row { grid-template-columns: 38px 1fr; }
+  .network-page .report-row > .severity, .network-page .report-row > span { display: none; }
+  .network-page .report-row > button { grid-column: 2; justify-self: start; }
+}
