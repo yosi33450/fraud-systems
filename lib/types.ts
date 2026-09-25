@@ -15,7 +15,7 @@ export interface Store {
   realtimeStatus?: "active" | "registered" | "configuring" | "setup-required" | "error";
   webhookRegisteredAt?: string;
   lastWebhookAt?: string;
-  giftCardTrackingStatus?: "active" | "shopify-approval-required" | "unavailable";
+  giftCardTrackingStatus?: "active" | "shopify-approval-required" | "permission-required" | "unavailable";
   giftCardsTracked?: number;
   lastGiftCardSyncAt?: string;
 }
