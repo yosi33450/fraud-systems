@@ -29,3 +29,17 @@ The response reports any failed/pending replays (at most ten attempted per call)
 Tests (isolated synthetic fixtures, never written to the application data):
 
     node --experimental-strip-types --test tests/*.test.mjs
+
+## Verification, 2026-09-25
+
+- 37 unit/integration tests and the production build passed.
+- Production policy applied once; 532 existing cases rechecked, 142 newly
+  automatically closed and 18 reopened, leaving 95 active cases.
+- All seven orders from the reported example were automatically closed; the
+  actual hourly counts were one or two, not seven.
+- Private-storage readback confirmed the migration marker, all 13,345 prior
+  orders retained, 621 gift-evidence records retained, and no manual decisions
+  changed. One new real-time order arrived during verification.
+- Authenticated API and browser both showed 95 active cases. Unauthenticated
+  reconciliation returned 401. No runtime errors in the post-deploy scan.
+- These counts are a point-in-time verification, not hard-coded application data.

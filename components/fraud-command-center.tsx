@@ -664,7 +664,7 @@ const conditionSentence = (condition: RiskCondition) => {
   const field = conditionFields.find((item) => item.value === condition.field);
   if (!field) return "תנאי לא ידוע";
   if (field.boolean) return field.label;
-  const window = condition.windowMinutes ? ` בתוך ${condition.windowMinutes % 60 === 0 ? `${condition.windowMinutes / 60} שעות` : `${condition.windowMinutes} דקות`}` : "";
+  const window = condition.windowMinutes ? ` בתוך ${condition.windowMinutes === 60 ? "שעה" : condition.windowMinutes % 60 === 0 ? `${condition.windowMinutes / 60} שעות` : `${condition.windowMinutes} דקות`}` : "";
   const comparison = condition.operator === "gt" ? "יותר מ־" : condition.operator === "eq" ? "בדיוק " : "לפחות ";
   return `${field.label} ${comparison}${condition.value} ${field.suffix ?? ""}${window}`;
 };
