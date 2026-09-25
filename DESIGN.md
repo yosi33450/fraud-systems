@@ -1,5 +1,33 @@
 # Shield Ledger — soft-focus merchant workspace
 
+## Mosaic-inspired workspace revision
+
+Reference requested by the merchant: https://github.com/cruip/tailwind-dashboard-template
+Reviewed its Sidebar.jsx, Header.jsx, Dashboard.jsx and DashboardCard01.jsx. Adopt
+interaction principles, not copied components/assets, sample data, branding, or charts.
+Keep Next.js, Hebrew RTL, Heebo, the green identity and all existing business logic.
+
+- A full 252px sidebar collapses into an 80px icon rail. Sidebar width and main-content
+  offset use the same 240ms ease-out transition; this layout animation is necessary
+  for the explicitly requested resizing behavior. Reduced motion disables it.
+- Save the preference locally, guarded against unavailable storage; never write tenant
+  settings. Mobile navigation stays independent and always opens with full labels.
+- Group destinations into monitoring/investigations and store management. Preserve all
+  destinations. Provide names, active state and counts to assistive tech in either mode;
+  collapsed buttons show tooltips on pointer hover or keyboard focus.
+- Compact sticky header with a current-workspace label and a quick-navigation dialog.
+  Ctrl/Cmd+K, search, arrow-key selection, Enter and Escape work without fetching data.
+- Mobile menu traps focus, dismisses with Escape/backdrop, restores trigger focus,
+  makes background content inert and unlocks cleanly on a desktop breakpoint.
+- Smaller summary padding and figures (44px open cases, 30px money); preserve the
+  exact figures and their meaning. Supporting numbers stay visually secondary.
+- Use 20px main surfaces, compact 68px section headers, 100px investigation rows,
+  64px contextual navigation rows, and consistent page action alignment.
+- Do not import demo financial trends, fake charts, promotional banners, or inert
+  template controls. Existing investigations, rules, scanning and data are untouched.
+
+Typecheck, production build and all 16 existing gift-evidence/summary tests pass.
+
 ## Revision after merchant feedback (2026-09-25)
 
 The previous flat-ledger direction was rejected: excessive lines, square controls,

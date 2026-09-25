@@ -22,6 +22,8 @@ import {
   Mail,
   Menu,
   Network,
+  PanelRightClose,
+  PanelRightOpen,
   Plus,
   PlusCircle,
   Phone,
@@ -44,6 +46,7 @@ import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { SeverityBadge } from "@/components/severity-badge";
 import { GiftCardWorkspace } from "@/components/gift-card-workspace";
 import { CenteredDialog } from "@/components/centered-dialog";
+import { SidebarItem, WorkspaceQuickNavigation, useWorkspaceNavigation } from "@/components/workspace-navigation";
 import { summarizeGiftCluster, type MoneyTotal } from "@/lib/gift-cluster-summary";
 import type { GiftLedger } from "@/lib/gift-card-evidence";
 import { cases as initialCases, employees, rules, stores } from "@/lib/initial-state";
@@ -106,6 +109,7 @@ export function FraudCommandCenter() {
   const [deliveries, setDeliveries] = useState<NotificationDelivery[]>([]);
   const [syncState, setSyncState] = useState<"loading" | "live" | "error">("loading");
   const [mobileNav, setMobileNav] = useState(false);
+  const { collapsed, toggleCollapsed, searchOpen, setSearchOpen } = useWorkspaceNavigation(mobileNav, setMobileNav);
   const [connectOpen, setConnectOpen] = useState(false);
   const deferredQuery = useDeferredValue(query.trim().toLowerCase());
   const realtimeActive = storeData.some((item) => item.realtimeStatus === "active");
@@ -262,44 +266,50 @@ export function FraudCommandCenter() {
   };
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${collapsed ? "sidebar-collapsed" : ""}`}>
       <a className="skip-link" href="#main-content">דלג לתוכן הראשי</a>
       <aside className={`sidebar ${mobileNav ? "sidebar-open" : ""}`} id="primary-navigation" aria-label="ניווט ראשי">
         <div className="brand-block">
           <div className="brand-mark" aria-hidden="true"><Shield size={21} /></div>
-          <div><strong>Shield Ledger</strong><span>מרכז מניעת הונאות</span></div>
+          <div className="brand-copy"><strong>Shield Ledger</strong><span>מרכז מניעת הונאות</span></div>
           <button className="icon-button mobile-only" onClick={() => setMobileNav(false)} aria-label="סגירת תפריט"><X size={18} /></button>
         </div>
-        <button className="tenant-switcher">
+        <button className="tenant-switcher" aria-label="הארגון שלי" title="הארגון שלי">
           <span className="tenant-avatar"><Shield size={16} /></span>
-          <span><strong>הארגון שלי</strong><small>{storeData.length ? `${storeData.length} חנויות מחוברות` : "טרם חוברה חנות"}</small></span>
+          <span className="tenant-copy"><strong>הארגון שלי</strong><small>{storeData.length ? `${storeData.length} חנויות מחוברות` : "טרם חוברה חנות"}</small></span>
           <ChevronDown size={15} aria-hidden="true" />
         </button>
         <nav className="nav-list">
-          {nav.map(({ id, label, Icon, count }) => (
-            <button key={id} className={view === id ? "nav-active" : ""} aria-current={view === id ? "page" : undefined} onClick={() => { setView(id); setMobileNav(false); }}>
-              <Icon size={18} strokeWidth={1.8} aria-hidden="true" /><span>{label}</span>
-              {count && (id !== "cases" || caseData.some((item) => !["resolved", "false-positive"].includes(item.status))) ? <small>{id === "cases" ? caseData.filter((item) => !["resolved", "false-positive"].includes(item.status)).length : count}</small> : null}
-            </button>
-          ))}
+          {[{ title: "ניטור וחקירות", items: nav.slice(0, 3) }, { title: "ניהול החנות", items: nav.slice(3) }].map((group) => <div className="nav-group" key={group.title}>
+            <h2 className="nav-group-title">{group.title}</h2>
+            {group.items.map(({ id, label, Icon, count }) => <SidebarItem key={id} label={label} Icon={Icon} active={view === id} collapsed={collapsed}
+              count={count && (id !== "cases" || caseData.some((item) => !["resolved", "false-positive"].includes(item.status))) ? id === "cases" ? caseData.filter((item) => !["resolved", "false-positive"].includes(item.status)).length : count : undefined}
+              onClick={() => { setView(id); setMobileNav(false); }} />)}
+          </div>)}
         </nav>
         <div className="sidebar-footer">
-          <button aria-current={view === "platform" ? "page" : undefined} onClick={() => { setView("platform"); setMobileNav(false); }}><Gauge size={18} /><span>ניהול הפלטפורמה</span><span className="owner-chip">בעלים</span></button>
-          <button onClick={() => { setView("notifications"); setMobileNav(false); }}><Settings size={18} /><span>הגדרות התראות</span></button>
-          <div className="user-block"><div className="user-avatar"><CircleUserRound size={17} /></div><div><strong>חשבון בעלים</strong><span>בעל הפלטפורמה</span></div><ChevronLeft size={15} /></div>
+          <SidebarItem label="ניהול הפלטפורמה" Icon={Gauge} active={view === "platform"} collapsed={collapsed} onClick={() => { setView("platform"); setMobileNav(false); }} />
+          <SidebarItem label="הגדרות התראות" Icon={Settings} collapsed={collapsed} onClick={() => { setView("notifications"); setMobileNav(false); }} />
+          <div className="user-block" title="חשבון בעלים"><div className="user-avatar"><CircleUserRound size={17} /></div><div className="user-copy"><strong>חשבון בעלים</strong><span>בעל הפלטפורמה</span></div><ChevronLeft size={15} /></div>
         </div>
       </aside>
       {mobileNav ? <button className="mobile-nav-backdrop" aria-label="סגירת תפריט" onClick={() => setMobileNav(false)} /> : null}
 
       <main className="main-content" id="main-content">
         <header className="topbar">
-          <button className="icon-button mobile-menu" onClick={() => setMobileNav(true)} aria-label="פתיחת תפריט" aria-expanded={mobileNav} aria-controls="primary-navigation"><Menu size={20} /></button>
+          <div className="workspace-location">
+            <button className="icon-button desktop-sidebar-toggle" onClick={toggleCollapsed} aria-label={collapsed ? "הרחבת סרגל הצד" : "צמצום סרגל הצד"} title={collapsed ? "הרחבת סרגל הצד" : "צמצום סרגל הצד"} aria-expanded={!collapsed} aria-controls="primary-navigation">{collapsed ? <PanelRightOpen size={20} /> : <PanelRightClose size={20} />}</button>
+            <button id="mobile-navigation-trigger" className="icon-button mobile-menu" onClick={() => setMobileNav(true)} aria-label="פתיחת תפריט" aria-expanded={mobileNav} aria-controls="primary-navigation"><Menu size={20} /></button>
+            <span className="workspace-current">{nav.find((item) => item.id === view)?.label ?? "ניהול הפלטפורמה"}</span>
+          </div>
           <div className={`topbar-context sync-${syncState} ${realtimeNeedsSetup && storeData.length ? "sync-warning" : ""}`}><span className="live-dot" />{syncState === "error" ? "בעיית סנכרון — הנתונים האחרונים נשמרו" : syncState === "loading" ? "מסנכרן נתונים…" : realtimeActive ? "אירועים חדשים נקלטים בזמן אמת" : realtimeRegistered ? "קליטה בזמן אמת הוגדרה — ממתין להזמנה חדשה" : storeData.length ? "נדרש חיבור מחדש לקליטה בזמן אמת" : "ממתין לחיבור חנות"}</div>
           <div className="topbar-actions">
+            <button className="quick-navigation-trigger" onClick={() => setSearchOpen(true)} aria-label="חיפוש מסך במערכת" aria-haspopup="dialog"><Search size={18} aria-hidden="true" /><span>מעבר מהיר</span><kbd dir="ltr">Ctrl K</kbd></button>
             <button className="store-pill"><StoreIcon size={15} /> {storeData.length ? "כל החנויות" : "אין חנות מחוברת"} <ChevronDown size={14} /></button>
             <button className="icon-button notification-button" onClick={() => setView("notifications")} aria-label="הגדרות התראות"><Bell size={19} /><span /></button>
           </div>
         </header>
+        {searchOpen ? <WorkspaceQuickNavigation destinations={[...nav, { id: "platform", label: "ניהול הפלטפורמה", Icon: Gauge }]} current={view} onNavigate={(id) => setView(id as View)} onClose={() => setSearchOpen(false)} /> : null}
 
         {view === "overview" || view === "cases" ? (
           <Overview
