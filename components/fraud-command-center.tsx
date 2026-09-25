@@ -283,8 +283,8 @@ export function FraudCommandCenter() {
           ))}
         </nav>
         <div className="sidebar-footer">
-          <button aria-current={view === "platform" ? "page" : undefined} onClick={() => setView("platform")}><Gauge size={18} /><span>ניהול הפלטפורמה</span><span className="owner-chip">בעלים</span></button>
-          <button onClick={() => setView("notifications")}><Settings size={18} /><span>הגדרות התראות</span></button>
+          <button aria-current={view === "platform" ? "page" : undefined} onClick={() => { setView("platform"); setMobileNav(false); }}><Gauge size={18} /><span>ניהול הפלטפורמה</span><span className="owner-chip">בעלים</span></button>
+          <button onClick={() => { setView("notifications"); setMobileNav(false); }}><Settings size={18} /><span>הגדרות התראות</span></button>
           <div className="user-block"><div className="user-avatar"><CircleUserRound size={17} /></div><div><strong>חשבון בעלים</strong><span>בעל הפלטפורמה</span></div><ChevronLeft size={15} /></div>
         </div>
       </aside>
