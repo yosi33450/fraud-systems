@@ -1,8 +1,9 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
-import { getStoreWebhookSecret, ingestShopifyOrder, resolveStore } from "@/lib/operational-store";
+import { getStoreConnection, getStoreWebhookSecret, ingestShopifyOrder, resolveStore } from "@/lib/operational-store";
 import { notifyStoreOwners } from "@/lib/email-notifications.server";
 import { hydrateOperationalState, persistOperationalState } from "@/lib/persistence.server";
+import { syncShopifyOrderGiftCards } from "@/lib/shopify-sync.server";
 
 export const runtime = "nodejs";
 
@@ -37,12 +38,30 @@ export async function POST(request: Request, context: { params: Promise<{ storeI
   if (!webhookId) return NextResponse.json({ error: "MISSING_WEBHOOK_ID" }, { status: 400 });
   const payload: unknown = JSON.parse(rawBody);
 
-  if (!topic.startsWith("orders/") && topic !== "refunds/create") {
+  if (!topic.startsWith("orders/") && topic !== "order_transactions/create" && topic !== "refunds/create") {
     return NextResponse.json({ accepted: true, ignored: true, storeId, webhookId, topic }, { status: 202 });
   }
 
   try {
-    const result = ingestShopifyOrder({ storeId, webhookId, topic, payload: payload as Parameters<typeof ingestShopifyOrder>[0]["payload"] });
+    let result;
+    if (topic === "order_transactions/create") {
+      const transaction = payload as { order_id?: string | number; admin_graphql_api_order_id?: string };
+      const rawOrderId = transaction.admin_graphql_api_order_id ?? transaction.order_id;
+      if (!rawOrderId) return NextResponse.json({ error: "ORDER_ID_MISSING" }, { status: 400 });
+      const orderId = String(rawOrderId).startsWith("gid://") ? String(rawOrderId) : `gid://shopify/Order/${rawOrderId}`;
+      const connection = getStoreConnection(store.tenantId, storeId);
+      result = await syncShopifyOrderGiftCards({
+        tenantId: store.tenantId,
+        storeId,
+        shopDomain: store.domain,
+        accessToken: connection.accessToken,
+        orderId,
+        webhookId,
+        topic,
+      });
+    } else {
+      result = ingestShopifyOrder({ storeId, webhookId, topic, payload: payload as Parameters<typeof ingestShopifyOrder>[0]["payload"] });
+    }
     const deliveries = result.case ? await notifyStoreOwners(result.case) : [];
     await persistOperationalState();
     return NextResponse.json({ accepted: true, storeId, webhookId, topic, duplicate: result.duplicate, caseId: result.case?.id ?? null, notificationsQueued: deliveries.length }, { status: 202 });

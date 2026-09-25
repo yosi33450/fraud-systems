@@ -2,7 +2,7 @@ import { createHmac, randomUUID } from "node:crypto";
 import { cases as seedCases, employees as seedEmployees, rules as seedRules, stores as seedStores } from "@/lib/initial-state";
 import { evaluateRisk, type OrderSignals } from "@/lib/risk-engine";
 import { isSharedServiceEmail } from "@/lib/customer-identity";
-import type { BlacklistReport, CaseStatus, DashboardSnapshot, Employee, FraudCase, NotificationDelivery, NotificationSettings, RiskRule, Store } from "@/lib/types";
+import type { BlacklistReport, CaseStatus, DashboardSnapshot, Employee, FraudCase, GiftCardRedemption, GiftCardTrace, NotificationDelivery, NotificationSettings, RiskRule, Store } from "@/lib/types";
 
 type ShopifyLineItem = {
   title?: string;
@@ -11,6 +11,18 @@ type ShopifyLineItem = {
   price?: string | number;
   gift_card?: boolean;
   product_type?: string;
+};
+
+export type ShopifyOrderTransaction = {
+  id?: string;
+  gateway?: string;
+  formatted_gateway?: string;
+  account_number?: string;
+  amount?: string | number;
+  status?: string;
+  kind?: string;
+  processed_at?: string;
+  receipt?: unknown;
 };
 
 export type ShopifyOrderPayload = {
@@ -33,6 +45,7 @@ export type ShopifyOrderPayload = {
   client_ip?: string;
   gateway_names?: string[];
   shopify_risk_facts?: string[];
+  transactions?: ShopifyOrderTransaction[];
 };
 
 type StoredOrder = {
@@ -47,6 +60,25 @@ type StoredOrder = {
   ip: string;
   customerId: string;
   createdAt: string;
+};
+
+export type GiftCardRegistryInput = {
+  giftCardId: string;
+  maskedCode: string;
+  lastCharacters: string;
+  initialValue: number;
+  balance: number;
+  purchaseOrderId?: string;
+  purchaseOrderNumber?: string;
+};
+
+type StoredGiftCard = GiftCardRegistryInput & {
+  tenantId: string;
+  storeId: string;
+  purchaserCustomer?: string;
+  purchaserEmail?: string;
+  purchaserCustomerId?: string;
+  redemptions: GiftCardRedemption[];
 };
 
 type AuditEntry = {
@@ -71,6 +103,7 @@ type OperationalState = {
   globalDigests: Set<string>;
   webhookIds: Set<string>;
   orders: StoredOrder[];
+  giftCards: StoredGiftCard[];
   audit: AuditEntry[];
   storeConnections: Map<string, { accessToken: string; expiresAt: string; webhookSecret?: string }>;
 };
@@ -88,6 +121,7 @@ export type PersistedOperationalState = {
   globalDigests: string[];
   webhookIds: string[];
   orders: StoredOrder[];
+  giftCards?: StoredGiftCard[];
   audit: AuditEntry[];
   storeConnections: Array<[string, { accessToken: string; expiresAt: string; webhookSecret?: string }]>;
 };
@@ -106,6 +140,7 @@ const createInitialState = (): OperationalState => ({
   globalDigests: new Set<string>(),
   webhookIds: new Set<string>(),
   orders: [],
+  giftCards: [],
   audit: [],
   storeConnections: new Map(),
 });
@@ -132,6 +167,7 @@ export function exportOperationalState(): PersistedOperationalState {
     globalDigests: [...state.globalDigests],
     webhookIds: [...state.webhookIds],
     orders: state.orders,
+    giftCards: state.giftCards,
     audit: state.audit,
     storeConnections: [...state.storeConnections.entries()],
   });
@@ -150,6 +186,7 @@ export function restoreOperationalState(snapshot: PersistedOperationalState) {
   state.globalDigests = new Set(clone(snapshot.globalDigests ?? []));
   state.webhookIds = new Set(clone(snapshot.webhookIds ?? []));
   state.orders = clone(snapshot.orders ?? []);
+  state.giftCards = clone(snapshot.giftCards ?? []);
   state.audit = clone(snapshot.audit ?? []);
   state.storeConnections = new Map(clone(snapshot.storeConnections ?? []));
   state.stores = state.stores.map((store) => ({
@@ -213,6 +250,12 @@ const baselineRules = (): RiskRule[] => [
     action: { severity: "high", openCase: true, emailOwner: true },
   },
   {
+    id: "recommended-linked-gift-card", label: "מימוש Gift Card שנרכש בתיק חשוד", description: "מקשר בין ההזמנה שבה הונפק הכרטיס להזמנה שבה מומש, ופותח תיק כאשר זהות המממש שונה מזהות הרוכש.",
+    category: "gift-card", enabled: true, logic: "all", recommended: true, matches: 0,
+    conditions: [{ id: "linked-gift-card", field: "linked_gift_card", operator: "eq", value: true }],
+    action: { severity: "critical", openCase: true, emailOwner: true },
+  },
+  {
     id: "recommended-email-velocity", label: "ריבוי הזמנות מאותו אימייל", description: "פותח התראה כאשר אותו אימייל מבצע 4 הזמנות או יותר בתוך שעה.",
     category: "velocity", enabled: true, logic: "all", recommended: true, matches: 0,
     conditions: [{ id: "email-velocity", field: "orders_by_email", operator: "gte", value: 4, windowMinutes: 60 }],
@@ -270,9 +313,9 @@ const migrateLegacyRules = () => {
       legacy.conditions = [{ id: condition.id, field: "order_amount", operator: "gt", value: threshold }];
     }
 
-    const amountTiers = baselineRules().filter((rule) => ["recommended-order-high", "recommended-order-critical"].includes(rule.id));
-    for (const tier of amountTiers) {
-      if (!rules.some((rule) => rule.id === tier.id)) rules.push(clone(tier));
+    const requiredRules = baselineRules().filter((rule) => ["recommended-order-high", "recommended-order-critical", "recommended-linked-gift-card"].includes(rule.id));
+    for (const requiredRule of requiredRules) {
+      if (!rules.some((rule) => rule.id === requiredRule.id)) rules.push(clone(requiredRule));
     }
   }
 };
@@ -403,6 +446,7 @@ const fallbackSignalsForCase = (item: FraudCase, tenantCases: FraudCase[]): Orde
     averageOrderValue,
     giftCardValue,
     giftCardBaseline: giftCardValue,
+    linkedGiftCard: Boolean(item.context?.giftCards?.redeemed.some((redemption) => redemption.identityChanged && redemption.confidence !== "ambiguous")),
     paymentFailures: hasEvidence(/כשל|failed payment/i) ? 3 : 0,
     billingShippingMismatch: hasEvidence(/כתובות החיוב והמשלוח שונות/i),
     shopifyRisk: item.context?.shopifyRisk === "high" ? "high" : item.context?.shopifyRisk === "medium" ? "medium" : item.context?.shopifyRisk === "low" ? "low" : "none",
@@ -579,11 +623,16 @@ export function markStoreRealtimeError(tenantId: string, storeId: string) {
   return clone(store);
 }
 
-export function completeHistoricalSync(tenantId: string, storeId: string, scanned: number, latestOrderAt?: string) {
+export function completeHistoricalSync(tenantId: string, storeId: string, scanned: number, latestOrderAt?: string, giftCardTracking?: { status: "active" | "permission-required"; tracked: number }) {
   const store = tenantStore(tenantId, storeId);
   store.status = "active";
   store.ordersLast30Days = scanned;
   store.lastSyncAt = new Date().toISOString();
+  if (giftCardTracking) {
+    store.giftCardTrackingStatus = giftCardTracking.status;
+    store.giftCardsTracked = giftCardTracking.tracked;
+    store.lastGiftCardSyncAt = new Date().toISOString();
+  }
   store.lastEventAt = latestOrderAt
     ? new Intl.DateTimeFormat("he-IL", { dateStyle: "short", timeStyle: "short", timeZone: "Asia/Jerusalem" }).format(new Date(latestOrderAt))
     : "לא נמצאו הזמנות ב־30 הימים האחרונים";
@@ -606,6 +655,77 @@ const sameAddress = (left?: ShopifyOrderPayload["billing_address"], right?: Shop
   return serialize(left) === serialize(right);
 };
 
+const normalizeGiftCardId = (value: unknown): string | undefined => {
+  if (typeof value === "number") return `gid://shopify/GiftCard/${value}`;
+  if (typeof value !== "string") return undefined;
+  const match = value.match(/(?:gid:\/\/shopify\/GiftCard\/)?(\d{4,})/i);
+  return match ? `gid://shopify/GiftCard/${match[1]}` : undefined;
+};
+
+const giftCardIdFromReceipt = (value: unknown): string | undefined => {
+  if (!value) return undefined;
+  if (typeof value === "number") return undefined;
+  if (typeof value === "string") {
+    const direct = normalizeGiftCardId(value);
+    if (direct && /gift.?card/i.test(value)) return direct;
+    try { return giftCardIdFromReceipt(JSON.parse(value)); } catch { return undefined; }
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) { const found = giftCardIdFromReceipt(item); if (found) return found; }
+    return undefined;
+  }
+  if (typeof value !== "object") return undefined;
+  for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+    if (/gift.?card.?id/i.test(key)) {
+      const found = normalizeGiftCardId(item);
+      if (found) return found;
+    }
+    const nested = giftCardIdFromReceipt(item);
+    if (nested) return nested;
+  }
+  return undefined;
+};
+
+const lastCharactersOf = (value?: string) => value?.replace(/[^a-z0-9]/gi, "").slice(-4).toUpperCase() || "";
+
+export function replaceGiftCardRegistry(tenantId: string, storeId: string, cards: GiftCardRegistryInput[]) {
+  tenantStore(tenantId, storeId);
+  const previous = new Map(state.giftCards.filter((card) => card.storeId === storeId).map((card) => [card.giftCardId, card]));
+  state.giftCards = state.giftCards.filter((card) => card.storeId !== storeId);
+  for (const card of cards) {
+    const existing = previous.get(card.giftCardId);
+    state.giftCards.push({
+      ...clone(card), tenantId, storeId,
+      purchaserCustomer: existing?.purchaserCustomer,
+      purchaserEmail: existing?.purchaserEmail,
+      purchaserCustomerId: existing?.purchaserCustomerId,
+      redemptions: existing?.redemptions ?? [],
+    });
+  }
+  return cards.length;
+}
+
+const traceOf = (card: StoredGiftCard): GiftCardTrace => ({
+  giftCardId: card.giftCardId,
+  maskedCode: card.maskedCode,
+  lastCharacters: card.lastCharacters,
+  initialValue: card.initialValue,
+  balance: card.balance,
+  purchaseOrderId: card.purchaseOrderId,
+  purchaseOrderNumber: card.purchaseOrderNumber,
+  redemptions: clone(card.redemptions),
+});
+
+const refreshGiftCardLinks = (storeId: string) => {
+  const cards = state.giftCards.filter((card) => card.storeId === storeId);
+  for (const item of state.cases.filter((candidate) => candidate.storeId === storeId && candidate.context?.shopifyOrderId)) {
+    const orderId = item.context!.shopifyOrderId!;
+    const issued = cards.filter((card) => card.purchaseOrderId === orderId).map(traceOf);
+    const redeemed = cards.flatMap((card) => card.redemptions.filter((redemption) => redemption.orderId === orderId));
+    if (issued.length || redeemed.length) item.context!.giftCards = { issued, redeemed: clone(redeemed) };
+  }
+};
+
 export function ingestShopifyOrder(input: { storeId: string; webhookId: string; topic: string; payload: ShopifyOrderPayload }) {
   const store = state.stores.find((item) => item.id === input.storeId);
   if (!store) throw new Error("STORE_NOT_FOUND");
@@ -613,10 +733,12 @@ export function ingestShopifyOrder(input: { storeId: string; webhookId: string; 
     store.realtimeStatus = "active";
     store.lastWebhookAt = new Date().toISOString();
   }
-  if (state.webhookIds.has(`${input.storeId}:${input.webhookId}`)) return { duplicate: true as const, case: null };
-  state.webhookIds.add(`${input.storeId}:${input.webhookId}`);
+  const seenWebhook = state.webhookIds.has(`${input.storeId}:${input.webhookId}`);
+  if (seenWebhook && input.topic !== "HISTORICAL_SYNC") return { duplicate: true as const, case: null };
+  if (!seenWebhook) state.webhookIds.add(`${input.storeId}:${input.webhookId}`);
 
   const payload = input.payload;
+  const shopifyOrderId = String(payload.admin_graphql_api_id ?? payload.id ?? randomUUID());
   const rawEmail = normalizeEmail(payload.email ?? payload.customer?.email ?? "");
   const sharedServiceEmail = isSharedServiceEmail(rawEmail);
   const email = sharedServiceEmail ? "" : rawEmail;
@@ -631,7 +753,67 @@ export function ingestShopifyOrder(input: { storeId: string; webhookId: string; 
     return total + (isGiftCard ? Number(item.price ?? 0) * Number(item.quantity ?? 1) : 0);
   }, 0);
   const createdAt = payload.created_at ?? new Date().toISOString();
-  const recentOrders = state.orders.filter((order) => order.storeId === store.id);
+  const customerName = [payload.customer?.first_name, payload.customer?.last_name].filter(Boolean).join(" ");
+  const addressName = [payload.shipping_address?.first_name ?? payload.billing_address?.first_name, payload.shipping_address?.last_name ?? payload.billing_address?.last_name].filter(Boolean).join(" ");
+  const customer = sharedServiceEmail && addressName ? addressName : customerName || addressName || "לקוח Shopify";
+  const storeGiftCards = state.giftCards.filter((card) => card.storeId === store.id);
+  const issuedGiftCards = storeGiftCards.filter((card) => card.purchaseOrderId === shopifyOrderId);
+  for (const card of issuedGiftCards) {
+    card.purchaseOrderNumber = payload.name ?? card.purchaseOrderNumber;
+    card.purchaserCustomer = customer;
+    card.purchaserEmail = email || undefined;
+    card.purchaserCustomerId = customerId || undefined;
+  }
+  const redeemedGiftCards: GiftCardRedemption[] = [];
+  for (const transaction of payload.transactions ?? []) {
+    if (transaction.status && transaction.status.toUpperCase() !== "SUCCESS") continue;
+    const gateway = `${transaction.gateway ?? ""} ${transaction.formatted_gateway ?? ""}`;
+    const exactId = giftCardIdFromReceipt(transaction.receipt);
+    const lastCharacters = lastCharactersOf(transaction.account_number);
+    const candidates = exactId
+      ? storeGiftCards.filter((card) => card.giftCardId === exactId)
+      : /gift.?card/i.test(gateway) && lastCharacters
+        ? storeGiftCards.filter((card) => card.lastCharacters.toUpperCase() === lastCharacters)
+        : [];
+    if (candidates.length !== 1) continue;
+    const card = candidates[0];
+    if (card.purchaseOrderId === shopifyOrderId) continue;
+    const confidence: GiftCardRedemption["confidence"] = exactId ? "exact-id" : "unique-last4";
+    const identityChanged = Boolean(
+      (card.purchaserEmail && email && card.purchaserEmail !== email)
+      || (card.purchaserCustomerId && customerId && card.purchaserCustomerId !== customerId)
+      || (!card.purchaserEmail && !card.purchaserCustomerId && card.purchaserCustomer && customer && card.purchaserCustomer !== customer)
+    );
+    const redemption: GiftCardRedemption = {
+      giftCardId: card.giftCardId,
+      maskedCode: card.maskedCode,
+      amount: Number(transaction.amount ?? 0),
+      orderId: shopifyOrderId,
+      orderNumber: payload.name ?? `#${String(payload.id ?? "NEW")}`,
+      customer,
+      email: email || "לא התקבל מ־Shopify",
+      redeemedAt: transaction.processed_at ?? createdAt,
+      purchaseOrderNumber: card.purchaseOrderNumber,
+      purchaserCustomer: card.purchaserCustomer,
+      purchaserEmail: card.purchaserEmail,
+      confidence,
+      identityChanged,
+    };
+    if (!card.redemptions.some((item) => item.orderId === redemption.orderId && item.amount === redemption.amount)) card.redemptions.push(redemption);
+    redeemedGiftCards.push(redemption);
+  }
+  const linkedGiftCard = redeemedGiftCards.some((redemption) => {
+    if (!redemption.identityChanged || redemption.confidence === "ambiguous") return false;
+    const sourceCard = storeGiftCards.find((card) => card.giftCardId === redemption.giftCardId);
+    return state.cases.some((item) => item.storeId === store.id && (
+      item.context?.shopifyOrderId === sourceCard?.purchaseOrderId
+      || Boolean(sourceCard?.purchaserEmail && item.email.includes("@") && normalizeEmail(item.email) === sourceCard.purchaserEmail)
+    ));
+  });
+  const existingOrder = state.orders.find((order) => order.storeId === store.id && order.shopifyOrderId === shopifyOrderId);
+  const existingCaseBeforeEvaluation = state.cases.find((item) => item.storeId === store.id && (item.context?.shopifyOrderId === shopifyOrderId || (payload.name && item.orderNumber === payload.name)));
+  if (existingCaseBeforeEvaluation?.context && !existingCaseBeforeEvaluation.context.shopifyOrderId) existingCaseBeforeEvaluation.context.shopifyOrderId = shopifyOrderId;
+  const recentOrders = state.orders.filter((order) => order.storeId === store.id && order.shopifyOrderId !== shopifyOrderId);
   const oneHourAgo = new Date(createdAt).getTime() - 3_600_000;
   const twoHoursAgo = new Date(createdAt).getTime() - 7_200_000;
   const oneDayAgo = new Date(createdAt).getTime() - 86_400_000;
@@ -655,6 +837,7 @@ export function ingestShopifyOrder(input: { storeId: string; webhookId: string; 
     averageOrderValue,
     giftCardValue,
     giftCardBaseline,
+    linkedGiftCard,
     paymentFailures: Number(payload.payment_failures ?? 0),
     billingShippingMismatch: Boolean(payload.billing_address && payload.shipping_address && !sameAddress(payload.billing_address, payload.shipping_address)),
     shopifyRisk: payload.risk_level ?? "none",
@@ -678,15 +861,16 @@ export function ingestShopifyOrder(input: { storeId: string; webhookId: string; 
 
   const order: StoredOrder = {
     tenantId: store.tenantId, storeId: store.id,
-    shopifyOrderId: String(payload.admin_graphql_api_id ?? payload.id ?? randomUUID()),
+    shopifyOrderId,
     email, phone, address, amount, giftCardValue, ip, customerId, createdAt,
   };
-  state.orders.push(order);
+  if (existingOrder) Object.assign(existingOrder, order);
+  else state.orders.push(order);
   const orderTime = new Date(createdAt).getTime();
   const now = new Date();
   const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-  if (orderTime >= startOfToday) store.ordersToday += 1;
-  if (orderTime >= Date.now() - 30 * 86_400_000) store.ordersLast30Days += 1;
+  if (!existingOrder && orderTime >= startOfToday) store.ordersToday += 1;
+  if (!existingOrder && orderTime >= Date.now() - 30 * 86_400_000) store.ordersLast30Days += 1;
   if (input.topic !== "HISTORICAL_SYNC") {
     store.lastEventAt = new Intl.DateTimeFormat("he-IL", { dateStyle: "short", timeStyle: "short", timeZone: "Asia/Jerusalem" }).format(new Date(createdAt));
   }
@@ -694,13 +878,26 @@ export function ingestShopifyOrder(input: { storeId: string; webhookId: string; 
   const result = evaluateRisk(signals, new Date(createdAt), state.rulesByTenant.get(store.tenantId) ?? []);
   for (const ruleId of result.matchedRuleIds) {
     const matchedRule = state.rulesByTenant.get(store.tenantId)?.find((rule) => rule.id === ruleId);
-    if (matchedRule) matchedRule.matches += 1;
+    if (matchedRule && (!existingOrder || !existingCaseBeforeEvaluation?.evidence.some((evidence) => evidence.label === matchedRule.label))) matchedRule.matches += 1;
   }
-  if (result.score < 25) return { duplicate: false as const, case: null, risk: result };
+  if (result.score < 25) {
+    refreshGiftCardLinks(store.id);
+    return { duplicate: false as const, case: null, risk: result };
+  }
 
-  const customerName = [payload.customer?.first_name, payload.customer?.last_name].filter(Boolean).join(" ");
-  const addressName = [payload.shipping_address?.first_name ?? payload.billing_address?.first_name, payload.shipping_address?.last_name ?? payload.billing_address?.last_name].filter(Boolean).join(" ");
-  const customer = sharedServiceEmail && addressName ? addressName : customerName || addressName || "לקוח Shopify";
+  const existingCase = existingCaseBeforeEvaluation;
+  if (existingCase) {
+    const previousScore = existingCase.score;
+    existingCase.score = Math.max(existingCase.score, result.score);
+    if (result.score >= previousScore) {
+      existingCase.severity = result.severity;
+      existingCase.reason = result.evidence[0]?.label ?? existingCase.reason;
+    }
+    existingCase.signals = clone(signals);
+    existingCase.evidence = [...existingCase.evidence, ...result.evidence.filter((evidence) => !existingCase.evidence.some((current) => current.label === evidence.label))];
+    refreshGiftCardLinks(store.id);
+    return { duplicate: false as const, case: result.score > previousScore ? clone(existingCase) : null, risk: result };
+  }
   const fraudCase: FraudCase = {
     id: randomUUID(), tenantId: store.tenantId, storeId: store.id, storeName: store.name,
     orderNumber: payload.name ?? `#${String(payload.id ?? "NEW")}`, customer, email: email || (sharedServiceEmail ? "לא זמין — עסקת PayPlus" : "לא זמין"),
@@ -724,9 +921,11 @@ export function ingestShopifyOrder(input: { storeId: string; webhookId: string; 
       ipOrderCountLastTwoHours: ip ? sameIp : undefined,
       ipGiftCardOrderCountLastTwoHours: ip ? giftCardOrdersByIp : undefined,
       ipDistinctEmailsLastTwoHours: ip ? emailsByIp : undefined,
+      shopifyOrderId,
     },
   };
   state.cases.unshift(fraudCase);
+  refreshGiftCardLinks(store.id);
   state.audit.unshift({
     id: randomUUID(), tenantId: store.tenantId, action: "case.created", resourceType: "case", resourceId: fraudCase.id,
     createdAt: new Date().toISOString(), metadata: { topic: input.topic, score: result.score },

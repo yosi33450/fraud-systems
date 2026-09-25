@@ -126,7 +126,7 @@ export async function testShopifyConnection(shopDomain: string, accessToken: str
 export async function registerOrderWebhook(input: {
   shopDomain: string;
   accessToken: string;
-  topic: "ORDERS_CREATE" | "ORDERS_PAID" | "ORDERS_UPDATED" | "REFUNDS_CREATE";
+  topic: "ORDERS_CREATE" | "ORDERS_PAID" | "ORDERS_UPDATED" | "ORDER_TRANSACTIONS_CREATE" | "REFUNDS_CREATE";
   uri: string;
 }) {
   const data = await shopifyAdminRequest<{
@@ -164,6 +164,24 @@ export async function ensureOrderCreateWebhook(input: { shopDomain: string; acce
     uri: input.uri,
   });
   return { ...created, created: true as const };
+}
+
+export async function ensureOrderWebhooks(input: { shopDomain: string; accessToken: string; uri: string }) {
+  const existing = await shopifyAdminRequest<{
+    webhookSubscriptions: { nodes: Array<{ id: string; topic: string; uri: string }> };
+  }>({
+    shopDomain: input.shopDomain,
+    accessToken: input.accessToken,
+    query: WEBHOOK_SUBSCRIPTIONS_QUERY,
+    variables: { first: 100 },
+  });
+  const topics = ["ORDERS_CREATE", "ORDER_TRANSACTIONS_CREATE"] as const;
+  return Promise.all(topics.map(async (topic) => {
+    const subscription = existing.webhookSubscriptions.nodes.find((item) => item.topic === topic && item.uri === input.uri);
+    if (subscription) return { ...subscription, created: false as const };
+    const created = await registerOrderWebhook({ ...input, topic });
+    return { ...created, created: true as const };
+  }));
 }
 
 export async function tagBlockedCustomer(input: { shopDomain: string; accessToken: string; customerId: string }) {

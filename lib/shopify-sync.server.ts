@@ -1,4 +1,4 @@
-import { completeHistoricalSync, failHistoricalSync, ingestShopifyOrder, type ShopifyOrderPayload } from "@/lib/operational-store";
+import { completeHistoricalSync, failHistoricalSync, ingestShopifyOrder, replaceGiftCardRegistry, type GiftCardRegistryInput, type ShopifyOrderPayload } from "@/lib/operational-store";
 import { shopifyAdminRequest } from "@/lib/shopify-admin.server";
 import { selectCustomerEmail } from "@/lib/customer-identity";
 
@@ -21,6 +21,10 @@ export const ORDERS_BACKFILL_QUERY = `#graphql
         }
       }
       customAttributes { key value }
+      transactions {
+        id gateway formattedGateway accountNumber kind status processedAt receiptJson
+        amountSet { shopMoney { amount currencyCode } }
+      }
         totalPriceSet { shopMoney { amount currencyCode } }
       customer {
         id
@@ -45,6 +49,39 @@ export const ORDERS_BACKFILL_QUERY = `#graphql
   }
 `;
 
+export const GIFT_CARDS_QUERY = `#graphql
+  query ShieldLedgerGiftCards($first: Int!, $after: String) {
+    giftCards(first: $first, after: $after, sortKey: CREATED_AT, reverse: true) {
+      nodes {
+        id maskedCode lastCharacters
+        initialValue { amount currencyCode }
+        balance { amount currencyCode }
+        order { id name }
+      }
+      pageInfo { hasNextPage endCursor }
+    }
+  }
+`;
+
+export const ORDER_GIFT_CARD_DETAILS_QUERY = `#graphql
+  query ShieldLedgerOrderGiftCardDetails($id: ID!) {
+    order(id: $id) {
+      id name createdAt email phone clientIp paymentGatewayNames
+      risk { recommendation assessments { riskLevel facts { description sentiment } } }
+      customAttributes { key value }
+      transactions {
+        id gateway formattedGateway accountNumber kind status processedAt receiptJson
+        amountSet { shopMoney { amount currencyCode } }
+      }
+      totalPriceSet { shopMoney { amount currencyCode } }
+      customer { id firstName lastName defaultEmailAddress { emailAddress } defaultPhoneNumber { phoneNumber } }
+      billingAddress { firstName lastName address1 city province countryCodeV2 zip phone }
+      shippingAddress { firstName lastName address1 city province countryCodeV2 zip phone }
+      lineItems(first: 50) { nodes { name title quantity originalUnitPriceSet { shopMoney { amount currencyCode } } } }
+    }
+  }
+`;
+
 type ShopifyOrderNode = {
   id: string;
   name: string;
@@ -58,6 +95,11 @@ type ShopifyOrderNode = {
     assessments: Array<{ riskLevel: string; facts: Array<{ description: string; sentiment: string }> }>;
   } | null;
   customAttributes: Array<{ key: string; value: string }>;
+  transactions: Array<{
+    id: string; gateway?: string | null; formattedGateway?: string | null; accountNumber?: string | null;
+    kind: string; status: string; processedAt?: string | null; receiptJson?: unknown;
+    amountSet: { shopMoney: { amount: string; currencyCode: string } };
+  }>;
   totalPriceSet: { shopMoney: { amount: string; currencyCode: string } };
   customer?: {
     id: string;
@@ -105,6 +147,17 @@ const toPayload = (order: ShopifyOrderNode): ShopifyOrderPayload => ({
     : order.risk?.recommendation?.toLowerCase() === "medium" ? "medium"
       : order.risk?.recommendation?.toLowerCase() === "low" ? "low" : "none",
   shopify_risk_facts: order.risk?.assessments.flatMap((assessment) => assessment.facts.filter((fact) => fact.sentiment === "NEGATIVE").map((fact) => fact.description)) ?? [],
+  transactions: order.transactions.map((transaction) => ({
+    id: transaction.id,
+    gateway: transaction.gateway ?? undefined,
+    formatted_gateway: transaction.formattedGateway ?? undefined,
+    account_number: transaction.accountNumber ?? undefined,
+    amount: transaction.amountSet.shopMoney.amount,
+    status: transaction.status,
+    kind: transaction.kind,
+    processed_at: transaction.processedAt ?? undefined,
+    receipt: transaction.receiptJson,
+  })),
   customer: {
     admin_graphql_api_id: order.customer?.id,
     first_name: order.customer?.firstName ?? undefined,
@@ -122,12 +175,54 @@ const toPayload = (order: ShopifyOrderNode): ShopifyOrderPayload => ({
   })),
 });
 
+async function syncGiftCardRegistry(input: { tenantId: string; storeId: string; shopDomain: string; accessToken: string }) {
+  let after: string | null = null;
+  const cards: GiftCardRegistryInput[] = [];
+  do {
+    const data: {
+      giftCards: {
+        nodes: Array<{
+          id: string; maskedCode: string; lastCharacters: string;
+          initialValue: { amount: string }; balance: { amount: string };
+          order?: { id: string; name: string } | null;
+        }>;
+        pageInfo: { hasNextPage: boolean; endCursor: string | null };
+      };
+    } = await shopifyAdminRequest({
+      shopDomain: input.shopDomain,
+      accessToken: input.accessToken,
+      query: GIFT_CARDS_QUERY,
+      variables: { first: 100, after },
+    });
+    cards.push(...data.giftCards.nodes.map((card) => ({
+      giftCardId: card.id,
+      maskedCode: card.maskedCode,
+      lastCharacters: card.lastCharacters,
+      initialValue: Number(card.initialValue.amount),
+      balance: Number(card.balance.amount),
+      purchaseOrderId: card.order?.id,
+      purchaseOrderNumber: card.order?.name,
+    })));
+    after = data.giftCards.pageInfo.hasNextPage ? data.giftCards.pageInfo.endCursor : null;
+  } while (after);
+  replaceGiftCardRegistry(input.tenantId, input.storeId, cards);
+  return cards.length;
+}
+
 export async function syncOrdersLast30Days(input: { tenantId: string; storeId: string; shopDomain: string; accessToken: string }) {
   const since = new Date(Date.now() - 30 * 86_400_000).toISOString();
   let after: string | null = null;
   const orders: ShopifyOrderNode[] = [];
 
   try {
+    let giftCardsTracked = 0;
+    let giftCardTracking: "active" | "permission-required" = "active";
+    try {
+      giftCardsTracked = await syncGiftCardRegistry(input);
+    } catch (error) {
+      giftCardTracking = "permission-required";
+      console.warn("[shopify-sync] gift card registry unavailable", error instanceof Error ? error.message : error);
+    }
     do {
       const data: OrdersBackfillResponse = await shopifyAdminRequest<OrdersBackfillResponse>({
         shopDomain: input.shopDomain,
@@ -150,10 +245,24 @@ export async function syncOrdersLast30Days(input: { tenantId: string; storeId: s
       });
       if (result.case) casesCreated += 1;
     }
-    const store = completeHistoricalSync(input.tenantId, input.storeId, orders.length, orders.at(-1)?.createdAt);
-    return { scanned: orders.length, casesCreated, since, store };
+    const store = completeHistoricalSync(input.tenantId, input.storeId, orders.length, orders.at(-1)?.createdAt, { status: giftCardTracking, tracked: giftCardsTracked });
+    return { scanned: orders.length, casesCreated, since, store, giftCardsTracked, giftCardTracking };
   } catch (error) {
     failHistoricalSync(input.tenantId, input.storeId);
     throw error;
   }
+}
+
+export async function syncShopifyOrderGiftCards(input: { tenantId: string; storeId: string; shopDomain: string; accessToken: string; orderId: string; webhookId: string; topic: string }) {
+  try { await syncGiftCardRegistry(input); } catch (error) {
+    console.warn("[shopify-sync] live gift card registry refresh unavailable", error instanceof Error ? error.message : error);
+  }
+  const data = await shopifyAdminRequest<{ order: ShopifyOrderNode | null }>({
+    shopDomain: input.shopDomain,
+    accessToken: input.accessToken,
+    query: ORDER_GIFT_CARD_DETAILS_QUERY,
+    variables: { id: input.orderId },
+  });
+  if (!data.order) throw new Error("SHOPIFY_ORDER_NOT_FOUND");
+  return ingestShopifyOrder({ storeId: input.storeId, webhookId: input.webhookId, topic: input.topic, payload: toPayload(data.order) });
 }

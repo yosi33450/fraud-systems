@@ -15,6 +15,9 @@ export interface Store {
   realtimeStatus?: "active" | "registered" | "configuring" | "setup-required" | "error";
   webhookRegisteredAt?: string;
   lastWebhookAt?: string;
+  giftCardTrackingStatus?: "active" | "permission-required";
+  giftCardsTracked?: number;
+  lastGiftCardSyncAt?: string;
 }
 
 export interface Evidence {
@@ -59,6 +62,7 @@ export interface FraudCase {
     averageOrderValue: number;
     giftCardValue: number;
     giftCardBaseline: number;
+    linkedGiftCard: boolean;
     paymentFailures: number;
     billingShippingMismatch: boolean;
     shopifyRisk: "none" | "low" | "medium" | "high";
@@ -77,7 +81,39 @@ export interface FraudCase {
     ipOrderCountLastTwoHours?: number;
     ipGiftCardOrderCountLastTwoHours?: number;
     ipDistinctEmailsLastTwoHours?: number;
+    shopifyOrderId?: string;
+    giftCards?: {
+      issued: GiftCardTrace[];
+      redeemed: GiftCardRedemption[];
+    };
   };
+}
+
+export interface GiftCardRedemption {
+  giftCardId: string;
+  maskedCode: string;
+  amount: number;
+  orderId: string;
+  orderNumber: string;
+  customer: string;
+  email: string;
+  redeemedAt: string;
+  purchaseOrderNumber?: string;
+  purchaserCustomer?: string;
+  purchaserEmail?: string;
+  confidence: "exact-id" | "unique-last4" | "ambiguous";
+  identityChanged: boolean;
+}
+
+export interface GiftCardTrace {
+  giftCardId: string;
+  maskedCode: string;
+  lastCharacters: string;
+  initialValue: number;
+  balance: number;
+  purchaseOrderId?: string;
+  purchaseOrderNumber?: string;
+  redemptions: GiftCardRedemption[];
 }
 
 export interface RiskRule {
@@ -98,7 +134,7 @@ export interface RiskRule {
   matches: number;
 }
 
-export type RiskConditionField = "orders_by_email" | "orders_by_ip" | "gift_card_orders_by_ip" | "emails_by_ip" | "identities_by_phone" | "order_amount" | "order_amount_vs_average" | "gift_card_value" | "payment_failures" | "network_match" | "employee_match" | "refund_after_fulfillment";
+export type RiskConditionField = "orders_by_email" | "orders_by_ip" | "gift_card_orders_by_ip" | "emails_by_ip" | "identities_by_phone" | "order_amount" | "order_amount_vs_average" | "gift_card_value" | "linked_gift_card" | "payment_failures" | "network_match" | "employee_match" | "refund_after_fulfillment";
 export type RiskConditionOperator = "gte" | "gt" | "eq";
 
 export interface RiskCondition {

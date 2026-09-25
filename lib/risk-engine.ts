@@ -11,6 +11,7 @@ export interface OrderSignals {
   averageOrderValue: number;
   giftCardValue: number;
   giftCardBaseline: number;
+  linkedGiftCard: boolean;
   paymentFailures: number;
   billingShippingMismatch: boolean;
   shopifyRisk: "none" | "low" | "medium" | "high";
@@ -40,6 +41,7 @@ const signalValue = (condition: RiskCondition, signals: OrderSignals): number | 
     case "order_amount": return signals.orderAmount;
     case "order_amount_vs_average": return signals.averageOrderValue > 0 ? signals.orderAmount / signals.averageOrderValue : 0;
     case "gift_card_value": return signals.giftCardValue;
+    case "linked_gift_card": return signals.linkedGiftCard;
     case "payment_failures": return signals.paymentFailures;
     case "network_match": return signals.blacklist.email || signals.blacklist.phone || signals.blacklist.address || signals.blacklist.ip || signals.blacklist.customer;
     case "employee_match": return signals.employeeMatch;

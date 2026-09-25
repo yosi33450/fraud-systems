@@ -20,6 +20,7 @@ function validateSignals(value: unknown): value is OrderSignals {
     body.paymentFailures,
   ].every(isNumber)
     && isBoolean(body.billingShippingMismatch)
+    && isBoolean(body.linkedGiftCard)
     && isBoolean(body.employeeMatch)
     && isBoolean(body.refundAfterFulfillment)
     && ["none", "low", "medium", "high"].includes(body.shopifyRisk ?? "")

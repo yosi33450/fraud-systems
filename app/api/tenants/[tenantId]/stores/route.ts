@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { connectShopifyStore, markStoreRealtimeError, markStoreRealtimeReady } from "@/lib/operational-store";
-import { ensureOrderCreateWebhook, requestOrganizationAccessToken, testShopifyConnection } from "@/lib/shopify-admin.server";
+import { ensureOrderWebhooks, requestOrganizationAccessToken, testShopifyConnection } from "@/lib/shopify-admin.server";
 import { syncOrdersLast30Days } from "@/lib/shopify-sync.server";
 import { hydrateOperationalState, persistOperationalState } from "@/lib/persistence.server";
 
@@ -39,14 +39,14 @@ export async function POST(request: Request, context: { params: Promise<{ tenant
       shopDomain: store.domain,
       accessToken: token.accessToken,
     });
-    const webhook = await ensureOrderCreateWebhook({
+    const webhooks = await ensureOrderWebhooks({
       shopDomain: store.domain,
       accessToken: token.accessToken,
       uri: new URL(`/api/shopify/webhooks/${store.id}`, request.url).toString(),
     });
     const readyStore = markStoreRealtimeReady(tenantId, store.id);
     await persistOperationalState();
-    return NextResponse.json({ connected: true, store: readyStore, sync, webhook });
+    return NextResponse.json({ connected: true, store: readyStore, sync, webhooks });
   } catch (error) {
     if (connectedStoreId) markStoreRealtimeError(tenantId, connectedStoreId);
     await persistOperationalState().catch(() => undefined);
