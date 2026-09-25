@@ -743,7 +743,7 @@ h1, h2, h3, h4, .brand-block strong {
   .cluster-severity { grid-column: 1 / -1; }
   .cluster-identity { grid-column: 1 / -1; }
   .cluster-stat { display: none; }
-  .cluster-status { grid-column: 1 / -1 !important; grid-row: auto !important; justify-content: space-between; }
+  .cluster-status { grid-column: 1 / -1; grid-row: auto; justify-content: space-between; }
   .cluster-orders { padding: 0 8px 8px; }
   .cluster-order { grid-template-columns: 82px 1fr 18px; gap: 8px; padding-inline: 10px; }
   .cluster-order .reason-cell, .cluster-order .amount-cell, .cluster-order > .status { display: none; }
@@ -1336,7 +1336,7 @@ p { text-wrap: pretty; }
   .gift-ledger-message { flex-direction: column; }
 }
 
-.gift-card-link-signal { color: #875f00 !important; background: #fff8dc !important; border-color: #ead89b !important; }
+.gift-card-link-signal { color: #875f00; background: #fff8dc; border-color: #ead89b; }
 .gift-card-tracking-state { grid-column: 1; display: flex; align-items: flex-start; gap: 9px; margin-top: 10px; padding: 10px 12px; border: 1px solid; border-radius: 7px; }
 .gift-card-tracking-state > div { display: flex; flex-direction: column; gap: 2px; }
 .gift-card-tracking-state strong { font-size: 12px; }

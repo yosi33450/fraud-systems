@@ -39,14 +39,17 @@ export default function LoginPage() {
           <label htmlFor="password">סיסמת מנהל</label>
           <input
             id="password"
+            name="password"
             type="password"
+            aria-invalid={Boolean(error)}
+            aria-describedby={error ? "login-error" : undefined}
             autoComplete="current-password"
             value={password}
             onChange={(event) => setPassword(event.target.value)}
             required
             autoFocus
           />
-          {error && <div className="login-error" role="alert">{error}</div>}
+          {error && <div id="login-error" className="login-error" role="alert">{error}</div>}
           <button className="primary-button" type="submit" disabled={loading}>
             {loading ? "מתחבר…" : "כניסה למערכת"}
           </button>
