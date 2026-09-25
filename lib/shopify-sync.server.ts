@@ -1,4 +1,5 @@
-import { completeHistoricalSync, failHistoricalSync, ingestShopifyOrder, replaceGiftCardRegistry, type GiftCardRegistryInput, type ShopifyOrderPayload } from "@/lib/operational-store";
+import { completeHistoricalSync, failHistoricalSync, ingestShopifyOrder, replaceGiftCardRegistry, upsertGiftCardRegistry, type GiftCardRegistryInput, type ShopifyOrderPayload } from "@/lib/operational-store";
+import type { Store } from "@/lib/types";
 import { shopifyAdminRequest } from "@/lib/shopify-admin.server";
 import { selectCustomerEmail } from "@/lib/customer-identity";
 
@@ -50,8 +51,8 @@ export const ORDERS_BACKFILL_QUERY = `#graphql
 `;
 
 export const GIFT_CARDS_QUERY = `#graphql
-  query ShieldLedgerGiftCards($first: Int!, $after: String) {
-    giftCards(first: $first, after: $after, sortKey: CREATED_AT, reverse: true) {
+  query ShieldLedgerGiftCards($first: Int!, $after: String, $query: String!) {
+    giftCards(first: $first, after: $after, query: $query, sortKey: CREATED_AT, reverse: true) {
       nodes {
         id maskedCode lastCharacters
         initialValue { amount currencyCode }
@@ -175,7 +176,15 @@ const toPayload = (order: ShopifyOrderNode): ShopifyOrderPayload => ({
   })),
 });
 
-async function syncGiftCardRegistry(input: { tenantId: string; storeId: string; shopDomain: string; accessToken: string }) {
+const giftCardTrackingStatus = (error: unknown): NonNullable<Store["giftCardTrackingStatus"]> => {
+  const message = error instanceof Error ? error.message : String(error);
+  return /access denied for giftcards|read_gift_cards/i.test(message) ? "shopify-approval-required" : "unavailable";
+};
+
+async function syncGiftCardRegistry(
+  input: { tenantId: string; storeId: string; shopDomain: string; accessToken: string },
+  options: { since: string; replace: boolean },
+) {
   let after: string | null = null;
   const cards: GiftCardRegistryInput[] = [];
   do {
@@ -192,7 +201,7 @@ async function syncGiftCardRegistry(input: { tenantId: string; storeId: string; 
       shopDomain: input.shopDomain,
       accessToken: input.accessToken,
       query: GIFT_CARDS_QUERY,
-      variables: { first: 100, after },
+      variables: { first: 100, after, query: `created_at:>=${options.since}` },
     });
     cards.push(...data.giftCards.nodes.map((card) => ({
       giftCardId: card.id,
@@ -205,7 +214,8 @@ async function syncGiftCardRegistry(input: { tenantId: string; storeId: string; 
     })));
     after = data.giftCards.pageInfo.hasNextPage ? data.giftCards.pageInfo.endCursor : null;
   } while (after);
-  replaceGiftCardRegistry(input.tenantId, input.storeId, cards);
+  if (options.replace) replaceGiftCardRegistry(input.tenantId, input.storeId, cards);
+  else upsertGiftCardRegistry(input.tenantId, input.storeId, cards);
   return cards.length;
 }
 
@@ -216,11 +226,11 @@ export async function syncOrdersLast30Days(input: { tenantId: string; storeId: s
 
   try {
     let giftCardsTracked = 0;
-    let giftCardTracking: "active" | "permission-required" = "active";
+    let giftCardTracking: NonNullable<Store["giftCardTrackingStatus"]> = "active";
     try {
-      giftCardsTracked = await syncGiftCardRegistry(input);
+      giftCardsTracked = await syncGiftCardRegistry(input, { since, replace: true });
     } catch (error) {
-      giftCardTracking = "permission-required";
+      giftCardTracking = giftCardTrackingStatus(error);
       console.warn("[shopify-sync] gift card registry unavailable", error instanceof Error ? error.message : error);
     }
     do {
@@ -254,9 +264,6 @@ export async function syncOrdersLast30Days(input: { tenantId: string; storeId: s
 }
 
 export async function syncShopifyOrderGiftCards(input: { tenantId: string; storeId: string; shopDomain: string; accessToken: string; orderId: string; webhookId: string; topic: string }) {
-  try { await syncGiftCardRegistry(input); } catch (error) {
-    console.warn("[shopify-sync] live gift card registry refresh unavailable", error instanceof Error ? error.message : error);
-  }
   const data = await shopifyAdminRequest<{ order: ShopifyOrderNode | null }>({
     shopDomain: input.shopDomain,
     accessToken: input.accessToken,
@@ -264,5 +271,13 @@ export async function syncShopifyOrderGiftCards(input: { tenantId: string; store
     variables: { id: input.orderId },
   });
   if (!data.order) throw new Error("SHOPIFY_ORDER_NOT_FOUND");
+  const containsGiftCard = data.order.lineItems.nodes.some((item) => /gift\s*card|כרטיס\s*מתנה/i.test(`${item.name} ${item.title}`))
+    || data.order.transactions.some((transaction) => /gift.?card/i.test(`${transaction.gateway ?? ""} ${transaction.formattedGateway ?? ""}`));
+  if (containsGiftCard) {
+    const since = new Date(Date.now() - 2 * 86_400_000).toISOString();
+    try { await syncGiftCardRegistry(input, { since, replace: false }); } catch (error) {
+      console.warn("[shopify-sync] live gift card registry refresh unavailable", error instanceof Error ? error.message : error);
+    }
+  }
   return ingestShopifyOrder({ storeId: input.storeId, webhookId: input.webhookId, topic: input.topic, payload: toPayload(data.order) });
 }

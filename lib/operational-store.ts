@@ -623,7 +623,7 @@ export function markStoreRealtimeError(tenantId: string, storeId: string) {
   return clone(store);
 }
 
-export function completeHistoricalSync(tenantId: string, storeId: string, scanned: number, latestOrderAt?: string, giftCardTracking?: { status: "active" | "permission-required"; tracked: number }) {
+export function completeHistoricalSync(tenantId: string, storeId: string, scanned: number, latestOrderAt?: string, giftCardTracking?: { status: NonNullable<Store["giftCardTrackingStatus"]>; tracked: number }) {
   const store = tenantStore(tenantId, storeId);
   store.status = "active";
   store.ordersLast30Days = scanned;
@@ -701,6 +701,19 @@ export function replaceGiftCardRegistry(tenantId: string, storeId: string, cards
       purchaserCustomerId: existing?.purchaserCustomerId,
       redemptions: existing?.redemptions ?? [],
     });
+  }
+  return cards.length;
+}
+
+export function upsertGiftCardRegistry(tenantId: string, storeId: string, cards: GiftCardRegistryInput[]) {
+  tenantStore(tenantId, storeId);
+  for (const card of cards) {
+    const existing = state.giftCards.find((item) => item.storeId === storeId && item.giftCardId === card.giftCardId);
+    if (existing) {
+      Object.assign(existing, clone(card));
+      continue;
+    }
+    state.giftCards.push({ ...clone(card), tenantId, storeId, redemptions: [] });
   }
   return cards.length;
 }
