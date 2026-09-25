@@ -43,7 +43,9 @@ export function useWorkspaceNavigation(mobileOpen: boolean, setMobileOpen: Dispa
     const previouslyInert = main?.inert ?? false;
     if (main) main.inert = true;
     document.body.style.overflow = "hidden";
-    sidebar?.querySelector<HTMLButtonElement>(".mobile-only")?.focus();
+    const focusMenu = () => sidebar?.querySelector<HTMLButtonElement>(".mobile-only")?.focus();
+    // Wait for the visibility transition to start before moving keyboard focus.
+    const focusFrame = window.requestAnimationFrame(focusMenu);
     const desktop = window.matchMedia("(min-width: 821px)");
     const closeOnDesktop = () => { if (desktop.matches) setMobileOpen(false); };
     const keyboard = (event: KeyboardEvent) => {
@@ -59,6 +61,7 @@ export function useWorkspaceNavigation(mobileOpen: boolean, setMobileOpen: Dispa
     document.addEventListener("keydown", keyboard);
     closeOnDesktop();
     return () => {
+      window.cancelAnimationFrame(focusFrame);
       desktop.removeEventListener("change", closeOnDesktop);
       document.removeEventListener("keydown", keyboard);
       if (main) main.inert = previouslyInert;
@@ -82,9 +85,11 @@ export function SidebarItem({ label, Icon, active, count, collapsed, onClick }: 
   useEffect(() => {
     if (!tooltip) return;
     const dismiss = () => setTooltip(null);
+    const dismissOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape") dismiss(); };
     window.addEventListener("resize", dismiss);
     window.addEventListener("scroll", dismiss, true);
-    return () => { window.removeEventListener("resize", dismiss); window.removeEventListener("scroll", dismiss, true); };
+    window.addEventListener("keydown", dismissOnEscape);
+    return () => { window.removeEventListener("resize", dismiss); window.removeEventListener("scroll", dismiss, true); window.removeEventListener("keydown", dismissOnEscape); };
   }, [tooltip]);
   return <>
     <button className={`sidebar-item ${active ? "nav-active" : ""}`} aria-current={active ? "page" : undefined}

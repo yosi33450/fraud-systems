@@ -65,7 +65,7 @@ svg { flex-shrink: 0; }
 .tenant-switcher strong { color: var(--ink); font-size: .9375rem; }
 .tenant-switcher small { color: var(--slate); font-size: .8125rem; }
 .tenant-avatar { background: white; color: var(--trust); border-radius: 12px; box-shadow: none; }
-.nav-list { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; margin: 16px 0; gap: 20px; }
+.nav-list { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; scrollbar-color: #ccd5d0 transparent; margin: 16px 0; gap: 20px; }
 .nav-group { display: grid; gap: 3px; }
 .nav-group-title { color: var(--slate); font-size: .75rem; font-weight: 500; padding: 0 14px; margin: 0 0 6px; white-space: nowrap; }
 .nav-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
