@@ -46,6 +46,9 @@ export function useWorkspaceNavigation(mobileOpen: boolean, setMobileOpen: Dispa
     const focusMenu = () => sidebar?.querySelector<HTMLButtonElement>(".mobile-only")?.focus();
     // Wait for the visibility transition to start before moving keyboard focus.
     const focusFrame = window.requestAnimationFrame(focusMenu);
+    const focusAfterReveal = window.setTimeout(() => {
+      if (!sidebar?.contains(document.activeElement)) focusMenu();
+    }, 260);
     const desktop = window.matchMedia("(min-width: 821px)");
     const closeOnDesktop = () => { if (desktop.matches) setMobileOpen(false); };
     const keyboard = (event: KeyboardEvent) => {
@@ -54,7 +57,8 @@ export function useWorkspaceNavigation(mobileOpen: boolean, setMobileOpen: Dispa
       const items = [...sidebar.querySelectorAll<HTMLElement>("button:not(:disabled), a[href], [tabindex='0']")].filter((item) => item.getClientRects().length > 0);
       const first = items[0];
       const last = items.at(-1);
-      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+      if (!sidebar.contains(document.activeElement)) { event.preventDefault(); (event.shiftKey ? last : first)?.focus(); }
+      else if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
       else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
     };
     desktop.addEventListener("change", closeOnDesktop);
@@ -62,6 +66,7 @@ export function useWorkspaceNavigation(mobileOpen: boolean, setMobileOpen: Dispa
     closeOnDesktop();
     return () => {
       window.cancelAnimationFrame(focusFrame);
+      window.clearTimeout(focusAfterReveal);
       desktop.removeEventListener("change", closeOnDesktop);
       document.removeEventListener("keydown", keyboard);
       if (main) main.inert = previouslyInert;
