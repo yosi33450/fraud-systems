@@ -2,6 +2,7 @@ import { createHmac, randomUUID } from "node:crypto";
 import { cases as seedCases, employees as seedEmployees, rules as seedRules, stores as seedStores } from "@/lib/initial-state";
 import { evaluateRisk, type OrderSignals } from "@/lib/risk-engine";
 import { isSharedServiceEmail } from "@/lib/customer-identity";
+import { buildGiftLedger, receiptGiftCard, type GiftCardOrderEvidence } from "@/lib/gift-card-evidence";
 import type { BlacklistReport, CaseStatus, DashboardSnapshot, Employee, FraudCase, GiftCardRedemption, GiftCardTrace, NotificationDelivery, NotificationSettings, RiskRule, Store } from "@/lib/types";
 
 type ShopifyLineItem = {
@@ -104,6 +105,7 @@ type OperationalState = {
   webhookIds: Set<string>;
   orders: StoredOrder[];
   giftCards: StoredGiftCard[];
+  giftCardOrders: GiftCardOrderEvidence[];
   audit: AuditEntry[];
   storeConnections: Map<string, { accessToken: string; expiresAt: string; webhookSecret?: string }>;
 };
@@ -122,6 +124,7 @@ export type PersistedOperationalState = {
   webhookIds: string[];
   orders: StoredOrder[];
   giftCards?: StoredGiftCard[];
+  giftCardOrders?: GiftCardOrderEvidence[];
   audit: AuditEntry[];
   storeConnections: Array<[string, { accessToken: string; expiresAt: string; webhookSecret?: string }]>;
 };
@@ -141,6 +144,7 @@ const createInitialState = (): OperationalState => ({
   webhookIds: new Set<string>(),
   orders: [],
   giftCards: [],
+  giftCardOrders: [],
   audit: [],
   storeConnections: new Map(),
 });
@@ -168,6 +172,7 @@ export function exportOperationalState(): PersistedOperationalState {
     webhookIds: [...state.webhookIds],
     orders: state.orders,
     giftCards: state.giftCards,
+    giftCardOrders: state.giftCardOrders ?? [],
     audit: state.audit,
     storeConnections: [...state.storeConnections.entries()],
   });
@@ -187,6 +192,7 @@ export function restoreOperationalState(snapshot: PersistedOperationalState) {
   state.webhookIds = new Set(clone(snapshot.webhookIds ?? []));
   state.orders = clone(snapshot.orders ?? []);
   state.giftCards = clone(snapshot.giftCards ?? []);
+  state.giftCardOrders = clone(snapshot.giftCardOrders ?? []);
   state.audit = clone(snapshot.audit ?? []);
   state.storeConnections = new Map(clone(snapshot.storeConnections ?? []));
   state.stores = state.stores.map((store) => ({
@@ -338,6 +344,7 @@ export function getDashboardSnapshot(tenantId: string): DashboardSnapshot {
   });
   return {
     tenantId,
+    giftCardLedger: buildGiftLedger(clone((state.giftCardOrders ?? []).filter((item) => item.tenantId === tenantId))),
     cases: clone(state.cases.filter((item) => item.tenantId === tenantId)),
     stores: clone(tenantStores),
     employees: clone(state.employees.filter((item) => item.tenantId === tenantId)),
@@ -655,54 +662,10 @@ const sameAddress = (left?: ShopifyOrderPayload["billing_address"], right?: Shop
   return serialize(left) === serialize(right);
 };
 
-const normalizeGiftCardId = (value: unknown): string | undefined => {
-  if (typeof value === "number") return `gid://shopify/GiftCard/${value}`;
-  if (typeof value !== "string") return undefined;
-  const match = value.match(/(?:gid:\/\/shopify\/GiftCard\/)?(\d{4,})/i);
-  return match ? `gid://shopify/GiftCard/${match[1]}` : undefined;
-};
-
-const giftCardIdFromReceipt = (value: unknown): string | undefined => {
-  if (!value) return undefined;
-  if (typeof value === "number") return undefined;
-  if (typeof value === "string") {
-    const direct = normalizeGiftCardId(value);
-    if (direct && /gift.?card/i.test(value)) return direct;
-    try { return giftCardIdFromReceipt(JSON.parse(value)); } catch { return undefined; }
-  }
-  if (Array.isArray(value)) {
-    for (const item of value) { const found = giftCardIdFromReceipt(item); if (found) return found; }
-    return undefined;
-  }
-  if (typeof value !== "object") return undefined;
-  for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
-    if (/gift.?card.?id/i.test(key)) {
-      const found = normalizeGiftCardId(item);
-      if (found) return found;
-    }
-    const nested = giftCardIdFromReceipt(item);
-    if (nested) return nested;
-  }
-  return undefined;
-};
-
-const lastCharactersOf = (value?: string) => value?.replace(/[^a-z0-9]/gi, "").slice(-4).toUpperCase() || "";
 
 export function replaceGiftCardRegistry(tenantId: string, storeId: string, cards: GiftCardRegistryInput[]) {
-  tenantStore(tenantId, storeId);
-  const previous = new Map(state.giftCards.filter((card) => card.storeId === storeId).map((card) => [card.giftCardId, card]));
-  state.giftCards = state.giftCards.filter((card) => card.storeId !== storeId);
-  for (const card of cards) {
-    const existing = previous.get(card.giftCardId);
-    state.giftCards.push({
-      ...clone(card), tenantId, storeId,
-      purchaserCustomer: existing?.purchaserCustomer,
-      purchaserEmail: existing?.purchaserEmail,
-      purchaserCustomerId: existing?.purchaserCustomerId,
-      redemptions: existing?.redemptions ?? [],
-    });
-  }
-  return cards.length;
+  // A rolling fetch window is not a retention policy: never erase older evidence.
+  return upsertGiftCardRegistry(tenantId, storeId, cards);
 }
 
 export function upsertGiftCardRegistry(tenantId: string, storeId: string, cards: GiftCardRegistryInput[]) {
@@ -737,7 +700,54 @@ const refreshGiftCardLinks = (storeId: string) => {
     const redeemed = cards.flatMap((card) => card.redemptions.filter((redemption) => redemption.orderId === orderId));
     if (issued.length || redeemed.length) item.context!.giftCards = { issued, redeemed: clone(redeemed) };
   }
+  refreshOrderEvidenceLinks(storeId);
 };
+
+export function refreshOrderEvidenceLinks(storeId: string) {
+  const ledger = buildGiftLedger((state.giftCardOrders ?? []).filter((order) => order.storeId === storeId));
+  const redemptionOf = (card: typeof ledger.cards[number], use: typeof card.uses[number]): GiftCardRedemption => ({
+    giftCardId: card.giftCardId, maskedCode: card.lastCharacters ? `•••• ${card.lastCharacters}` : "קוד מוסתר",
+    transactionId: use.transactionId, amount: use.amount, currency: use.currency, orderId: use.order.orderId,
+    orderNumber: use.order.orderNumber, customer: use.order.customer, email: use.order.email,
+    redeemedAt: use.processedAt, purchaseOrderNumber: card.purchase?.orderNumber,
+    purchaserCustomer: card.purchase?.customer, purchaserEmail: card.purchase?.email,
+    confidence: "exact-id", identityChanged: Boolean(card.purchase?.email && use.order.email && card.purchase.email !== use.order.email),
+  });
+  for (const item of state.cases.filter((entry) => entry.storeId === storeId && entry.context?.shopifyOrderId)) {
+    const orderId = item.context!.shopifyOrderId;
+    const issued = ledger.cards.filter((card) => !card.purchaseConflict && card.purchase?.orderId === orderId).map((card): GiftCardTrace => ({
+      giftCardId: card.giftCardId, maskedCode: card.lastCharacters ? `•••• ${card.lastCharacters}` : "קוד מוסתר",
+      lastCharacters: card.lastCharacters, initialValue: null, balance: null, purchaseOrderId: orderId,
+      purchaseOrderNumber: card.purchase?.orderNumber,
+      redemptions: card.uses.filter((use) => use.kind !== "REFUND").map((use) => redemptionOf(card, use)),
+    }));
+    const redeemed = ledger.cards.filter((card) => !card.purchaseConflict).flatMap((card) => card.uses
+      .filter((use) => use.order.orderId === orderId && use.kind !== "REFUND").map((use) => redemptionOf(card, use)));
+    if (issued.length || redeemed.length) item.context!.giftCards = { issued, redeemed };
+  }
+}
+
+export function recordGiftCardOrderEvidence(order: GiftCardOrderEvidence, refresh = true) {
+  const store = tenantStore(order.tenantId, order.storeId);
+  state.giftCardOrders ??= [];
+  const index = state.giftCardOrders.findIndex((item) => item.storeId === order.storeId && item.orderId === order.orderId);
+  const previous = state.giftCardOrders[index];
+  // Preserve positive evidence if Shopify returns a partial timeline on a later request.
+  const merged = clone(order);
+  merged.issued = [...new Map([...(previous?.issued ?? []), ...order.issued].map((item) => [item.giftCardId, item])).values()];
+  merged.uses = [...new Map([...(previous?.uses ?? []), ...order.uses].map((item) => [item.transactionId, item])).values()];
+  if (index < 0) state.giftCardOrders.push(merged); else state.giftCardOrders[index] = merged;
+  if (!store.lastGiftCardSyncAt || order.checkedAt > store.lastGiftCardSyncAt) store.lastGiftCardSyncAt = order.checkedAt;
+  if (refresh) refreshOrderEvidenceLinks(order.storeId);
+}
+
+export function giftCardAlertOrderIds(tenantId: string, storeId: string) {
+  tenantStore(tenantId, storeId);
+  return [...new Set(state.cases.filter((item) => item.tenantId === tenantId && item.storeId === storeId && (
+    item.items.some((line) => /gift\s*card|גיפט\s*קארד|כרטיס\s*מתנה/i.test(line.name))
+    || item.context?.paymentGateways.some((gateway) => /gift.?card/i.test(gateway))
+  )).map((item) => item.context?.shopifyOrderId).filter((id): id is string => Boolean(id)))];
+}
 
 export function ingestShopifyOrder(input: { storeId: string; webhookId: string; topic: string; payload: ShopifyOrderPayload }) {
   const store = state.stores.find((item) => item.id === input.storeId);
@@ -762,7 +772,7 @@ export function ingestShopifyOrder(input: { storeId: string; webhookId: string; 
   const amount = Number(payload.total_price ?? 0);
   const lineItems = payload.line_items ?? [];
   const giftCardValue = lineItems.reduce((total, item) => {
-    const isGiftCard = item.gift_card || /gift\s*card|כרטיס\s*מתנה/i.test(`${item.title ?? ""} ${item.product_type ?? ""}`);
+    const isGiftCard = item.gift_card || /gift\s*card|גיפט\s*קארד|כרטיס\s*מתנה/i.test(`${item.title ?? ""} ${item.name ?? ""} ${item.product_type ?? ""}`);
     return total + (isGiftCard ? Number(item.price ?? 0) * Number(item.quantity ?? 1) : 0);
   }, 0);
   const createdAt = payload.created_at ?? new Date().toISOString();
@@ -779,15 +789,11 @@ export function ingestShopifyOrder(input: { storeId: string; webhookId: string; 
   }
   const redeemedGiftCards: GiftCardRedemption[] = [];
   for (const transaction of payload.transactions ?? []) {
-    if (transaction.status && transaction.status.toUpperCase() !== "SUCCESS") continue;
-    const gateway = `${transaction.gateway ?? ""} ${transaction.formatted_gateway ?? ""}`;
-    const exactId = giftCardIdFromReceipt(transaction.receipt);
-    const lastCharacters = lastCharactersOf(transaction.account_number);
+    if (transaction.status?.toUpperCase() !== "SUCCESS" || !["SALE", "CAPTURE"].includes(transaction.kind?.toUpperCase() ?? "")) continue;
+    const exactId = receiptGiftCard(transaction.receipt).id;
     const candidates = exactId
       ? storeGiftCards.filter((card) => card.giftCardId === exactId)
-      : /gift.?card/i.test(gateway) && lastCharacters
-        ? storeGiftCards.filter((card) => card.lastCharacters.toUpperCase() === lastCharacters)
-        : [];
+      : [];
     if (candidates.length !== 1) continue;
     const card = candidates[0];
     if (card.purchaseOrderId === shopifyOrderId) continue;
@@ -799,6 +805,7 @@ export function ingestShopifyOrder(input: { storeId: string; webhookId: string; 
     );
     const redemption: GiftCardRedemption = {
       giftCardId: card.giftCardId,
+      transactionId: transaction.id,
       maskedCode: card.maskedCode,
       amount: Number(transaction.amount ?? 0),
       orderId: shopifyOrderId,
@@ -812,7 +819,7 @@ export function ingestShopifyOrder(input: { storeId: string; webhookId: string; 
       confidence,
       identityChanged,
     };
-    if (!card.redemptions.some((item) => item.orderId === redemption.orderId && item.amount === redemption.amount)) card.redemptions.push(redemption);
+    if (transaction.id && !card.redemptions.some((item) => item.transactionId === transaction.id)) card.redemptions.push(redemption);
     redeemedGiftCards.push(redemption);
   }
   const linkedGiftCard = redeemedGiftCards.some((redemption) => {

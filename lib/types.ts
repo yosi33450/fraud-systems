@@ -90,6 +90,8 @@ export interface FraudCase {
 }
 
 export interface GiftCardRedemption {
+  transactionId?: string;
+  currency?: string;
   giftCardId: string;
   maskedCode: string;
   amount: number;
@@ -109,8 +111,8 @@ export interface GiftCardTrace {
   giftCardId: string;
   maskedCode: string;
   lastCharacters: string;
-  initialValue: number;
-  balance: number;
+  initialValue: number | null;
+  balance: number | null;
   purchaseOrderId?: string;
   purchaseOrderNumber?: string;
   redemptions: GiftCardRedemption[];
@@ -168,6 +170,7 @@ export interface BlacklistReport {
 }
 
 export interface DashboardSnapshot {
+  giftCardLedger?: import("./gift-card-evidence").GiftLedger;
   tenantId: string;
   cases: FraudCase[];
   stores: Store[];

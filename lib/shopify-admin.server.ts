@@ -175,7 +175,7 @@ export async function ensureOrderWebhooks(input: { shopDomain: string; accessTok
     query: WEBHOOK_SUBSCRIPTIONS_QUERY,
     variables: { first: 100 },
   });
-  const topics = ["ORDERS_CREATE", "ORDER_TRANSACTIONS_CREATE"] as const;
+  const topics = ["ORDERS_CREATE", "ORDERS_UPDATED", "ORDER_TRANSACTIONS_CREATE"] as const;
   return Promise.all(topics.map(async (topic) => {
     const subscription = existing.webhookSubscriptions.nodes.find((item) => item.topic === topic && item.uri === input.uri);
     if (subscription) return { ...subscription, created: false as const };

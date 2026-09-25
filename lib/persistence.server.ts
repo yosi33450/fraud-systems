@@ -29,7 +29,7 @@ const encryptionKey = () => {
   return createHash("sha256").update(secret).digest();
 };
 
-const encrypt = (snapshot: PersistedOperationalState): EncryptedState => {
+export const encryptPrivateData = (snapshot: unknown): EncryptedState => {
   const iv = randomBytes(12);
   const cipher = createCipheriv("aes-256-gcm", encryptionKey(), iv);
   const ciphertext = Buffer.concat([cipher.update(JSON.stringify(snapshot), "utf8"), cipher.final()]);
@@ -40,14 +40,14 @@ const encrypt = (snapshot: PersistedOperationalState): EncryptedState => {
   };
 };
 
-const decrypt = (payload: EncryptedState): PersistedOperationalState => {
+export const decryptPrivateData = <T = PersistedOperationalState,>(payload: EncryptedState): T => {
   const decipher = createDecipheriv("aes-256-gcm", encryptionKey(), Buffer.from(payload.iv, "base64"));
   decipher.setAuthTag(Buffer.from(payload.auth_tag, "base64"));
   const plaintext = Buffer.concat([
     decipher.update(Buffer.from(payload.ciphertext, "base64")),
     decipher.final(),
   ]).toString("utf8");
-  return JSON.parse(plaintext) as PersistedOperationalState;
+  return JSON.parse(plaintext) as T;
 };
 
 const supabaseConfiguration = () => {
@@ -127,13 +127,13 @@ async function saveEncryptedState(payload: EncryptedState) {
 export async function hydrateOperationalState() {
   globalThis.__shieldLedgerHydration ??= (async () => {
     const payload = await loadEncryptedState();
-    if (payload) restoreOperationalState(decrypt(payload));
+    if (payload) restoreOperationalState(decryptPrivateData(payload));
   })();
   return globalThis.__shieldLedgerHydration;
 }
 
 export async function persistOperationalState() {
-  const persist = async () => saveEncryptedState(encrypt(exportOperationalState()));
+  const persist = async () => saveEncryptedState(encryptPrivateData(exportOperationalState()));
   globalThis.__shieldLedgerPersistenceQueue = (globalThis.__shieldLedgerPersistenceQueue ?? Promise.resolve()).then(persist, persist);
   return globalThis.__shieldLedgerPersistenceQueue;
 }

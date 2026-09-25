@@ -42,15 +42,17 @@ import {
 } from "lucide-react";
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { SeverityBadge } from "@/components/severity-badge";
+import { GiftCardWorkspace } from "@/components/gift-card-workspace";
 import { cases as initialCases, employees, rules, stores } from "@/lib/initial-state";
 import type { BlacklistReport, CaseStatus, DashboardSnapshot, Employee, FraudCase, NotificationDelivery, NotificationSettings, RiskCondition, RiskConditionField, RiskRule, Severity, Store } from "@/lib/types";
 
-type View = "overview" | "cases" | "stores" | "employees" | "rules" | "notifications" | "network" | "team" | "platform";
+type View = "overview" | "cases" | "gift-cards" | "stores" | "employees" | "rules" | "notifications" | "network" | "team" | "platform";
 type RuleReconciliation = { reviewed: number; updated: number; resolved: number; reopened: number; active: number };
 
 const nav = [
   { id: "overview", label: "מרכז בקרה", Icon: LayoutDashboard },
   { id: "cases", label: "התראות וחקירות", Icon: ClipboardList, count: 8 },
+  { id: "gift-cards", label: "מעקב גיפטקארדים", Icon: Gift },
   { id: "stores", label: "חנויות", Icon: StoreIcon },
   { id: "employees", label: "עובדים", Icon: UsersRound },
   { id: "rules", label: "חוקי סיכון", Icon: SlidersHorizontal },
@@ -88,6 +90,7 @@ export function FraudCommandCenter() {
   const [view, setView] = useState<View>("overview");
   const [selectedCase, setSelectedCase] = useState<FraudCase | null>(null);
   const [caseData, setCaseData] = useState(initialCases);
+  const [giftLedger, setGiftLedger] = useState<DashboardSnapshot["giftCardLedger"]>();
   const [query, setQuery] = useState("");
   const [severity, setSeverity] = useState<Severity | "all">("all");
   const [store, setStore] = useState("all");
@@ -112,6 +115,7 @@ export function FraudCommandCenter() {
 
   const applySnapshot = (snapshot: DashboardSnapshot) => {
     setCaseData(snapshot.cases);
+    setGiftLedger(snapshot.giftCardLedger);
     setStoreData(snapshot.stores);
     setEmployeeData(snapshot.employees);
     setRuleData(snapshot.rules);
@@ -133,6 +137,9 @@ export function FraudCommandCenter() {
   };
 
   useEffect(() => { void refreshSnapshot(); }, []);
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("view") === "gift-cards") setView("gift-cards");
+  }, []);
 
   const decideCase = async (status: CaseStatus) => {
     if (!selectedCase) return;
@@ -311,6 +318,7 @@ export function FraudCommandCenter() {
           />
         ) : null}
         {view === "stores" ? <StoresScreen stores={storeData} onConnect={() => setConnectOpen(true)} onSync={syncShopifyStore} syncing={syncState === "loading"} /> : null}
+        {view === "gift-cards" ? <GiftCardWorkspace ledger={giftLedger} stores={storeData} cases={caseData} onOpenCase={openCase} onRefresh={refreshSnapshot} /> : null}
         {view === "employees" ? <EmployeesScreen employees={employeeData} onCreate={createEmployee} /> : null}
         {view === "rules" ? <RulesScreen rules={ruleData} onToggle={toggleRule} onSave={saveRule} onCreate={createRule} /> : null}
         {view === "notifications" ? <NotificationsScreen settings={notifications} deliveries={deliveries} onSave={saveNotifications} /> : null}
@@ -382,7 +390,7 @@ function clusterCases(items: FraudCase[]): CaseCluster[] {
     return {
       id: cases.map((item) => item.id).sort()[0], cases, emails, ips, phones, customers, severity,
       totalAmount: cases.reduce((sum, item) => sum + item.amount, 0),
-      giftCardOrders: cases.filter((item) => item.items.some((line) => /gift\s*card|כרטיס\s*מתנה/i.test(line.name))).length,
+      giftCardOrders: cases.filter((item) => item.items.some((line) => /gift\s*card|גיפט\s*קארד|כרטיס\s*מתנה/i.test(line.name))).length,
       giftCardLinks: cases.reduce((sum, item) => sum + (item.context?.giftCards?.redeemed.filter((redemption) => redemption.identityChanged).length ?? 0), 0),
     };
   }).sort((left, right) => severityOrder[right.severity] - severityOrder[left.severity] || right.cases.length - left.cases.length);
@@ -460,7 +468,7 @@ function Overview({ cases, query, setQuery, severity, setSeverity, store, setSto
           return <article className={`case-cluster ${cluster.cases.length > 1 ? "case-cluster-linked" : ""}`} key={cluster.id}>
             <button className="case-cluster-summary" onClick={() => cluster.cases.length === 1 ? onOpen(cluster.cases[0]) : toggleCluster(cluster.id)} aria-expanded={cluster.cases.length > 1 ? expanded : undefined}>
               <div className="cluster-severity">{closedByRules ? <span className="closed-by-rules"><CheckCircle2 size={15} /> נסגר לפי החוקים</span> : <SeverityBadge severity={activeClusterCases.length ? activeSeverity : cluster.severity} score={Math.max(...(activeClusterCases.length ? activeClusterCases : cluster.cases).map((item) => item.score))} />}</div>
-              <div className="cluster-identity"><strong>{repeatedBy}</strong><span>{cluster.cases.length > 1 ? `${cluster.cases.length} הזמנות קושרו לאותה זהות` : `${cluster.cases[0].orderNumber} · ${cluster.cases[0].reason}`}</span><div className="cluster-signals">{cluster.emails.length > 1 ? <span><Mail size={13} /> {cluster.emails.length} אימיילים</span> : null}{cluster.ips.length === 1 && cluster.cases.length > 1 ? <span><Wifi size={13} /> IP משותף</span> : null}{cluster.phones.length === 1 && cluster.cases.length > 1 ? <span><Phone size={13} /> טלפון משותף</span> : null}{cluster.giftCardOrders > 0 ? <span><Gift size={13} /> {cluster.giftCardOrders} Gift Card</span> : null}{cluster.giftCardLinks > 0 ? <span className="gift-card-link-signal"><Fingerprint size={13} /> {cluster.giftCardLinks} מימושים מקושרים</span> : null}</div></div>
+              <div className="cluster-identity"><strong>{repeatedBy}</strong><span>{cluster.cases.length > 1 ? cluster.giftCardLinks > 0 ? `${cluster.cases.length} הזמנות מקושרות ברכישה ובמימוש` : `${cluster.cases.length} הזמנות עם פרטי זיהוי משותפים` : `${cluster.cases[0].orderNumber} · ${cluster.cases[0].reason}`}</span><div className="cluster-signals">{cluster.emails.length > 1 ? <span><Mail size={13} /> {cluster.emails.length} אימיילים</span> : null}{cluster.ips.length === 1 && cluster.cases.length > 1 ? <span><Wifi size={13} /> IP משותף</span> : null}{cluster.phones.length === 1 && cluster.cases.length > 1 ? <span><Phone size={13} /> טלפון משותף</span> : null}{cluster.giftCardOrders > 0 ? <span><Gift size={13} /> {cluster.giftCardOrders} Gift Card</span> : null}{cluster.giftCardLinks > 0 ? <span className="gift-card-link-signal"><Fingerprint size={13} /> {cluster.giftCardLinks} מימושים מקושרים</span> : null}</div></div>
               <div className="cluster-stat"><span>הזמנות</span><strong>{cluster.cases.length}</strong></div>
               <div className="cluster-stat"><span>סכום כולל</span><strong>{formatCurrency(cluster.totalAmount)}</strong></div>
               <div className="cluster-status"><span className={`status status-${statusCase.status}`}>{closedByRules ? "נסגר אוטומטית" : caseStatusLabel(statusCase)}</span>{cluster.cases.length > 1 ? expanded ? <ChevronUp size={18} /> : <ChevronDown size={18} /> : <ChevronLeft size={18} />}</div>
@@ -492,12 +500,12 @@ function GiftCardTrail({ item }: { item: FraudCase }) {
   const redeemedCount = activity.issued.filter((card) => card.redemptions.length > 0).length;
   return <section className="gift-card-trail" aria-label="מסלול כרטיסי המתנה">
     <div className="gift-card-trail-heading"><div><Gift size={17} /><div><strong>מסלול Gift Card</strong><span>{activity.issued.length ? `${activity.issued.length} כרטיסים הונפקו · ${redeemedCount} כבר מומשו` : `${activity.redeemed.length} כרטיסים מומשו בהזמנה זו`}</span></div></div><span className="gift-card-safe">הקוד המלא אינו נשמר</span></div>
-    {links.length ? <div className="gift-card-links">{links.slice(0, 8).map(({ card, redemption }) => <article key={`${redemption.giftCardId}:${redemption.orderId}`}>
+    {links.length ? <div className="gift-card-links">{links.slice(0, 8).map(({ card, redemption }) => <article key={redemption.transactionId ?? `${redemption.giftCardId}:${redemption.orderId}`}>
       <div className="gift-card-id"><span>{redemption.maskedCode}</span><strong className="mono">{giftCardDisplayId(redemption.giftCardId)}</strong></div>
       <div className="gift-card-route"><div><span>נרכש</span><strong>{redemption.purchaseOrderNumber ?? card?.purchaseOrderNumber ?? "הזמנה לא ידועה"}</strong><small>{redemption.purchaserCustomer || redemption.purchaserEmail || "זהות הרוכש לא התקבלה"}</small></div><ChevronLeft size={17} /><div><span>מומש</span><strong>{redemption.orderNumber}</strong><small>{redemption.customer || redemption.email}</small></div></div>
-      <div className="gift-card-link-result"><strong>{formatCurrency(redemption.amount)}</strong><span className={redemption.identityChanged ? "identity-changed" : "identity-same"}>{redemption.identityChanged ? "זהות שונה מהרוכש" : "אותה זהות"}</span><small>{redemption.confidence === "exact-id" ? "התאמה לפי מזהה Shopify" : "התאמה ייחודית לפי 4 ספרות"}</small></div>
-    </article>)}</div> : <div className="gift-card-unredeemed"><strong>{activity.issued.length} כרטיסים ממתינים למימוש</strong><span>כאשר אחד מהם ישמש בהזמנה, המערכת תקשר אוטומטית בין הקונה למממש.</span></div>}
-    {links.length > 8 ? <p className="gift-card-more">ועוד {links.length - 8} מימושים מקושרים</p> : null}
+      <div className="gift-card-link-result"><strong>{new Intl.NumberFormat("he-IL", { style: "currency", currency: redemption.currency ?? "ILS" }).format(redemption.amount)}</strong><span className={redemption.identityChanged ? "identity-changed" : "identity-same"}>{redemption.identityChanged ? "פרטי קונה ומממש שונים" : "לא זוהה שינוי בפרטים"}</span><small>{redemption.confidence === "exact-id" ? "התאמה לפי מזהה Shopify" : "התאמה חלקית — אינה הוכחה"}</small></div>
+    </article>)}</div> : <div className="gift-card-unredeemed"><strong>{activity.issued.length} כרטיסים ללא מימוש שאותר</strong><span>לא נמצא מימוש בנתונים שנבדקו. זו אינה בדיקת יתרה; אפשר להרחיב את הסריקה במעקב גיפטקארדים.</span></div>}
+    <p className="gift-card-more"><a href={`/?view=gift-cards&order=${encodeURIComponent(item.orderNumber)}`}>{links.length > 8 ? `ועוד ${links.length - 8} מימושים מקושרים · ` : ""}למסלול המלא במעקב גיפטקארדים</a></p>
   </section>;
 }
 
@@ -567,7 +575,7 @@ function ConnectStoreDialog({ onClose, onConnect }: { onClose: () => void; onCon
       <form onSubmit={submit} className="connect-form" autoComplete="off">
         <label className="field-label">כתובת החנות<span>הדומיין הקבוע של החנות, לא כתובת האתר הציבורית.</span><div className="domain-input"><span aria-hidden="true">https://</span><input name="shopDomain" dir="ltr" required placeholder="your-store.myshopify.com" autoCapitalize="none" autoCorrect="off" spellCheck={false} inputMode="url" aria-label="דומיין קבוע של חנות Shopify" /></div></label>
         <div className="credentials-grid"><label className="field-label">Client ID<input name="clientId" dir="ltr" required autoComplete="off" placeholder="מ־Shopify Dev Dashboard" /></label><label className="field-label">Client secret<input name="clientSecret" dir="ltr" type="password" required autoComplete="new-password" placeholder="••••••••••••••••" /></label></div>
-        <div className="credential-note"><LockKeyhole size={17} /><div><strong>ה־Client secret לא נשמר בדפדפן</strong><span>הוא נשלח לשרת המקומי רק כדי לקבל Token זמני מ־Shopify. למעקב אחר רכישה ומימוש של Gift Cards האפליקציה צריכה את ההרשאות read_orders, read_customers ו־read_gift_cards.</span></div></div>
+        <div className="credential-note"><LockKeyhole size={17} /><div><strong>ה־Client secret לא נשמר בדפדפן</strong><span>הוא נשלח לשרת כדי להתחבר ל־Shopify. מעקב הגיפטקארדים משתמש בנתוני הזמנות ובאירועים הזמינים בהרשאות החיבור. קריאת יתרות כרטיסים היא יכולת נפרדת שדורשת read_gift_cards.</span></div></div>
         {error ? <div className="inline-error" role="alert">{error}</div> : null}
         <div className="connect-help"><span>את הפרטים מוצאים ב־Dev Dashboard ← Apps ← האפליקציה שלך ← Settings.</span><a href="https://dev.shopify.com/dashboard" target="_blank" rel="noreferrer">פתח Dev Dashboard <ExternalLink size={13} /></a></div>
         <footer><button type="button" className="secondary-button" onClick={onClose} disabled={connecting}>ביטול</button><button className="primary-button" disabled={connecting}>{connecting ? <><RefreshCcw size={15} className="spin" /> בודק מול Shopify…</> : <><Shield size={15} /> בדוק וחבר חנות</>}</button></footer>
@@ -581,7 +589,7 @@ function StoresScreen({ stores, onConnect, onSync, syncing }: { stores: Store[];
   const ordersToday = stores.reduce((total, store) => total + store.ordersLast30Days, 0);
   return <div className="page-content product-page stores-page"><PageHeading eyebrow="חיבורי SHOPIFY" title="החנויות שמוגנות כרגע" description="לכל חנות סביבת עבודה נפרדת. כאן אפשר לראות אם הנתונים נקלטים ומתי התקבלה ההזמנה האחרונה." action={<button className="primary-button" onClick={onConnect}><Plus size={16} /> חיבור חנות</button>} />
     <section className="compact-overview"><div><span>חנויות מחוברות</span><strong>{connected} מתוך {stores.length}</strong><small>מקבלות הזמנות בזמן אמת</small></div><div><span>הזמנות ב־30 יום</span><strong>{ordersToday.toLocaleString("he-IL")}</strong><small>מכל החנויות בארגון</small></div><div><span>דורש טיפול</span><strong>{stores.length - connected}</strong><small>חיבורים שצריך לבדוק</small></div></section>
-    {stores.length ? <div className="store-grid">{stores.map((item) => { const receiving = item.realtimeStatus === "active"; const registered = item.realtimeStatus === "registered"; const realtimeReady = receiving || registered; const configuring = item.realtimeStatus === "configuring"; const giftCardActive = item.giftCardTrackingStatus === "active"; const giftCardApproval = item.giftCardTrackingStatus === "shopify-approval-required" || item.giftCardTrackingStatus === "permission-required"; return <article className="store-card" key={item.id}><div className="store-card-top"><div className="store-logo"><StoreIcon /></div><span className={`connection-state ${realtimeReady ? "state-active" : "state-degraded"}`}>{receiving ? "אירועים נקלטים בזמן אמת" : registered ? "קליטה חיה הוגדרה · ממתין להזמנה" : configuring ? "מגדיר קליטה בזמן אמת" : "נדרש חיבור מחדש לזמן אמת"}</span></div><h2>{item.name}</h2><p className="mono">{item.domain}</p>{item.giftCardTrackingStatus ? <div className={`gift-card-tracking-state ${giftCardActive ? "tracking-active" : "tracking-permission"}`}><Gift size={16} /><div><strong>{giftCardActive ? `מעקב Gift Card פעיל · ${item.giftCardsTracked ?? 0} כרטיסים ב־30 יום` : giftCardApproval ? "המעקב מוכן · ממתין לאישור Shopify" : "מעקב Gift Card אינו זמין כרגע"}</strong><span>{giftCardActive ? "רכישה ומימוש נקשרים לפי מזהה Shopify המאובטח." : giftCardApproval ? "Shopify דורשת אישור Support מיוחד להרשאת read_gift_cards; הוספת ההרשאה לגרסה בלבד אינה מספיקה." : "אירעה תקלה זמנית בקריאת Gift Cards. ההזמנות וההתראות ממשיכות להיקלט."}</span></div></div> : null}{!realtimeReady ? <div className="realtime-notice"><Info size={16} /><div><strong>סנכרון 30 הימים הושלם, אך קליטה חיה עדיין לא הוגדרה</strong><span>יש לבצע חיבור מחדש פעם אחת כדי לרשום את ההתראה האוטומטית מול Shopify.</span></div></div> : null}<div className="store-stats"><div><span>הזמנות ב־30 יום</span><strong>{item.ordersLast30Days.toLocaleString("he-IL")}</strong></div><div><span>הזמנה אחרונה שנשמרה</span><strong>{item.lastEventAt}</strong></div><div><span>אירוע חי אחרון</span><strong>{item.lastWebhookAt ? new Intl.DateTimeFormat("he-IL", { dateStyle: "short", timeStyle: "short" }).format(new Date(item.lastWebhookAt)) : registered ? "ממתין להזמנה חדשה" : "עדיין לא התקבל"}</strong></div><div><span>סנכרון היסטורי אחרון</span><strong>{item.lastSyncAt ? new Intl.DateTimeFormat("he-IL", { dateStyle: "short", timeStyle: "short" }).format(new Date(item.lastSyncAt)) : "לא בוצע"}</strong></div></div><div className="store-actions"><button onClick={() => void onSync(item.id)} disabled={syncing}>{syncing ? "מסנכרן…" : "סנכרן 30 יום מחדש"}</button><button className={!realtimeReady ? "reconnect-attention" : ""} onClick={onConnect} aria-label={`חיבור מחדש של ${item.name}`}><RefreshCcw size={15} /> חיבור מחדש</button></div></article>; })}</div> : <div className="empty-panel"><div className="empty-panel-icon"><StoreIcon size={25} /></div><h2>עדיין לא חוברה חנות</h2><p>לא הוזנו פרטי חנות לדוגמה. החנות הראשונה שתחבר תופיע כאן עם נתונים אמיתיים בלבד.</p><button className="primary-button" onClick={onConnect}><Plus size={16} /> חיבור חנות Shopify</button></div>}
+    {stores.length ? <div className="store-grid">{stores.map((item) => { const receiving = item.realtimeStatus === "active"; const registered = item.realtimeStatus === "registered"; const realtimeReady = receiving || registered; const configuring = item.realtimeStatus === "configuring"; const giftCardActive = item.giftCardTrackingStatus === "active"; const giftCardApproval = item.giftCardTrackingStatus === "shopify-approval-required" || item.giftCardTrackingStatus === "permission-required"; return <article className="store-card" key={item.id}><div className="store-card-top"><div className="store-logo"><StoreIcon /></div><span className={`connection-state ${realtimeReady ? "state-active" : "state-degraded"}`}>{receiving ? "אירועים נקלטים בזמן אמת" : registered ? "קליטה חיה הוגדרה · ממתין להזמנה" : configuring ? "מגדיר קליטה בזמן אמת" : "נדרש חיבור מחדש לזמן אמת"}</span></div><h2>{item.name}</h2><p className="mono">{item.domain}</p>{item.giftCardTrackingStatus ? <div className={`gift-card-tracking-state ${giftCardActive ? "tracking-active" : "tracking-permission"}`}><Gift size={16} /><div><strong>{giftCardActive ? `גישה למאגר כרטיסים · ${item.giftCardsTracked ?? 0} כרטיסים` : giftCardApproval ? "מעקב לפי הזמנות · ללא גישה ליתרות" : "מעקב לפי ראיות הזמנה"}</strong><span>{giftCardActive ? "מסלולי הרכישה והמימוש נמצאים במסך מעקב גיפטקארדים." : giftCardApproval ? "ניתן לקשר רכישה למימוש כשמזהה הכרטיס מופיע באירועי ההזמנה ובעסקאות. read_gift_cards נדרשת לגישה ליתרות ולמאגר הכרטיסים, לא למסלול הראיות הזה." : "פתח את מעקב הגיפטקארדים וסרוק את ההזמנות הזמינות."}</span></div></div> : null}{!realtimeReady ? <div className="realtime-notice"><Info size={16} /><div><strong>סנכרון 30 הימים הושלם, אך קליטה חיה עדיין לא הוגדרה</strong><span>יש לבצע חיבור מחדש פעם אחת כדי לרשום את ההתראה האוטומטית מול Shopify.</span></div></div> : null}<div className="store-stats"><div><span>הזמנות ב־30 יום</span><strong>{item.ordersLast30Days.toLocaleString("he-IL")}</strong></div><div><span>הזמנה אחרונה שנשמרה</span><strong>{item.lastEventAt}</strong></div><div><span>אירוע חי אחרון</span><strong>{item.lastWebhookAt ? new Intl.DateTimeFormat("he-IL", { dateStyle: "short", timeStyle: "short" }).format(new Date(item.lastWebhookAt)) : registered ? "ממתין להזמנה חדשה" : "עדיין לא התקבל"}</strong></div><div><span>סנכרון היסטורי אחרון</span><strong>{item.lastSyncAt ? new Intl.DateTimeFormat("he-IL", { dateStyle: "short", timeStyle: "short" }).format(new Date(item.lastSyncAt)) : "לא בוצע"}</strong></div></div><div className="store-actions"><button onClick={() => void onSync(item.id)} disabled={syncing}>{syncing ? "מסנכרן…" : "סנכרן 30 יום מחדש"}</button><button className={!realtimeReady ? "reconnect-attention" : ""} onClick={onConnect} aria-label={`חיבור מחדש של ${item.name}`}><RefreshCcw size={15} /> חיבור מחדש</button></div></article>; })}</div> : <div className="empty-panel"><div className="empty-panel-icon"><StoreIcon size={25} /></div><h2>עדיין לא חוברה חנות</h2><p>לא הוזנו פרטי חנות לדוגמה. החנות הראשונה שתחבר תופיע כאן עם נתונים אמיתיים בלבד.</p><button className="primary-button" onClick={onConnect}><Plus size={16} /> חיבור חנות Shopify</button></div>}
     <div className="security-note"><LockKeyhole size={20} /><div><strong>כל חנות רואה רק את המידע שלה</strong><p>פרטי החיבור נשמרים מוצפנים. רק בעל הפלטפורמה יכול לחבר חנות או להחליף הרשאות.</p></div></div>
   </div>;
 }

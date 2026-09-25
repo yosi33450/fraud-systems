@@ -2,6 +2,7 @@ import { completeHistoricalSync, failHistoricalSync, ingestShopifyOrder, replace
 import type { Store } from "@/lib/types";
 import { shopifyAdminRequest } from "@/lib/shopify-admin.server";
 import { selectCustomerEmail } from "@/lib/customer-identity";
+import { syncGiftEvidenceForOrder } from "@/lib/gift-card-sync.server";
 
 export const ORDERS_BACKFILL_QUERY = `#graphql
   query ShieldLedgerOrdersBackfill($first: Int!, $after: String, $query: String!) {
@@ -40,6 +41,7 @@ export const ORDERS_BACKFILL_QUERY = `#graphql
           nodes {
             name
             title
+            isGiftCard
             quantity
             originalUnitPriceSet { shopMoney { amount currencyCode } }
           }
@@ -78,7 +80,7 @@ export const ORDER_GIFT_CARD_DETAILS_QUERY = `#graphql
       customer { id firstName lastName defaultEmailAddress { emailAddress } defaultPhoneNumber { phoneNumber } }
       billingAddress { firstName lastName address1 city province countryCodeV2 zip phone }
       shippingAddress { firstName lastName address1 city province countryCodeV2 zip phone }
-      lineItems(first: 50) { nodes { name title quantity originalUnitPriceSet { shopMoney { amount currencyCode } } } }
+      lineItems(first: 50) { nodes { name title isGiftCard quantity originalUnitPriceSet { shopMoney { amount currencyCode } } } }
     }
   }
 `;
@@ -111,7 +113,7 @@ type ShopifyOrderNode = {
   } | null;
   billingAddress?: { firstName?: string | null; lastName?: string | null; address1?: string | null; city?: string | null; province?: string | null; countryCodeV2?: string | null; zip?: string | null; phone?: string | null } | null;
   shippingAddress?: { firstName?: string | null; lastName?: string | null; address1?: string | null; city?: string | null; province?: string | null; countryCodeV2?: string | null; zip?: string | null; phone?: string | null } | null;
-  lineItems: { nodes: Array<{ name: string; title: string; quantity: number; originalUnitPriceSet: { shopMoney: { amount: string; currencyCode: string } } }> };
+  lineItems: { nodes: Array<{ name: string; title: string; isGiftCard: boolean; quantity: number; originalUnitPriceSet: { shopMoney: { amount: string; currencyCode: string } } }> };
 };
 
 type OrdersBackfillResponse = {
@@ -171,6 +173,7 @@ const toPayload = (order: ShopifyOrderNode): ShopifyOrderPayload => ({
   line_items: order.lineItems.nodes.map((item) => ({
     name: item.name,
     title: item.title,
+    gift_card: item.isGiftCard,
     quantity: item.quantity,
     price: item.originalUnitPriceSet.shopMoney.amount,
   })),
@@ -271,13 +274,10 @@ export async function syncShopifyOrderGiftCards(input: { tenantId: string; store
     variables: { id: input.orderId },
   });
   if (!data.order) throw new Error("SHOPIFY_ORDER_NOT_FOUND");
-  const containsGiftCard = data.order.lineItems.nodes.some((item) => /gift\s*card|כרטיס\s*מתנה/i.test(`${item.name} ${item.title}`))
+  const containsGiftCard = data.order.lineItems.nodes.some((item) => item.isGiftCard)
     || data.order.transactions.some((transaction) => /gift.?card/i.test(`${transaction.gateway ?? ""} ${transaction.formattedGateway ?? ""}`));
   if (containsGiftCard) {
-    const since = new Date(Date.now() - 2 * 86_400_000).toISOString();
-    try { await syncGiftCardRegistry(input, { since, replace: false }); } catch (error) {
-      console.warn("[shopify-sync] live gift card registry refresh unavailable", error instanceof Error ? error.message : error);
-    }
+    await syncGiftEvidenceForOrder(input, input.orderId);
   }
   return ingestShopifyOrder({ storeId: input.storeId, webhookId: input.webhookId, topic: input.topic, payload: toPayload(data.order) });
 }
