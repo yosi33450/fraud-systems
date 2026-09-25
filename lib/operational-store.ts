@@ -152,6 +152,10 @@ export function restoreOperationalState(snapshot: PersistedOperationalState) {
   state.orders = clone(snapshot.orders ?? []);
   state.audit = clone(snapshot.audit ?? []);
   state.storeConnections = new Map(clone(snapshot.storeConnections ?? []));
+  state.stores = state.stores.map((store) => ({
+    ...store,
+    realtimeStatus: store.realtimeStatus ?? "setup-required",
+  }));
   migrateLegacyRules();
 }
 
@@ -283,7 +287,11 @@ export function getDashboardSnapshot(tenantId: string): DashboardSnapshot {
   const tenantStores = state.stores.filter((item) => item.tenantId === tenantId).map((store) => {
     const storeOrders = state.orders.filter((order) => order.storeId === store.id);
     const uniqueOrdersSince = (since: number) => new Set(storeOrders.filter((order) => new Date(order.createdAt).getTime() >= since).map((order) => order.shopifyOrderId)).size;
-    return { ...store, ordersLast30Days: uniqueOrdersSince(thirtyDaysAgo) };
+    return {
+      ...store,
+      ordersLast30Days: uniqueOrdersSince(thirtyDaysAgo),
+      realtimeStatus: store.realtimeStatus ?? "setup-required",
+    };
   });
   return {
     tenantId,
@@ -528,9 +536,11 @@ export function connectShopifyStore(input: {
   const store: Store = existing ?? {
     id: randomUUID(), tenantId: input.tenantId, name: input.name, domain: input.domain,
     status: "syncing", lastEventAt: "מסנכרן 30 יום אחרונים", ordersToday: 0, ordersLast30Days: 0,
+    realtimeStatus: "configuring",
   };
   store.name = input.name;
   store.status = "syncing";
+  store.realtimeStatus = "configuring";
   if (!existing) state.stores.unshift(store);
   state.storeConnections.set(store.id, {
     accessToken: input.accessToken,
@@ -554,6 +564,19 @@ export function getStoreConnection(tenantId: string, storeId: string) {
 
 export function getStoreWebhookSecret(storeId: string) {
   return state.storeConnections.get(storeId)?.webhookSecret;
+}
+
+export function markStoreRealtimeReady(tenantId: string, storeId: string) {
+  const store = tenantStore(tenantId, storeId);
+  store.realtimeStatus = "registered";
+  store.webhookRegisteredAt = new Date().toISOString();
+  return clone(store);
+}
+
+export function markStoreRealtimeError(tenantId: string, storeId: string) {
+  const store = tenantStore(tenantId, storeId);
+  store.realtimeStatus = "error";
+  return clone(store);
 }
 
 export function completeHistoricalSync(tenantId: string, storeId: string, scanned: number, latestOrderAt?: string) {
@@ -584,9 +607,13 @@ const sameAddress = (left?: ShopifyOrderPayload["billing_address"], right?: Shop
 };
 
 export function ingestShopifyOrder(input: { storeId: string; webhookId: string; topic: string; payload: ShopifyOrderPayload }) {
-  if (state.webhookIds.has(`${input.storeId}:${input.webhookId}`)) return { duplicate: true as const, case: null };
   const store = state.stores.find((item) => item.id === input.storeId);
   if (!store) throw new Error("STORE_NOT_FOUND");
+  if (input.topic !== "HISTORICAL_SYNC") {
+    store.realtimeStatus = "active";
+    store.lastWebhookAt = new Date().toISOString();
+  }
+  if (state.webhookIds.has(`${input.storeId}:${input.webhookId}`)) return { duplicate: true as const, case: null };
   state.webhookIds.add(`${input.storeId}:${input.webhookId}`);
 
   const payload = input.payload;
@@ -660,7 +687,9 @@ export function ingestShopifyOrder(input: { storeId: string; webhookId: string; 
   const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
   if (orderTime >= startOfToday) store.ordersToday += 1;
   if (orderTime >= Date.now() - 30 * 86_400_000) store.ordersLast30Days += 1;
-  if (input.topic !== "HISTORICAL_SYNC") store.lastEventAt = "עכשיו";
+  if (input.topic !== "HISTORICAL_SYNC") {
+    store.lastEventAt = new Intl.DateTimeFormat("he-IL", { dateStyle: "short", timeStyle: "short", timeZone: "Asia/Jerusalem" }).format(new Date(createdAt));
+  }
 
   const result = evaluateRisk(signals, new Date(createdAt), state.rulesByTenant.get(store.tenantId) ?? []);
   for (const ruleId of result.matchedRuleIds) {

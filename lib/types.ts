@@ -12,6 +12,9 @@ export interface Store {
   ordersToday: number;
   ordersLast30Days: number;
   lastSyncAt?: string;
+  realtimeStatus?: "active" | "registered" | "configuring" | "setup-required" | "error";
+  webhookRegisteredAt?: string;
+  lastWebhookAt?: string;
 }
 
 export interface Evidence {

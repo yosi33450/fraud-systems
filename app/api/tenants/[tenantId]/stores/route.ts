@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { connectShopifyStore } from "@/lib/operational-store";
+import { connectShopifyStore, markStoreRealtimeError, markStoreRealtimeReady } from "@/lib/operational-store";
 import { ensureOrderCreateWebhook, requestOrganizationAccessToken, testShopifyConnection } from "@/lib/shopify-admin.server";
 import { syncOrdersLast30Days } from "@/lib/shopify-sync.server";
 import { hydrateOperationalState, persistOperationalState } from "@/lib/persistence.server";
@@ -18,6 +18,7 @@ export async function POST(request: Request, context: { params: Promise<{ tenant
   if (![shopDomain, clientId, clientSecret].every((value) => typeof value === "string" && value.trim())) {
     return NextResponse.json({ error: "MISSING_CREDENTIALS" }, { status: 400 });
   }
+  let connectedStoreId: string | null = null;
   try {
     const token = await requestOrganizationAccessToken({
       shopDomain: String(shopDomain), clientId: String(clientId), clientSecret: String(clientSecret),
@@ -31,6 +32,7 @@ export async function POST(request: Request, context: { params: Promise<{ tenant
       clientSecret: String(clientSecret),
       expiresIn: token.expiresIn,
     });
+    connectedStoreId = store.id;
     const sync = await syncOrdersLast30Days({
       tenantId,
       storeId: store.id,
@@ -42,9 +44,11 @@ export async function POST(request: Request, context: { params: Promise<{ tenant
       accessToken: token.accessToken,
       uri: new URL(`/api/shopify/webhooks/${store.id}`, request.url).toString(),
     });
+    const readyStore = markStoreRealtimeReady(tenantId, store.id);
     await persistOperationalState();
-    return NextResponse.json({ connected: true, store: sync.store, sync, webhook });
+    return NextResponse.json({ connected: true, store: readyStore, sync, webhook });
   } catch (error) {
+    if (connectedStoreId) markStoreRealtimeError(tenantId, connectedStoreId);
     await persistOperationalState().catch(() => undefined);
     const message = error instanceof Error ? error.message : "SHOPIFY_CONNECTION_FAILED";
     console.error("[shopify-connection] failed", {
