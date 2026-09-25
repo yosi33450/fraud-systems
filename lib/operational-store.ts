@@ -278,10 +278,17 @@ const ensureBaselineRules = (tenantId: string) => {
 };
 
 export function getDashboardSnapshot(tenantId: string): DashboardSnapshot {
+  const now = Date.now();
+  const thirtyDaysAgo = now - 30 * 86_400_000;
+  const tenantStores = state.stores.filter((item) => item.tenantId === tenantId).map((store) => {
+    const storeOrders = state.orders.filter((order) => order.storeId === store.id);
+    const uniqueOrdersSince = (since: number) => new Set(storeOrders.filter((order) => new Date(order.createdAt).getTime() >= since).map((order) => order.shopifyOrderId)).size;
+    return { ...store, ordersLast30Days: uniqueOrdersSince(thirtyDaysAgo) };
+  });
   return {
     tenantId,
     cases: clone(state.cases.filter((item) => item.tenantId === tenantId)),
-    stores: clone(state.stores.filter((item) => item.tenantId === tenantId)),
+    stores: clone(tenantStores),
     employees: clone(state.employees.filter((item) => item.tenantId === tenantId)),
     rules: clone(state.rulesByTenant.get(tenantId) ?? []),
     reports: clone(state.reports.filter((item) => item.tenantId === tenantId)),
