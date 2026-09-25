@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildGiftLedger, extractGiftUses, extractIssuances, normalizeGiftCardId, receiptGiftCard } from '../lib/gift-card-evidence.ts';
+import { buildGiftLedger, hasFlaggedGiftSource, extractGiftUses, extractIssuances, normalizeGiftCardId, receiptGiftCard } from '../lib/gift-card-evidence.ts';
 
 const event = (id = '12345', suffix = 'AB12') => ({ id: 'gid://shopify/BasicEvent/1', action: 'fulfillment_success', createdAt: '2026-09-01T12:00:00Z', additionalContent: JSON.stringify({ content: [{ content: `<a href="/admin/gift_cards/${id}">•••• •••• •••• ${suffix}</a>` }] }) });
 const transaction = (overrides = {}) => ({ id: 'tx1', gateway: 'gift_card', kind: 'SALE', status: 'SUCCESS', processedAt: '2026-09-02T12:00:00Z', receiptJson: JSON.stringify({ gift_card_id: 12345, gift_card_last_characters: 'ab12' }), amountSet: { shopMoney: { amount: '100.25', currencyCode: 'ILS' } }, ...overrides });
@@ -61,4 +61,11 @@ test('conflicting purchase claims are explicitly flagged', () => {
   const issued = extractIssuances([event()]);
   const result = buildGiftLedger([order({ issued }), order({ orderId: 'o2', issued })]);
   assert.equal(result.cards[0].purchaseConflict, true);
+});
+test('different recipient triggers the existing risk signal only with a flagged source order', () => {
+  const ledger = buildGiftLedger([order({ issued: extractIssuances([event()]) }), order({ orderId: 'o2', email: 'recipient@example.com', uses: extractGiftUses([transaction()], '').uses })]);
+  assert.equal(hasFlaggedGiftSource(ledger.cards, 'test-store', 'o2', []), false);
+  for (const status of ['resolved', 'false-positive']) assert.equal(hasFlaggedGiftSource(ledger.cards, 'test-store', 'o2', [{ storeId: 'test-store', orderId: 'o1', status }]), false);
+  assert.equal(hasFlaggedGiftSource(ledger.cards, 'test-store', 'o2', [{ storeId: 'test-store', orderId: 'o1', status: 'new' }]), true);
+  assert.equal(hasFlaggedGiftSource(ledger.cards, 'other-store', 'o2', [{ storeId: 'test-store', orderId: 'o1', status: 'new' }]), false);
 });

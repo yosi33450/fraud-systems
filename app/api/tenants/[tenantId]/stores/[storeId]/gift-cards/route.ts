@@ -8,11 +8,13 @@ export const runtime = "nodejs";
 export const maxDuration = 60;
 
 export async function POST(request: Request, context: { params: Promise<{ tenantId: string; storeId: string }> }) {
+  const started = Date.now();
   await hydrateOperationalState();
   const { tenantId, storeId } = await context.params;
   const store = resolveStore(storeId);
   if (!store || store.tenantId !== tenantId) return NextResponse.json({ error: "STORE_NOT_FOUND" }, { status: 404 });
   try {
+    console.info(JSON.stringify({ route: "gift-ledger-scan", event: "start", requestId: request.headers.get("x-vercel-id") }));
     const body = await request.json() as { mode?: string; after?: string | null; since?: string; until?: string };
     if (body.mode && !["alerts", "all"].includes(body.mode)) return NextResponse.json({ error: "INVALID_SCAN" }, { status: 400 });
     const connection = { tenantId, storeId, shopDomain: store.domain, accessToken: getStoreConnection(tenantId, storeId).accessToken };
@@ -37,6 +39,7 @@ export async function POST(request: Request, context: { params: Promise<{ tenant
       try { await ensureOrderWebhooks({ ...connection, uri: `${new URL(request.url).origin}/api/shopify/webhooks/${storeId}` }); }
       catch { liveSetup = false; }
     }
+    console.info(JSON.stringify({ route: "gift-ledger-scan", event: "complete", scanned: result.scanned, more: Boolean(result.after), ms: Date.now() - started }));
     return NextResponse.json({ ...result, since, until, liveSetup });
   } catch (error) {
     console.error("[gift-ledger] scan failed", error instanceof Error ? error.message : "unknown");

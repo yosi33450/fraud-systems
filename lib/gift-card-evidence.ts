@@ -21,6 +21,15 @@ export type GiftLedgerCard = {
 };
 export type GiftLedger = { cards: GiftLedgerCard[]; orders: GiftCardOrderEvidence[] };
 
+export function hasFlaggedGiftSource(cards: GiftLedgerCard[], storeId: string, orderId: string, sources: Array<{ storeId: string; orderId?: string; status: string }>) {
+  const flagged = new Set(sources.filter((source) => source.storeId === storeId && ["new", "review", "action", "fraud"].includes(source.status)).map((source) => source.orderId));
+  return cards.some((card) => card.storeId === storeId && !card.purchaseConflict && card.purchase && flagged.has(card.purchase.orderId)
+    && card.uses.some((use) => use.order.orderId === orderId && use.kind !== "REFUND" && Boolean(
+      (card.purchase!.email && use.order.email && card.purchase!.email.toLowerCase() !== use.order.email.toLowerCase())
+      || (card.purchase!.customerId && use.order.customerId && card.purchase!.customerId !== use.order.customerId)
+    )));
+}
+
 export function normalizeGiftCardId(value: unknown): string | undefined {
   if (typeof value === "number" && !Number.isSafeInteger(value)) return undefined;
   const match = String(value ?? "").match(/^(?:gid:\/\/shopify\/GiftCard\/)?([1-9]\d*)$/);

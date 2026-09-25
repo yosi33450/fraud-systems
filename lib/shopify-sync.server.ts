@@ -3,6 +3,7 @@ import type { Store } from "@/lib/types";
 import { shopifyAdminRequest } from "@/lib/shopify-admin.server";
 import { selectCustomerEmail } from "@/lib/customer-identity";
 import { syncGiftEvidenceForOrder } from "@/lib/gift-card-sync.server";
+import { hydrateGiftEvidence } from "@/lib/gift-card-persistence.server";
 
 export const ORDERS_BACKFILL_QUERY = `#graphql
   query ShieldLedgerOrdersBackfill($first: Int!, $after: String, $query: String!) {
@@ -277,6 +278,7 @@ export async function syncShopifyOrderGiftCards(input: { tenantId: string; store
   const containsGiftCard = data.order.lineItems.nodes.some((item) => item.isGiftCard)
     || data.order.transactions.some((transaction) => /gift.?card/i.test(`${transaction.gateway ?? ""} ${transaction.formattedGateway ?? ""}`));
   if (containsGiftCard) {
+    await hydrateGiftEvidence(input.tenantId);
     await syncGiftEvidenceForOrder(input, input.orderId);
   }
   return ingestShopifyOrder({ storeId: input.storeId, webhookId: input.webhookId, topic: input.topic, payload: toPayload(data.order) });

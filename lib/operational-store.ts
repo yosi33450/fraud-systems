@@ -2,7 +2,7 @@ import { createHmac, randomUUID } from "node:crypto";
 import { cases as seedCases, employees as seedEmployees, rules as seedRules, stores as seedStores } from "@/lib/initial-state";
 import { evaluateRisk, type OrderSignals } from "@/lib/risk-engine";
 import { isSharedServiceEmail } from "@/lib/customer-identity";
-import { buildGiftLedger, receiptGiftCard, type GiftCardOrderEvidence } from "@/lib/gift-card-evidence";
+import { buildGiftLedger, hasFlaggedGiftSource, receiptGiftCard, type GiftCardOrderEvidence } from "@/lib/gift-card-evidence";
 import type { BlacklistReport, CaseStatus, DashboardSnapshot, Employee, FraudCase, GiftCardRedemption, GiftCardTrace, NotificationDelivery, NotificationSettings, RiskRule, Store } from "@/lib/types";
 
 type ShopifyLineItem = {
@@ -435,6 +435,11 @@ export function updateRule(tenantId: string, ruleId: string, patch: Partial<Pick
 const activeStatuses = new Set<CaseStatus>(["new", "review", "action"]);
 const autoResolvedReason = "לא עומד עוד בחוקי הסיכון הפעילים";
 
+function evidenceLinkedGiftSignal(storeId: string, orderId: string) {
+  return hasFlaggedGiftSource(buildGiftLedger((state.giftCardOrders ?? []).filter((order) => order.storeId === storeId)).cards,
+    storeId, orderId, state.cases.map((item) => ({ storeId: item.storeId, orderId: item.context?.shopifyOrderId, status: item.status })));
+}
+
 const fallbackSignalsForCase = (item: FraudCase, tenantCases: FraudCase[]): OrderSignals => {
   const giftCardValue = item.items.reduce((total, line) => /gift\s*card|כרטיס\s*מתנה/i.test(line.name) ? total + line.price * line.quantity : total, 0);
   const samePhoneEmails = item.context?.phone
@@ -453,7 +458,9 @@ const fallbackSignalsForCase = (item: FraudCase, tenantCases: FraudCase[]): Orde
     averageOrderValue,
     giftCardValue,
     giftCardBaseline: giftCardValue,
-    linkedGiftCard: Boolean(item.context?.giftCards?.redeemed.some((redemption) => redemption.identityChanged && redemption.confidence !== "ambiguous")),
+    linkedGiftCard: evidenceLinkedGiftSignal(item.storeId, item.context?.shopifyOrderId ?? "") || Boolean(item.context?.giftCards?.redeemed.some((redemption) =>
+      redemption.identityChanged && redemption.confidence === "exact-id" && redemption.purchaseOrderNumber && tenantCases.some((source) =>
+        source.storeId === item.storeId && source.orderNumber === redemption.purchaseOrderNumber && ["new", "review", "action", "fraud"].includes(source.status)))),
     paymentFailures: hasEvidence(/כשל|failed payment/i) ? 3 : 0,
     billingShippingMismatch: hasEvidence(/כתובות החיוב והמשלוח שונות/i),
     shopifyRisk: item.context?.shopifyRisk === "high" ? "high" : item.context?.shopifyRisk === "medium" ? "medium" : item.context?.shopifyRisk === "low" ? "low" : "none",
@@ -825,11 +832,11 @@ export function ingestShopifyOrder(input: { storeId: string; webhookId: string; 
   const linkedGiftCard = redeemedGiftCards.some((redemption) => {
     if (!redemption.identityChanged || redemption.confidence === "ambiguous") return false;
     const sourceCard = storeGiftCards.find((card) => card.giftCardId === redemption.giftCardId);
-    return state.cases.some((item) => item.storeId === store.id && (
+    return state.cases.some((item) => item.storeId === store.id && ["new", "review", "action", "fraud"].includes(item.status) && (
       item.context?.shopifyOrderId === sourceCard?.purchaseOrderId
       || Boolean(sourceCard?.purchaserEmail && item.email.includes("@") && normalizeEmail(item.email) === sourceCard.purchaserEmail)
     ));
-  });
+  }) || evidenceLinkedGiftSignal(store.id, shopifyOrderId);
   const existingOrder = state.orders.find((order) => order.storeId === store.id && order.shopifyOrderId === shopifyOrderId);
   const existingCaseBeforeEvaluation = state.cases.find((item) => item.storeId === store.id && (item.context?.shopifyOrderId === shopifyOrderId || (payload.name && item.orderNumber === payload.name)));
   if (existingCaseBeforeEvaluation?.context && !existingCaseBeforeEvaluation.context.shopifyOrderId) existingCaseBeforeEvaluation.context.shopifyOrderId = shopifyOrderId;

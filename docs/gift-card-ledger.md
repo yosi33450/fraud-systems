@@ -14,6 +14,10 @@ It does not issue, disable, redeem or expose the full redeemable code of a card.
 - An exact card ID **and the same tenant/store** are required to link the sides.
 - Last-four characters, names, amounts, or different emails never prove the link.
 - Distinct buyer and recipient is normal gifting, not an automatic fraud verdict.
+- The existing linked-gift-card risk condition is evaluated on live ingestion only
+  when an exact source purchase has an active or merchant-confirmed fraud case and
+  available buyer/recipient identifiers differ. Closed/false-positive sources do
+  not trigger it. Historical evidence scans do not change case decisions/statuses.
 - Missing source or missing transactions is explicitly unknown. No balance or
   initial face value is inferred from order totals, successful charges or absent data.
 - Conflicting issuance claims are flagged and excluded from proven-link counts.
