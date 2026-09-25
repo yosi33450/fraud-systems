@@ -294,7 +294,7 @@ export function FraudCommandCenter() {
       <main className="main-content" id="main-content">
         <header className="topbar">
           <button className="icon-button mobile-menu" onClick={() => setMobileNav(true)} aria-label="פתיחת תפריט" aria-expanded={mobileNav} aria-controls="primary-navigation"><Menu size={20} /></button>
-          <div className={`topbar-context sync-${syncState} ${realtimeNeedsSetup && storeData.length ? "sync-warning" : ""}`}><span className="live-dot" />{syncState === "error" ? "בעיית סנכרון — הנתונים האחרונים נשמרו" : syncState === "loading" ? "מסנכרן נתונים…" : realtimeActive ? "אירועים חדשים נקלטים בזמן אמת" : realtimeRegistered ? "קליטה בזמן אמת הוגדרה — ממתין להזמנה חדשה" : storeData.length ? "נדרש חיבור מחדש לקליטה בזמן אמת" : "ממתין לחיבור חנות"}<span>·</span> API מאובטח לפי לקוח</div>
+          <div className={`topbar-context sync-${syncState} ${realtimeNeedsSetup && storeData.length ? "sync-warning" : ""}`}><span className="live-dot" />{syncState === "error" ? "בעיית סנכרון — הנתונים האחרונים נשמרו" : syncState === "loading" ? "מסנכרן נתונים…" : realtimeActive ? "אירועים חדשים נקלטים בזמן אמת" : realtimeRegistered ? "קליטה בזמן אמת הוגדרה — ממתין להזמנה חדשה" : storeData.length ? "נדרש חיבור מחדש לקליטה בזמן אמת" : "ממתין לחיבור חנות"}</div>
           <div className="topbar-actions">
             <button className="store-pill"><StoreIcon size={15} /> {storeData.length ? "כל החנויות" : "אין חנות מחוברת"} <ChevronDown size={14} /></button>
             <button className="icon-button notification-button" onClick={() => setView("notifications")} aria-label="הגדרות התראות"><Bell size={19} /><span /></button>
@@ -428,7 +428,7 @@ function Overview({ cases, ledger, query, setQuery, severity, setSeverity, store
         <div className="attention-summary">
           <div className="brief-label"><span className="brief-icon"><ShieldAlert size={21} aria-hidden="true" /></span><h2>ממתינים לבדיקה שלך</h2></div>
           <strong className="attention-total">{activeCases.length}</strong>
-          <div className="attention-context"><span>תיקים פתוחים</span><span className="urgent-count"><ShieldAlert size={14} aria-hidden="true" />{activeCases.filter((item) => item.severity === "critical").length} קריטיים</span></div>
+          <div className="attention-context"><span>תיקים פתוחים</span><span className="urgent-count"><ShieldAlert size={14} aria-hidden="true" />{activeCases.filter((item) => item.severity === "critical").length} ברמה קריטית</span></div>
           <button className="primary-button" onClick={onShowAll}>פתיחת ההתראות <ChevronLeft size={17} /></button>
         </div>
         <div className="exposure-summary">
@@ -456,7 +456,7 @@ function Overview({ cases, ledger, query, setQuery, severity, setSeverity, store
     </section> : null}
 
     <section className="case-section">
-      <div className="section-heading"><div><h2>{casesOnly ? "התראות לפי זהות" : "תור החלטות"}</h2><span>{clusters.length} קבוצות · {displayCases.length} הזמנות</span></div>{casesOnly ? <button className="secondary-button" onClick={() => setShowClosed((value) => !value)}>{showClosed ? "הצג פעילות בלבד" : `הצג גם ${cases.length - activeCases.length} שטופלו`}</button> : <button className="text-button" onClick={onShowAll}>הצג הכל <ChevronLeft size={14} /></button>}</div>
+      <div className="section-heading"><div><h2>{casesOnly ? "התראות לפי זהות" : "תור החלטות"}</h2><span>{clusters.length} קבוצות · {displayCases.length} הזמנות</span></div>{casesOnly ? <button className="secondary-button" onClick={() => setShowClosed((value) => !value)}>{showClosed ? "הצג פעילות בלבד" : `הצג גם סגורות (${cases.length - activeCases.length})`}</button> : <button className="text-button" onClick={onShowAll}>הצג הכל <ChevronLeft size={14} /></button>}</div>
       <div className="filter-bar">
         <label className="search-box"><Search size={16} /><span className="sr-only">חיפוש</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="חיפוש הזמנה, לקוח או סיבה" /></label>
         <select value={severity} onChange={(event) => setSeverity(event.target.value as Severity | "all")} aria-label="סינון לפי חומרה"><option value="all">כל החומרות</option><option value="critical">קריטי</option><option value="high">גבוה</option><option value="medium">בינוני</option><option value="low">נמוך</option></select>

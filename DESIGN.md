@@ -36,6 +36,15 @@ without depending on proprietary system fonts or loading a second decorative fam
 Verification for this revision is separate from the prior QA record below. No API,
 data, risk, matching, case grouping, authentication or persistence code is changed.
 
+Revision checks: production build and typecheck pass; 16 existing gift-evidence and
+financial-summary tests pass. All ten workspaces checked at desktop and 375px for
+page overflow. Group and order dialogs retain separate purchase/use figures, open
+centrally and dismiss back to the group. No forms, scans or case decisions submitted.
+Visual review found a cramped desktop sidebar; keep it 252px until the mobile menu
+breakpoint. Closed mobile navigation remains hidden from keyboard focus. Remove the
+decorative API tagline from the top bar so real connection status has room on mobile.
+Rename the closed-case filter to "closed", not "treated": a wording correction only.
+
 ## Scope and audit (2026-09-25)
 
 Presentation only. Preserve handlers, queries, permissions, rules, currency calculations,

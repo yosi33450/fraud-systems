@@ -70,7 +70,7 @@ svg { flex-shrink: 0; }
 .nav-list small { background: var(--trust); color: white; border-radius: var(--radius-pill); min-width: 30px; height: 24px; font-size: .8125rem; padding-inline: 7px; }
 .sidebar-footer { border-color: var(--hairline); }
 .sidebar-footer > button { font-size: .875rem; gap: 8px; }
-.sidebar-footer > button > span:not(.owner-chip) { white-space: nowrap; }
+.sidebar-footer > button > span:not(.owner-chip) { min-width: 0; white-space: normal; text-align: start; }
 .owner-chip { background: #e3e9e5; color: var(--slate); font-size: .75rem; }
 .user-block { background: transparent; border-top: 1px solid var(--hairline); border-radius: 0; padding-top: 16px; }
 .user-block strong { color: var(--ink); font-size: .875rem; }
@@ -206,7 +206,7 @@ svg { flex-shrink: 0; }
 .drawer-header h2, .drawer-title h2 { font-size: 1.5rem; font-weight: 650; line-height: 1.4; }
 .drawer-header p { color: var(--slate); font-size: .875rem; }
 .centered-dialog .drawer-body, .cluster-dialog-body { background: white; padding: 24px 28px; }
-.case-summary-strip { background: #f4f7f5; border: 0; border-radius: 8px; box-shadow: none; padding: 20px; }
+.case-summary-strip { background: #f4f7f5; border: 0; border-radius: 16px; box-shadow: none; padding: 20px; }
 .case-summary-strip strong { font-size: 1.125rem; }
 .case-summary-strip span, .case-summary-strip small { font-size: .875rem; }
 .case-summary-strip dt, .evidence-columns, .evidence-source { font-size: .8125rem; }
@@ -228,7 +228,7 @@ svg { flex-shrink: 0; }
 .decision-bar { padding: 16px 28px; background: white; border-top: 1px solid var(--hairline); box-shadow: none; }
 .decision-bar span, .decision-status span { font-size: .8125rem; }
 .decision-bar strong { font-size: .9375rem; }
-.gift-money-flow { border: 0; border-radius: 8px; background: #edf4ef; padding: 24px; }
+.gift-money-flow { border: 0; border-radius: 16px; background: #edf4ef; padding: 24px; }
 .gift-money-flow strong { font-size: 1.75rem; font-weight: 650; }
 .gift-money-flow span, .gift-money-flow small, .gift-money-note, .cluster-dialog-footer { color: var(--slate); font-size: .875rem; }
 .cluster-dialog-order { padding: 18px 12px; border-color: var(--hairline); gap: 16px; }
@@ -382,7 +382,7 @@ svg { flex-shrink: 0; }
 .error-page p { font-size: 1rem; }
 
 @media (max-width: 1280px) {
-  :root { --sidebar-width: 224px; }
+  :root { --sidebar-width: 252px; }
   .sidebar { padding-inline: 12px; }
   .page-content, .product-page, .gift-ledger-page { padding: 28px 24px; }
   .case-queue-head, .case-cluster-summary { grid-template-columns: 92px minmax(160px, 1fr) 52px 150px 72px; gap: 12px; }
