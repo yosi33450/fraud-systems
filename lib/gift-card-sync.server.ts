@@ -8,7 +8,8 @@ type Connection = { tenantId: string; storeId: string; shopDomain: string; acces
 const fields = `id name createdAt email customAttributes { key value }
   customer { id firstName lastName defaultEmailAddress { emailAddress } }
   shippingAddress { firstName lastName } billingAddress { firstName lastName }
-  lineItems(first: 100) { nodes { isGiftCard quantity } pageInfo { hasNextPage } }
+  lineItems(first: 100) { nodes { isGiftCard quantity originalTotalSet { shopMoney { amount currencyCode } }
+    discountAllocations { allocatedAmountSet { shopMoney { amount currencyCode } } } } pageInfo { hasNextPage } }
   transactions(first: 250) { id gateway kind status processedAt receiptJson amountSet { shopMoney { amount currencyCode } } }`;
 export const GIFT_ORDER_QUERY = `query GiftLedgerOrder($id: ID!) { order(id: $id) { ${fields} } }`;
 export const GIFT_SCAN_QUERY = `query GiftLedgerScan($after: String, $query: String!) {
@@ -27,7 +28,10 @@ type GiftOrder = {
   customAttributes: Array<{ key: string; value: string }>;
   customer?: { id: string; firstName?: string; lastName?: string; defaultEmailAddress?: { emailAddress: string } };
   shippingAddress?: { firstName?: string; lastName?: string }; billingAddress?: { firstName?: string; lastName?: string };
-  lineItems: { nodes: Array<{ isGiftCard: boolean; quantity: number }>; pageInfo: { hasNextPage: boolean } };
+  lineItems: { nodes: Array<{ isGiftCard: boolean; quantity: number;
+    originalTotalSet: { shopMoney: { amount: string; currencyCode: string } };
+    discountAllocations: Array<{ allocatedAmountSet: { shopMoney: { amount: string; currencyCode: string } } }>;
+  }>; pageInfo: { hasNextPage: boolean } };
   transactions: Parameters<typeof extractGiftUses>[0];
 };
 type Events = { nodes: Parameters<typeof extractIssuances>[0]; pageInfo: { hasNextPage: boolean; endCursor: string | null } };
@@ -57,6 +61,11 @@ async function evidenceForOrder(connection: Connection, order: GiftOrder) {
     email: email.toLowerCase(), customerId: order.customer?.id, createdAt: order.createdAt,
     checkedAt: new Date().toISOString(), giftCardUnits, issued: extractIssuances(events), ...parsed,
     complete: !after && !order.lineItems.pageInfo.hasNextPage && order.transactions.length < 250,
+    purchaseAmounts: order.lineItems.pageInfo.hasNextPage ? undefined : order.lineItems.nodes.filter((item) => item.isGiftCard).map((item) => ({
+      currency: item.originalTotalSet.shopMoney.currencyCode,
+      // Historical purchase value, after allocated discounts, before refunds/taxes.
+      amount: Math.max(0, Math.round((Number(item.originalTotalSet.shopMoney.amount) - item.discountAllocations.reduce((sum, allocation) => sum + Number(allocation.allocatedAmountSet.shopMoney.amount), 0)) * 100) / 100),
+    })),
   };
   return evidence;
 }

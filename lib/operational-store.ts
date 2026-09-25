@@ -741,6 +741,7 @@ export function recordGiftCardOrderEvidence(order: GiftCardOrderEvidence, refres
   const previous = state.giftCardOrders[index];
   // Preserve positive evidence if Shopify returns a partial timeline on a later request.
   const merged = clone(order);
+  merged.purchaseAmounts ??= previous?.purchaseAmounts;
   merged.issued = [...new Map([...(previous?.issued ?? []), ...order.issued].map((item) => [item.giftCardId, item])).values()];
   merged.uses = [...new Map([...(previous?.uses ?? []), ...order.uses].map((item) => [item.transactionId, item])).values()];
   if (index < 0) state.giftCardOrders.push(merged); else state.giftCardOrders[index] = merged;

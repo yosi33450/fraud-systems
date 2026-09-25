@@ -28,6 +28,7 @@ export async function persistGiftEvidence(tenantId: string, storeId: string, inc
       const previous = merged.get(order.orderId);
       const newest = previous && previous.checkedAt > order.checkedAt ? previous : order;
       merged.set(order.orderId, { ...newest,
+        purchaseAmounts: newest.purchaseAmounts ?? previous?.purchaseAmounts ?? order.purchaseAmounts,
         issued: [...new Map([...(previous?.issued ?? []), ...order.issued].map((item) => [item.giftCardId, item])).values()],
         uses: [...new Map([...(previous?.uses ?? []), ...order.uses].map((item) => [item.transactionId, item])).values()],
       });

@@ -63,3 +63,21 @@ purchase evidence. All fixtures are synthetic and never appear in the product.
 
 Shopify references: [BasicEvent](https://shopify.dev/docs/api/admin-graphql/2026-07/objects/BasicEvent),
 [OrderTransaction](https://shopify.dev/docs/api/admin-graphql/2026-07/objects/OrderTransaction).
+# Investigation presentation
+
+Linked alert groups open a centered native dialog; individual investigations open
+above it and closing returns focus to the originating order. Escape only closes
+the top dialog. Mobile uses the same structure with internal scrolling.
+
+Gift purchases and redemptions must never be added to a combined group total.
+Purchase amounts use only `isGiftCard` lines: original total minus allocated
+discounts, in shop currency, before refunds/taxes. Legacy evidence without these
+amounts is explicitly incomplete until re-scanned; order totals are not a fallback.
+Observed usage from those purchases requires an exact, non-conflicting card ID in
+the same store, including uses without alerts. Successful refunds remain separate.
+Neither the difference nor a missing use is a current gift-card balance.
+
+The scan defaults to **all orders in 30 days**, not only orders already flagged.
+Missing sources mean no issuance event was found in collected evidence, not that
+the customer did not purchase a card. Older purchases and non-order issuance may
+still be unavailable. No match is inferred from suffixes or amounts.

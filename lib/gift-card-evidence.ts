@@ -12,6 +12,7 @@ export type GiftCardOrderEvidence = GiftOrderIdentity & {
   tenantId: string; storeId: string; checkedAt: string; giftCardUnits: number;
   issued: GiftIssuance[]; uses: GiftUse[]; unidentifiedTransactions: number;
   complete: boolean;
+  purchaseAmounts?: Array<{ amount: number; currency: string }>;
 };
 export type GiftLedgerCard = {
   key: string; storeId: string; giftCardId: string; lastCharacters: string;

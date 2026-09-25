@@ -820,6 +820,60 @@ body { font-family: "Noto Sans Hebrew Variable", "Segoe UI", sans-serif; }
 .evidence-workspace .empty-state { min-height: 300px; }
 
 .drawer-backdrop { background: rgb(13 25 20 / .5); backdrop-filter: none; }
+
+/* Investigation workspace: one centered evidence surface, including nested orders. */
+.centered-dialog { margin: auto; padding: 0; width: min(1120px, calc(100vw - 48px)); max-width: none; height: min(860px, calc(100dvh - 64px)); max-height: calc(100dvh - 64px); border: 1px solid #cbd7cf; border-radius: 14px; color: #14231d; background: #fff; box-shadow: 0 24px 90px rgb(13 25 20 / .24); overflow: hidden; }
+.centered-dialog[open] { display: flex; flex-direction: column; animation: investigation-appear .16s ease-out; }
+.centered-dialog::backdrop { background: rgb(13 25 20 / .5); }
+.centered-dialog .drawer-header { flex: 0 0 auto; min-width: 0; }
+.centered-dialog .drawer-header h2 { margin: 4px 0; font-size: 23px; line-height: 1.35; }
+.centered-dialog .drawer-header .icon-button { flex-shrink: 0; }
+.centered-dialog .drawer-body, .cluster-dialog-body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 24px 28px; }
+.centered-dialog .decision-bar { position: static; flex: 0 0 auto; min-height: 82px; }
+.centered-dialog .mono, .centered-dialog .drawer-title h2, .centered-dialog .case-summary-strip dd { font-family: "Heebo Variable", "Noto Sans Hebrew Variable", sans-serif; font-variant-numeric: tabular-nums; }
+.centered-dialog :focus-visible { outline: 2px solid #08785a; outline-offset: 3px; }
+.gift-money-flow { display: grid; grid-template-columns: 1fr 40px 1fr; align-items: center; gap: 24px; padding: 24px 28px; background: #f0f6f2; border-inline-start: 3px solid #237b59; }
+.gift-money-flow > div { display: flex; flex-direction: column; gap: 6px; }
+.gift-money-flow span { font-size: 14px; color: #405b4e; }
+.gift-money-flow strong { font-size: 30px; line-height: 1.2; font-weight: 650; font-variant-numeric: tabular-nums; }
+.gift-money-flow small, .gift-money-note { font-size: 13px; line-height: 1.65; color: #52675c; }
+.gift-money-note { margin: 14px 0 22px; }
+.cluster-dialog-orders { border-top: 1px solid #d6ded9; }
+.cluster-dialog-order { display: grid; grid-template-columns: 130px minmax(0, 1fr) 125px 80px 18px; gap: 18px; align-items: center; width: 100%; padding: 16px 8px; border: 0; border-bottom: 1px solid #e2e8e4; color: inherit; background: #fff; text-align: start; }
+.cluster-dialog-order:hover { background: #f2f7f3; }
+.cluster-dialog-order > span { min-width: 0; }
+.cluster-dialog-order strong, .cluster-dialog-order small { display: block; }
+.cluster-dialog-order strong { font-size: 15px; font-weight: 650; }
+.cluster-dialog-order small { font-size: 12px; color: #52675c; margin-top: 3px; overflow-wrap: anywhere; }
+.order-number, .order-value { font-variant-numeric: tabular-nums; }
+.cluster-dialog-footer { flex: 0 0 auto; padding: 14px 28px; border-top: 1px solid #d6ded9; color: #52675c; font-size: 12px; background: #f8faf8; }
+.case-cluster-summary .cluster-gift-amounts { display: flex; }
+.evidence-workspace .case-cluster-summary .cluster-stat strong { font-family: "Heebo Variable", "Noto Sans Hebrew Variable", sans-serif; font-size: 16px; font-weight: 650; }
+.cluster-gift-amounts > span:last-child { color: #237b59; }
+@keyframes investigation-appear { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+@media (max-width: 1180px) and (min-width: 701px) {
+  .case-cluster-summary .cluster-gift-amounts:nth-of-type(4) { display: flex; grid-column: 2; grid-row: 2; }
+}
+@media (max-width: 700px) {
+  .centered-dialog { width: calc(100vw - 16px); height: calc(100dvh - 24px); max-height: calc(100dvh - 24px); border-radius: 10px; }
+  .centered-dialog .drawer-header { padding: 14px 16px; min-height: 84px; gap: 12px; }
+  .centered-dialog .drawer-header h2 { font-size: 19px; }
+  .centered-dialog .drawer-body, .cluster-dialog-body { padding: 16px; }
+  .centered-dialog .decision-bar { padding: 12px; min-height: 0; }
+  .centered-dialog .decision-actions { display: grid; grid-template-columns: 1fr 1fr; }
+  .centered-dialog .decision-actions button { font-size: 12px; }
+  .gift-money-flow { grid-template-columns: 1fr; gap: 14px; padding: 18px; }
+  .gift-money-flow > svg { transform: rotate(-90deg); }
+  .gift-money-flow strong { font-size: 26px; }
+  .cluster-dialog-order { grid-template-columns: minmax(0, 1fr) auto 18px; gap: 8px 12px; padding: 16px 0; }
+  .cluster-dialog-order .order-buyer { grid-column: 1 / -1; grid-row: 2; }
+  .cluster-dialog-order .order-value { grid-column: 1; grid-row: 3; }
+  .cluster-dialog-order > .status { grid-column: 2; grid-row: 1; }
+  .cluster-dialog-order > svg { grid-column: 3; grid-row: 1; }
+  .cluster-dialog-footer { padding: 12px 16px; }
+  .case-cluster-summary .cluster-gift-amounts:nth-of-type(4) { display: flex; grid-column: 1 / -1; padding-top: 8px; border-top: 1px solid #e2e8e4; }
+}
+@media (prefers-reduced-motion: reduce) { .centered-dialog[open] { animation: none; } }
 .investigation-drawer {
   width: min(1040px, calc(100vw - 32px));
   color: #14231d;

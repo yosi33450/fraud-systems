@@ -43,6 +43,9 @@ import {
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { SeverityBadge } from "@/components/severity-badge";
 import { GiftCardWorkspace } from "@/components/gift-card-workspace";
+import { CenteredDialog } from "@/components/centered-dialog";
+import { summarizeGiftCluster, type MoneyTotal } from "@/lib/gift-cluster-summary";
+import type { GiftLedger } from "@/lib/gift-card-evidence";
 import { cases as initialCases, employees, rules, stores } from "@/lib/initial-state";
 import type { BlacklistReport, CaseStatus, DashboardSnapshot, Employee, FraudCase, NotificationDelivery, NotificationSettings, RiskCondition, RiskConditionField, RiskRule, Severity, Store } from "@/lib/types";
 
@@ -300,6 +303,7 @@ export function FraudCommandCenter() {
         {view === "overview" || view === "cases" ? (
           <Overview
             cases={visibleCases}
+            ledger={giftLedger}
             query={query}
             setQuery={setQuery}
             severity={severity}
@@ -372,7 +376,7 @@ function clusterCases(items: FraudCase[]): CaseCluster[] {
         .filter((email): email is string => typeof email === "string" && isRealEmail(email))
         .map((email) => `email:${email.trim().toLowerCase()}`) ?? []),
     ].filter(Boolean);
-    identities.forEach((identity) => {
+    identities.map((identity) => `${item.tenantId}:${item.storeId}:${identity}`).forEach((identity) => {
       const owner = identityOwner.get(identity);
       if (owner === undefined) identityOwner.set(identity, index); else union(index, owner);
     });
@@ -396,7 +400,8 @@ function clusterCases(items: FraudCase[]): CaseCluster[] {
   }).sort((left, right) => severityOrder[right.severity] - severityOrder[left.severity] || right.cases.length - left.cases.length);
 }
 
-function Overview({ cases, query, setQuery, severity, setSeverity, store, setStore, stores, onOpen, casesOnly, onRefresh, refreshing, deliveries, onShowAll, onOpenNotifications, onOpenStores }: {
+function Overview({ cases, ledger, query, setQuery, severity, setSeverity, store, setStore, stores, onOpen, casesOnly, onRefresh, refreshing, deliveries, onShowAll, onOpenNotifications, onOpenStores }: {
+  ledger?: GiftLedger;
   cases: FraudCase[]; query: string; setQuery: (value: string) => void; severity: Severity | "all"; setSeverity: (value: Severity | "all") => void;
   store: string; setStore: (value: string) => void; stores: Store[]; onOpen: (item: FraudCase) => void; casesOnly: boolean;
   onRefresh: () => Promise<void>; refreshing: boolean;
@@ -407,15 +412,11 @@ function Overview({ cases, query, setQuery, severity, setSeverity, store, setSto
   const automaticallyClosed = cases.filter(isAutomaticallyResolved).length;
   const merchantDecisions = cases.filter((item) => ["fraud", "false-positive"].includes(item.status) || (item.status === "resolved" && !isAutomaticallyResolved(item))).length;
   const [showClosed, setShowClosed] = useState(false);
-  const [expandedClusters, setExpandedClusters] = useState<Set<string>>(new Set());
+  const [selectedClusterId, setSelectedClusterId] = useState<string | null>(null);
   const activeCases = cases.filter((item) => ["new", "review", "action"].includes(item.status));
   const displayCases = casesOnly && showClosed ? cases : activeCases;
   const clusters = useMemo(() => clusterCases(displayCases), [displayCases]);
-  const toggleCluster = (id: string) => setExpandedClusters((current) => {
-    const next = new Set(current);
-    if (next.has(id)) next.delete(id); else next.add(id);
-    return next;
-  });
+  const selectedCluster = clusters.find((cluster) => cluster.id === selectedClusterId);
   return <div className={`page-content product-page ${casesOnly ? "evidence-workspace" : "overview-workspace"}`}>
     <PageHeading eyebrow={casesOnly ? "תור החלטות" : "מרכז החלטות"} title={casesOnly ? "התראות וחקירות" : hasStores ? "מה דורש טיפול עכשיו" : "חבר את חנות Shopify הראשונה"} description={casesOnly ? "כל הזמנה חשודה נשארת כאן עד שבעל החנות מקבל החלטה." : hasStores ? `יש ${cases.filter((item) => ["new", "review", "action"].includes(item.status)).length} תיקים פתוחים. המערכת מתריעה — ההחלטה תמיד נשארת אצלך.` : "לא נטען מידע לדוגמה. לאחר החיבור יוצגו כאן רק הזמנות ונתונים אמיתיים מהחנות שלך."} action={hasStores ? <button className="secondary-button" onClick={() => void onRefresh()} disabled={refreshing}><RefreshCcw size={15} className={refreshing ? "spin" : ""} /> {refreshing ? "מסנכרן…" : "רענון נתונים"}</button> : <button className="primary-button" onClick={onOpenStores}><Plus size={16} /> חיבור חנות</button>} />
 
@@ -453,7 +454,8 @@ function Overview({ cases, query, setQuery, severity, setSeverity, store, setSto
       <div className="case-cluster-list">
         {displayCases.length > 0 ? <div className="case-queue-head" aria-hidden="true"><span>חומרה</span><span>זהות וסיבת ההתראה</span><span>הזמנות</span><span>סכום</span><span>מצב</span></div> : null}
         {clusters.map((cluster) => {
-          const expanded = expandedClusters.has(cluster.id);
+          const giftSummary = summarizeGiftCluster(cluster.cases, ledger);
+          const isGiftJourney = giftSummary.purchases.length > 0 && giftSummary.redemptions.length > 0;
           const activeClusterCases = cluster.cases.filter((item) => ["new", "review", "action"].includes(item.status));
           const closedByRules = activeClusterCases.length === 0 && cluster.cases.every(isAutomaticallyResolved);
           const activeSeverity = activeClusterCases.reduce<Severity>((highest, item) => severityOrder[item.severity] > severityOrder[highest] ? item.severity : highest, "low");
@@ -466,20 +468,40 @@ function Overview({ cases, query, setQuery, severity, setSeverity, store, setSto
                   : "זהויות מקושרות"
             : customerDisplayName(cluster.cases[0]);
           return <article className={`case-cluster ${cluster.cases.length > 1 ? "case-cluster-linked" : ""}`} key={cluster.id}>
-            <button className="case-cluster-summary" onClick={() => cluster.cases.length === 1 ? onOpen(cluster.cases[0]) : toggleCluster(cluster.id)} aria-expanded={cluster.cases.length > 1 ? expanded : undefined}>
+            <button className="case-cluster-summary" onClick={() => cluster.cases.length === 1 ? onOpen(cluster.cases[0]) : setSelectedClusterId(cluster.id)} aria-haspopup="dialog">
               <div className="cluster-severity">{closedByRules ? <span className="closed-by-rules"><CheckCircle2 size={15} /> נסגר לפי החוקים</span> : <SeverityBadge severity={activeClusterCases.length ? activeSeverity : cluster.severity} score={Math.max(...(activeClusterCases.length ? activeClusterCases : cluster.cases).map((item) => item.score))} />}</div>
               <div className="cluster-identity"><strong>{repeatedBy}</strong><span>{cluster.cases.length > 1 ? cluster.giftCardLinks > 0 ? `${cluster.cases.length} הזמנות מקושרות ברכישה ובמימוש` : `${cluster.cases.length} הזמנות עם פרטי זיהוי משותפים` : `${cluster.cases[0].orderNumber} · ${cluster.cases[0].reason}`}</span><div className="cluster-signals">{cluster.emails.length > 1 ? <span><Mail size={13} /> {cluster.emails.length} אימיילים</span> : null}{cluster.ips.length === 1 && cluster.cases.length > 1 ? <span><Wifi size={13} /> IP משותף</span> : null}{cluster.phones.length === 1 && cluster.cases.length > 1 ? <span><Phone size={13} /> טלפון משותף</span> : null}{cluster.giftCardOrders > 0 ? <span><Gift size={13} /> {cluster.giftCardOrders} Gift Card</span> : null}{cluster.giftCardLinks > 0 ? <span className="gift-card-link-signal"><Fingerprint size={13} /> {cluster.giftCardLinks} מימושים מקושרים</span> : null}</div></div>
               <div className="cluster-stat"><span>הזמנות</span><strong>{cluster.cases.length}</strong></div>
-              <div className="cluster-stat"><span>סכום כולל</span><strong>{formatCurrency(cluster.totalAmount)}</strong></div>
-              <div className="cluster-status"><span className={`status status-${statusCase.status}`}>{closedByRules ? "נסגר אוטומטית" : caseStatusLabel(statusCase)}</span>{cluster.cases.length > 1 ? expanded ? <ChevronUp size={18} /> : <ChevronDown size={18} /> : <ChevronLeft size={18} />}</div>
+              {isGiftJourney ? <div className="cluster-stat cluster-gift-amounts"><span>נרכש בגיפטקארדים</span><strong>{giftSummary.missingPurchaseAmounts ? "נדרשת השלמת סכום" : moneyTotals(giftSummary.purchased)}</strong><span>מומש מתוכם <bdi>{moneyTotals(giftSummary.linkedRedeemed)}</bdi></span></div> : <div className="cluster-stat"><span>סכום הזמנות</span><strong>{formatCurrency(cluster.totalAmount)}</strong></div>}
+              <div className="cluster-status"><span className={`status status-${statusCase.status}`}>{closedByRules ? "נסגר אוטומטית" : caseStatusLabel(statusCase)}</span><ChevronLeft size={18} /></div>
             </button>
-            {expanded ? <div className="cluster-orders">{cluster.cases.map((item) => <button key={item.id} className="cluster-order" onClick={() => onOpen(item)}><span className="cluster-order-index mono">{item.orderNumber}</span><span><strong>{customerDisplayName(item)}</strong><small>{isPayPlusPlaceholder(item) ? "PayPlus · פרטי קשר לא התקבלו" : item.email}</small></span><span className="reason-cell">{isAutomaticallyResolved(item) ? item.resolution?.note ?? "לא עומד עוד בחוקי הסיכון הפעילים" : item.reason}</span><strong className="mono amount-cell">{formatCurrency(item.amount)}</strong><span className={`status status-${item.status}`}>{caseStatusLabel(item)}</span><ChevronLeft size={16} /></button>)}</div> : null}
           </article>;
         })}
         {displayCases.length === 0 ? <div className="empty-state"><Shield size={26} /><strong>{hasStores ? "אין כרגע התראות פעילות" : "אין נתונים להצגה"}</strong><span>{hasStores ? "שינויי החוקים חושבו מחדש. הזמנות חשודות חדשות יופיעו כאן." : "חבר חנות Shopify כדי להתחיל לקבל ולבדוק הזמנות."}</span></div> : null}
       </div>
     </section>
+    {selectedCluster ? <ClusterInvestigation cluster={selectedCluster} ledger={ledger} onClose={() => setSelectedClusterId(null)} onOpen={onOpen} /> : null}
   </div>;
+}
+
+const moneyTotals = (amounts: MoneyTotal[]) => amounts.length ? amounts.map(({ amount, currency }) => new Intl.NumberFormat("he-IL", { style: "currency", currency, maximumFractionDigits: 2 }).format(amount)).join(" · ") : "לא נמצא בנתונים";
+
+function ClusterInvestigation({ cluster, ledger, onClose, onOpen }: { cluster: CaseCluster; ledger?: GiftLedger; onClose: () => void; onOpen: (item: FraudCase) => void }) {
+  const summary = summarizeGiftCluster(cluster.cases, ledger);
+  const gift = summary.purchases.length > 0 || summary.redemptions.length > 0;
+  const [section, setSection] = useState<"redemptions" | "purchases" | "other">(summary.redemptions.length ? "redemptions" : summary.purchases.length ? "purchases" : "other");
+  const titles = { redemptions: "מימושי גיפטקארד", purchases: "רכישות גיפטקארד", other: "הזמנות נוספות" };
+  const rows = gift ? summary[section] : cluster.cases;
+  return <CenteredDialog label="חקירת קבוצת הזמנות" onClose={onClose} className="cluster-investigation">
+    <header className="drawer-header"><div><span className="case-kicker">חקירה מקושרת · {cluster.cases.length} הזמנות</span><h2>{gift ? "מסלול הכסף, מהרכישה למימוש" : "הזמנות עם פרטי זיהוי משותפים"}</h2><p>{cluster.cases[0].storeName} · {cluster.emails.length} כתובות אימייל · קישור אינו הוכחה להונאה</p></div><button autoFocus className="icon-button" onClick={onClose} aria-label="סגירת הקבוצה"><X size={20} /></button></header>
+    <div className="cluster-dialog-body">
+      {gift ? <><div className="gift-money-flow"><div><span>נרכש בגיפטקארדים</span><strong><bdi>{summary.missingPurchaseAmounts ? "נדרשת השלמת סכום" : moneyTotals(summary.purchased)}</bdi></strong><small>{summary.purchases.length} הזמנות רכישה בקבוצה</small></div><ChevronLeft aria-hidden="true" size={22} /><div><span>מומש מתוך הכרטיסים האלו</span><strong><bdi>{moneyTotals(summary.linkedRedeemed)}</bdi></strong><small>לפי מזהי כרטיסים תואמים בלבד</small></div></div><p className="gift-money-note">רכישה ומימוש הם שני שלבים של אותו כסף ולכן אינם מחוברים לסכום כולל. סכום הרכישה לאחר הנחות ולפני החזרים ומסים; אינו יתרת כרטיסים.</p>
+      {summary.missingPurchaseAmounts ? <p role="status" className="gift-ledger-message">חסר פירוט סכום ב־{summary.missingPurchaseAmounts} הזמנות רכישה. סריקת Shopify במעקב גיפטקארדים תשלים את הנתונים.</p> : null}
+      {summary.refunded.length ? <p className="gift-money-note">החזרים מוצלחים לגיפטקארדים בהזמנות הקבוצה: <bdi>{moneyTotals(summary.refunded)}</bdi></p> : null}
+      <div className="gift-ledger-tabs" role="group" aria-label="סוג הזמנות בקבוצה">{(["redemptions", "purchases", "other"] as const).map((key) => <button key={key} aria-pressed={section === key} onClick={() => setSection(key)}>{titles[key]} <span>{summary[key].length}</span></button>)}</div></> : <p className="gift-money-note">פתח הזמנה להצגת הראיות וקבלת החלטה. סטטוס כל הזמנה נשמר בנפרד.</p>}
+      <div className="cluster-dialog-orders">{rows.map((item) => <button key={item.id} className="cluster-dialog-order" onClick={() => onOpen(item)} aria-haspopup="dialog"><span className="order-number"><bdi>#{item.orderNumber.replace(/^#/, "")}</bdi><small>{item.createdAt}</small></span><span className="order-buyer"><strong>{customerDisplayName(item)}</strong><small><bdi>{isRealEmail(item.email) ? item.email : "פרטי קשר לא התקבלו"}</bdi></small><small>{item.reason}</small></span><span className="order-value"><strong><bdi>{formatCurrency(item.amount)}</bdi></strong><small>סכום ההזמנה</small></span><span className={`status status-${item.status}`}>{caseStatusLabel(item)}</span><ChevronLeft size={17} /></button>)}{!rows.length ? <p className="gift-ledger-empty">אין הזמנות מסוג זה בקבוצה.</p> : null}</div>
+    </div><footer className="cluster-dialog-footer">פתיחת הזמנה תציג חלון חקירה במרכז. סגירתו תחזיר אותך לקבוצה הזאת.</footer>
+  </CenteredDialog>;
 }
 
 function Metric({ icon, label, value, detail, tone = "default" }: { icon: React.ReactNode; label: string; value: string; detail: string; tone?: string }) {
@@ -512,22 +534,12 @@ function GiftCardTrail({ item }: { item: FraudCase }) {
 function InvestigationDrawer({ item, onClose, onDecide }: { item: FraudCase; onClose: () => void; onDecide: (status: CaseStatus) => void }) {
   const closedByRules = isAutomaticallyResolved(item);
   const missingBuyerIdentity = isPayPlusPlaceholder(item) || ["ללא שם", "לקוח Shopify", ""].includes(item.customer.trim());
-  const closeButtonRef = useRef<HTMLButtonElement>(null);
-  useEffect(() => {
-    closeButtonRef.current?.focus();
-    const handleKeyDown = (event: KeyboardEvent) => { if (event.key === "Escape") onClose(); };
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    window.addEventListener("keydown", handleKeyDown);
-    return () => { document.body.style.overflow = previousOverflow; window.removeEventListener("keydown", handleKeyDown); };
-  }, [onClose]);
   const formatEvidenceTime = (value: string) => {
     const date = new Date(value);
     return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat("he-IL", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }).format(date);
   };
-  return <div className="drawer-backdrop" onMouseDown={(event) => { if (event.currentTarget === event.target) onClose(); }}>
-    <aside className="investigation-drawer" role="dialog" aria-modal="true" aria-label={`חקירת הזמנה ${item.orderNumber}`}>
-      <header className="drawer-header"><div><span className="case-kicker">תיק חקירה</span><div className="drawer-title"><h2>{item.orderNumber}</h2>{closedByRules ? <span className="closed-by-rules"><CheckCircle2 size={15} /> נסגר לפי החוקים</span> : <SeverityBadge severity={item.severity} score={item.score} />}</div><p>{item.storeName} · נפתח {item.createdAt}</p></div><button ref={closeButtonRef} className="icon-button" onClick={onClose} aria-label="סגירת תיק"><X size={20} /></button></header>
+  return <CenteredDialog label={`חקירת הזמנה ${item.orderNumber}`} onClose={onClose} className="order-investigation">
+      <header className="drawer-header"><div><span className="case-kicker">תיק חקירה</span><div className="drawer-title"><h2>{item.orderNumber}</h2>{closedByRules ? <span className="closed-by-rules"><CheckCircle2 size={15} /> נסגר לפי החוקים</span> : <SeverityBadge severity={item.severity} score={item.score} />}</div><p>{item.storeName} · נפתח {item.createdAt}</p></div><button autoFocus className="icon-button" onClick={onClose} aria-label="סגירת תיק"><X size={20} /></button></header>
       <div className="drawer-body">
         <section className={`case-summary-strip ${closedByRules ? "case-summary-resolved" : ""}`}><div><span>{closedByRules ? "מצב התראה" : "סיבת ההתראה"}</span><h3>{closedByRules ? "ההתראה אינה פעילה" : item.reason}</h3><p>{closedByRules ? item.resolution?.note ?? "ההזמנה אינה עומדת כרגע באף חוק סיכון פעיל. לא התקבלה החלטה אנושית לגביה." : "המערכת מציגה את העובדות שנמצאו. ההחלטה נשארת בידי בעל החנות."}</p></div><dl><div><dt>ציון</dt><dd>{item.score}</dd></div><div><dt>תנאים</dt><dd>{item.evidence.length}</dd></div><div><dt>סכום</dt><dd>{formatCurrency(item.amount)}</dd></div></dl></section>
         <div className="drawer-grid">
@@ -536,8 +548,7 @@ function InvestigationDrawer({ item, onClose, onDecide }: { item: FraudCase; onC
         </div>
       </div>
       <footer className="decision-bar"><div><span>סטטוס נוכחי</span><strong>{closedByRules ? "נסגר לפי החוקים" : caseStatusLabel(item)}</strong></div>{closedByRules ? <span className="decision-explanation">שינוי בחוקים שיחזיר התאמה יפתח את ההתראה מחדש אוטומטית.</span> : <div className="decision-actions">{item.status === "new" ? <button className="secondary-button" onClick={() => onDecide("review")}>העבר לבדיקה</button> : null}<button className="secondary-button" onClick={() => onDecide("false-positive")}>לא חשוד</button><button className="secondary-button" onClick={() => onDecide("resolved")}><CheckCircle2 size={16} /> סגור כטופל</button><button className="danger-button" onClick={() => onDecide("fraud")}><ShieldAlert size={16} /> אשר הונאה והוסף לחסימה</button></div>}</footer>
-    </aside>
-  </div>;
+  </CenteredDialog>;
 }
 
 function ConnectStoreDialog({ onClose, onConnect }: { onClose: () => void; onConnect: (input: { shopDomain: string; clientId: string; clientSecret: string }) => Promise<void> }) {
