@@ -1,6 +1,7 @@
 import { createHmac, randomUUID } from "node:crypto";
 import { cases as seedCases, employees as seedEmployees, rules as seedRules, stores as seedStores } from "@/lib/initial-state";
 import { evaluateRisk, type OrderSignals } from "@/lib/risk-engine";
+import { computeVelocitySignals, createVelocityLookup } from "@/lib/order-velocity";
 import { isSharedServiceEmail } from "@/lib/customer-identity";
 import { buildGiftLedger, hasFlaggedGiftSource, receiptGiftCard, type GiftCardOrderEvidence } from "@/lib/gift-card-evidence";
 import type { BlacklistReport, CaseStatus, DashboardSnapshot, Employee, FraudCase, GiftCardRedemption, GiftCardTrace, NotificationDelivery, NotificationSettings, RiskRule, Store } from "@/lib/types";
@@ -235,9 +236,9 @@ const tenantStore = (tenantId: string, storeId: string) => {
 
 const baselineRules = (): RiskRule[] => [
   {
-    id: "recommended-ip-velocity", label: "ריבוי הזמנות מאותה כתובת IP", description: "פותח התראה כאשר אותה כתובת IP מבצעת 5 הזמנות או יותר בתוך שעתיים. IP הוא אות מסייע ולא הוכחת זהות.",
+    id: "recommended-ip-velocity", label: "ריבוי הזמנות מאותה כתובת IP בשעה", description: "יותר מ־3 רכישות באותה חנות ובאותו IP ב־60 דקות מתגלגלות. IP אינו הוכחת זהות.",
     category: "velocity", enabled: true, logic: "all", recommended: true, matches: 0,
-    conditions: [{ id: "ip-velocity", field: "orders_by_ip", operator: "gte", value: 5, windowMinutes: 120 }],
+    conditions: [{ id: "ip-velocity", field: "orders_by_ip", operator: "gt", value: 3, windowMinutes: 60 }],
     action: { severity: "high", openCase: true, emailOwner: true },
   },
   {
@@ -264,9 +265,16 @@ const baselineRules = (): RiskRule[] => [
   {
     id: "recommended-email-velocity", label: "ריבוי הזמנות מאותו אימייל", description: "פותח התראה כאשר אותו אימייל מבצע 4 הזמנות או יותר בתוך שעה.",
     category: "velocity", enabled: true, logic: "all", recommended: true, matches: 0,
-    conditions: [{ id: "email-velocity", field: "orders_by_email", operator: "gte", value: 4, windowMinutes: 60 }],
+    conditions: [{ id: "email-velocity", field: "orders_by_email", operator: "gt", value: 3, windowMinutes: 60 }],
     action: { severity: "high", openCase: true, emailOwner: true },
   },
+  ...(["email", "ip"] as const).map((identity): RiskRule => ({
+    id: `recommended-${identity}-daily-velocity`, label: `ריבוי הזמנות מאותו ${identity === "email" ? "אימייל" : "IP"} ביום`,
+    description: "יותר מ־5 רכישות באותה חנות ב־24 שעות מתגלגלות, כולל הרכישה הנוכחית.",
+    category: "velocity", enabled: true, logic: "all", recommended: true, matches: 0,
+    conditions: [{ id: `${identity}-daily-velocity`, field: identity === "email" ? "orders_by_email" : "orders_by_ip", operator: "gt", value: 5, windowMinutes: 1440 }],
+    action: { severity: "high", openCase: true, emailOwner: true },
+  })),
   {
     id: "recommended-phone-identities", label: "מספר טלפון עם כמה זהויות", description: "פותח התראה כאשר מספר טלפון משויך ל־3 אימיילים או יותר ב־24 שעות.",
     category: "identity", enabled: true, logic: "all", recommended: true, matches: 0,
@@ -274,9 +282,9 @@ const baselineRules = (): RiskRule[] => [
     action: { severity: "high", openCase: true, emailOwner: true },
   },
   {
-    id: "recommended-order-spike", label: "סכום הזמנה חריג", description: "פותח התראה כאשר סכום ההזמנה גבוה מ־₪1,000.",
+    id: "recommended-order-spike", label: "סכום הזמנה חריג", description: "פותח התראה על רכישה בודדת מעל 1,500 ₪, לא על סכום מצטבר של קבוצה.",
     category: "payment", enabled: true, logic: "all", recommended: true, matches: 0,
-    conditions: [{ id: "order-spike", field: "order_amount", operator: "gt", value: 1000 }],
+    conditions: [{ id: "order-spike", field: "order_amount", operator: "gt", value: 1500 }],
     action: { severity: "medium", openCase: true, emailOwner: false },
   },
   {
@@ -434,6 +442,37 @@ export function updateRule(tenantId: string, ruleId: string, patch: Partial<Pick
 
 const activeStatuses = new Set<CaseStatus>(["new", "review", "action"]);
 const autoResolvedReason = "לא עומד עוד בחוקי הסיכון הפעילים";
+const isAutoResolved = (item: FraudCase) => item.status === "resolved" && item.resolution?.source !== "merchant" &&
+  (item.reason === autoResolvedReason || item.resolution?.source === "automatic-rule-change");
+const canReevaluate = (item: FraudCase) => activeStatuses.has(item.status) || isAutoResolved(item);
+
+function applyRiskResult(item: FraudCase, signals: OrderSignals, result: ReturnType<typeof evaluateRisk>) {
+  if (!canReevaluate(item)) return;
+  const wasAutoResolved = isAutoResolved(item);
+  item.amount = signals.orderAmount;
+  item.signals = clone(signals);
+  if (item.context) {
+    item.context.ipOrderCountLastTwoHours = signals.ordersByIpLastTwoHours;
+    item.context.ipGiftCardOrderCountLastTwoHours = signals.giftCardOrdersByIpLastTwoHours;
+    item.context.ipDistinctEmailsLastTwoHours = signals.emailsByIpLastTwoHours;
+  }
+  if (result.score < 25) {
+    item.status = "resolved";
+    item.reason = autoResolvedReason;
+    item.resolution = { source: "automatic-rule-change", at: new Date().toISOString(),
+      note: "נבדקו מחדש סכום הרכישה וחלונות הזמן של ההזמנות. לא התקיים תנאי שמצדיק התראה פעילה. זו סגירה אוטומטית, לא טיפול של בעל החנות." };
+    item.score = 0;
+    item.severity = "low";
+    item.evidence = [];
+    return;
+  }
+  if (wasAutoResolved) item.status = "new";
+  item.resolution = undefined;
+  item.score = result.score;
+  item.severity = result.severity;
+  item.evidence = result.evidence;
+  item.reason = result.evidence[0]?.label ?? item.reason;
+}
 
 function evidenceLinkedGiftSignal(storeId: string, orderId: string) {
   return hasFlaggedGiftSource(buildGiftLedger((state.giftCardOrders ?? []).filter((order) => order.storeId === storeId)).cards,
@@ -442,25 +481,19 @@ function evidenceLinkedGiftSignal(storeId: string, orderId: string) {
 
 const fallbackSignalsForCase = (item: FraudCase, tenantCases: FraudCase[]): OrderSignals => {
   const giftCardValue = item.items.reduce((total, line) => /gift\s*card|כרטיס\s*מתנה/i.test(line.name) ? total + line.price * line.quantity : total, 0);
-  const samePhoneEmails = item.context?.phone
-    ? new Set(tenantCases.filter((candidate) => candidate.context?.phone === item.context?.phone && candidate.email.includes("@")).map((candidate) => normalizeEmail(candidate.email))).size
-    : 0;
   const averageOrderValue = tenantCases.length ? tenantCases.reduce((sum, candidate) => sum + candidate.amount, 0) / tenantCases.length : item.amount;
   const hasEvidence = (pattern: RegExp) => item.evidence.some((evidence) => pattern.test(`${evidence.label} ${evidence.description}`));
-  const purchaseSignalsApply = item.amount > 0 || giftCardValue > 0;
   return {
-    ordersByEmailLastHour: purchaseSignalsApply ? (item.email.includes("@") ? Math.max(1, tenantCases.filter((candidate) => normalizeEmail(candidate.email) === normalizeEmail(item.email)).length) : 1) : 0,
-    ordersByIpLastTwoHours: purchaseSignalsApply ? (item.context?.ipOrderCountLastTwoHours ?? 1) : 0,
-    giftCardOrdersByIpLastTwoHours: purchaseSignalsApply ? (item.context?.ipGiftCardOrderCountLastTwoHours ?? (giftCardValue > 0 ? 1 : 0)) : 0,
-    emailsByIpLastTwoHours: purchaseSignalsApply ? (item.context?.ipDistinctEmailsLastTwoHours ?? 1) : 0,
-    identitiesByPhoneLastDay: purchaseSignalsApply ? samePhoneEmails : 0,
+    ordersByEmailLastHour: 0,
+    ordersByIpLastTwoHours: 0,
+    giftCardOrdersByIpLastTwoHours: 0,
+    emailsByIpLastTwoHours: 0,
+    identitiesByPhoneLastDay: 0,
     orderAmount: item.amount,
     averageOrderValue,
     giftCardValue,
     giftCardBaseline: giftCardValue,
-    linkedGiftCard: evidenceLinkedGiftSignal(item.storeId, item.context?.shopifyOrderId ?? "") || Boolean(item.context?.giftCards?.redeemed.some((redemption) =>
-      redemption.identityChanged && redemption.confidence === "exact-id" && redemption.purchaseOrderNumber && tenantCases.some((source) =>
-        source.storeId === item.storeId && source.orderNumber === redemption.purchaseOrderNumber && ["new", "review", "action", "fraud"].includes(source.status)))),
+    linkedGiftCard: false,
     paymentFailures: hasEvidence(/כשל|failed payment/i) ? 3 : 0,
     billingShippingMismatch: hasEvidence(/כתובות החיוב והמשלוח שונות/i),
     shopifyRisk: item.context?.shopifyRisk === "high" ? "high" : item.context?.shopifyRisk === "medium" ? "medium" : item.context?.shopifyRisk === "low" ? "low" : "none",
@@ -475,48 +508,49 @@ const fallbackSignalsForCase = (item: FraudCase, tenantCases: FraudCase[]): Orde
 export function reevaluateOpenCases(tenantId: string) {
   const tenantCases = state.cases.filter((item) => item.tenantId === tenantId);
   const rules = state.rulesByTenant.get(tenantId) ?? [];
-  const candidates = tenantCases.filter((item) => activeStatuses.has(item.status) || (item.status === "resolved" && (item.reason === autoResolvedReason || item.resolution?.source === "automatic-rule-change")));
+  const candidates = tenantCases.filter(canReevaluate);
+  const velocityFor = createVelocityLookup(state.orders, rules.flatMap((rule) => rule.conditions));
   let resolved = 0;
   let updated = 0;
   let reopened = 0;
 
-  for (const item of candidates) {
-    const wasAutoResolved = item.status === "resolved" && (item.reason === autoResolvedReason || item.resolution?.source === "automatic-rule-change");
-    const result = evaluateRisk(item.signals ?? fallbackSignalsForCase(item, tenantCases), new Date(item.occurredAt ?? Date.now()), rules);
+  const evaluated = candidates.map((item) => {
+    const base = item.signals ?? fallbackSignalsForCase(item, tenantCases);
+    const stored = state.orders.find((order) => order.tenantId === tenantId && order.storeId === item.storeId && order.shopifyOrderId === item.context?.shopifyOrderId);
+    const current = stored ?? {
+      tenantId, storeId: item.storeId, shopifyOrderId: item.context?.shopifyOrderId ?? item.id,
+      createdAt: item.occurredAt ?? "", email: item.email, ip: item.context?.ip ?? "", phone: item.context?.phone ?? "",
+      amount: item.amount, giftCardValue: base.giftCardValue,
+    };
+    const signals: OrderSignals = { ...base, orderAmount: current.amount, linkedGiftCard: false,
+      ...velocityFor(current) };
+    const timestamp = Number.isFinite(Date.parse(current.createdAt)) ? new Date(current.createdAt) : new Date();
+    return { item, signals, timestamp, baseResult: evaluateRisk(signals, timestamp, rules) };
+  });
+  // Establish genuine source-order risk first. Stale linked alerts must not keep
+  // each other alive after the false velocity alerts have been removed.
+  const baseResults = new Map(evaluated.map((entry) => [entry.item.id, entry.baseResult]));
+  const sourceCases = tenantCases.map((item) => ({ ...item,
+    status: baseResults.has(item.id) ? (baseResults.get(item.id)!.score >= 25 ? "new" : "resolved") : item.status,
+  }));
+  const ledgers = new Map(state.stores.filter((store) => store.tenantId === tenantId).map((store) => [store.id,
+    buildGiftLedger((state.giftCardOrders ?? []).filter((order) => order.tenantId === tenantId && order.storeId === store.id))]));
+
+  for (const { item, signals, timestamp } of evaluated) {
+    const wasAutoResolved = isAutoResolved(item);
+    signals.linkedGiftCard = hasFlaggedGiftSource(ledgers.get(item.storeId)?.cards ?? [], item.storeId, item.context?.shopifyOrderId ?? "",
+      sourceCases.map((source) => ({ storeId: source.storeId, orderId: source.context?.shopifyOrderId, status: source.status })))
+      || Boolean(item.context?.giftCards?.redeemed.some((redemption) => redemption.identityChanged && redemption.confidence === "exact-id" &&
+        sourceCases.some((source) => source.storeId === item.storeId && source.orderNumber === redemption.purchaseOrderNumber && ["new", "review", "action", "fraud"].includes(source.status))));
+    const result = evaluateRisk(signals, timestamp, rules);
+    applyRiskResult(item, signals, result);
     if (result.score < 25) {
-      item.status = "resolved";
-      item.reason = autoResolvedReason;
-      const amountThresholds = rules
-        .filter((rule) => rule.enabled)
-        .flatMap((rule) => rule.conditions)
-        .filter((condition) => condition.field === "order_amount" && typeof condition.value === "number")
-        .map((condition) => condition.value as number)
-        .sort((left, right) => left - right);
-      const threshold = amountThresholds[0];
-      item.resolution = {
-        source: "automatic-rule-change",
-        at: new Date().toISOString(),
-        note: item.amount <= 0
-          ? "ההזמנה בסכום אפס ואינה נחשבת לרכישה לצורך חוקי תדירות."
-          : threshold !== undefined && item.amount <= threshold
-            ? `סכום ההזמנה (${item.amount.toLocaleString("he-IL", { style: "currency", currency: "ILS", maximumFractionDigits: 0 })}) נמוך מסף הסכום הפעיל (${threshold.toLocaleString("he-IL", { style: "currency", currency: "ILS", maximumFractionDigits: 0 })}), ולא התקיים חוק סיכון אחר.`
-            : "ההזמנה אינה עומדת כרגע באף חוק סיכון פעיל.",
-      };
-      item.score = 0;
-      item.severity = "low";
-      item.evidence = [];
       if (!wasAutoResolved) resolved += 1;
       continue;
     }
     if (wasAutoResolved) {
-      item.status = "new";
       reopened += 1;
     }
-    item.resolution = undefined;
-    item.score = result.score;
-    item.severity = result.severity;
-    item.evidence = result.evidence;
-    item.reason = result.evidence[0]?.label ?? item.reason;
     updated += 1;
   }
 
@@ -532,6 +566,43 @@ export function reevaluateOpenCases(tenantId: string) {
     active: tenantCases.filter((item) => activeStatuses.has(item.status)).length,
     cases: clone(tenantCases),
   };
+}
+
+/** Explicit, idempotent policy correction for the merchant who requested it.
+ * Never reapply on hydration: later edits remain the merchant's choice.
+ */
+export function repairVelocityPolicy(tenantId: string) {
+  const migration = "risk.velocity-windows-v3";
+  const alreadyApplied = state.audit.some((event) => event.tenantId === tenantId && event.action === migration);
+  if (!alreadyApplied) {
+    const rules = state.rulesByTenant.get(tenantId);
+    if (!rules) throw new Error("RULE_NOT_FOUND");
+    const policyIds = ["recommended-email-velocity", "recommended-ip-velocity", "recommended-email-daily-velocity", "recommended-ip-daily-velocity", "recommended-order-spike"];
+    for (const baseline of baselineRules().filter((rule) => policyIds.includes(rule.id))) {
+      const existing = rules.find((rule) => rule.id === baseline.id);
+      if (existing) Object.assign(existing, { label: baseline.label, description: baseline.description, conditions: clone(baseline.conditions), logic: baseline.logic, enabled: true });
+      else rules.push(clone(baseline));
+    }
+    state.audit.unshift({ id: randomUUID(), tenantId, action: migration, resourceType: "risk_rules", resourceId: tenantId,
+      createdAt: new Date().toISOString(), metadata: { hour: 60, hourlyThreshold: 3, day: 1440, dailyThreshold: 5, amountThreshold: 1500 } });
+  }
+  return { alreadyApplied, ...reevaluateOpenCases(tenantId) };
+}
+
+// Locate newly qualifying historical orders without inventing customer/item data.
+// The caller fetches their original Shopify details before creating any case.
+export function pendingVelocityPolicyOrders(tenantId: string) {
+  const policy = (state.rulesByTenant.get(tenantId) ?? []).filter((rule) => [
+    "recommended-email-velocity", "recommended-ip-velocity", "recommended-email-daily-velocity", "recommended-ip-daily-velocity", "recommended-order-spike",
+  ].includes(rule.id));
+  const known = new Set(state.cases.filter((item) => item.tenantId === tenantId).map((item) => `${item.storeId}:${item.context?.shopifyOrderId}`));
+  const orders = state.orders.filter((order) => order.tenantId === tenantId && Number.isFinite(Date.parse(order.createdAt)) && !known.has(`${order.storeId}:${order.shopifyOrderId}`));
+  const velocityFor = createVelocityLookup(state.orders, policy.flatMap((rule) => rule.conditions));
+  return orders.filter((order) => evaluateRisk({
+    ...velocityFor(order), orderAmount: order.amount, averageOrderValue: 0, giftCardValue: order.giftCardValue, giftCardBaseline: 0,
+    linkedGiftCard: false, paymentFailures: 0, billingShippingMismatch: false, shopifyRisk: "none", employeeMatch: false, refundAfterFulfillment: false,
+    blacklist: { email: false, phone: false, address: false, ip: false, customer: false },
+  }, new Date(order.createdAt), policy).score >= 25).map((order) => ({ storeId: order.storeId, orderId: order.shopifyOrderId }));
 }
 
 export function createRule(tenantId: string, input: Omit<RiskRule, "id" | "matches">) {
@@ -650,6 +721,7 @@ export function completeHistoricalSync(tenantId: string, storeId: string, scanne
   store.lastEventAt = latestOrderAt
     ? new Intl.DateTimeFormat("he-IL", { dateStyle: "short", timeStyle: "short", timeZone: "Asia/Jerusalem" }).format(new Date(latestOrderAt))
     : "לא נמצאו הזמנות ב־30 הימים האחרונים";
+  reevaluateOpenCases(tenantId);
   return clone(store);
 }
 
@@ -842,25 +914,15 @@ export function ingestShopifyOrder(input: { storeId: string; webhookId: string; 
   const existingCaseBeforeEvaluation = state.cases.find((item) => item.storeId === store.id && (item.context?.shopifyOrderId === shopifyOrderId || (payload.name && item.orderNumber === payload.name)));
   if (existingCaseBeforeEvaluation?.context && !existingCaseBeforeEvaluation.context.shopifyOrderId) existingCaseBeforeEvaluation.context.shopifyOrderId = shopifyOrderId;
   const recentOrders = state.orders.filter((order) => order.storeId === store.id && order.shopifyOrderId !== shopifyOrderId);
-  const oneHourAgo = new Date(createdAt).getTime() - 3_600_000;
-  const twoHoursAgo = new Date(createdAt).getTime() - 7_200_000;
-  const oneDayAgo = new Date(createdAt).getTime() - 86_400_000;
-  const sameEmail = recentOrders.filter((order) => email && order.email === email && new Date(order.createdAt).getTime() >= oneHourAgo).length + 1;
-  const recentIpOrders = recentOrders.filter((order) => ip && order.ip === ip && new Date(order.createdAt).getTime() >= twoHoursAgo);
-  const sameIp = recentIpOrders.length + 1;
-  const giftCardOrdersByIp = recentIpOrders.filter((order) => order.giftCardValue > 0).length + (giftCardValue > 0 ? 1 : 0);
-  const emailsByIp = new Set([...recentIpOrders.map((order) => order.email), email].filter(Boolean)).size;
-  const identitiesByPhone = new Set(recentOrders.filter((order) => phone && order.phone === phone && new Date(order.createdAt).getTime() >= oneDayAgo).map((order) => order.email)).size + (email ? 1 : 0);
+  const velocity = computeVelocitySignals({ tenantId: store.tenantId, storeId: store.id, shopifyOrderId, email, ip, phone, amount, giftCardValue, createdAt },
+    recentOrders, (state.rulesByTenant.get(store.tenantId) ?? []).flatMap((rule) => rule.conditions));
+  const { ordersByIpLastTwoHours: sameIp, giftCardOrdersByIpLastTwoHours: giftCardOrdersByIp, emailsByIpLastTwoHours: emailsByIp } = velocity;
   const averageOrderValue = recentOrders.length ? recentOrders.reduce((sum, order) => sum + order.amount, 0) / recentOrders.length : amount;
   const giftCardBaseline = recentOrders.length ? recentOrders.reduce((sum, order) => sum + order.giftCardValue, 0) / Math.max(1, recentOrders.length) : giftCardValue;
   const employeeMatch = state.employees.some((employee) => employee.tenantId === store.tenantId && normalizeEmail(employee.email) === email);
 
   const signals: OrderSignals = {
-    ordersByEmailLastHour: sameEmail,
-    ordersByIpLastTwoHours: sameIp,
-    giftCardOrdersByIpLastTwoHours: giftCardOrdersByIp,
-    emailsByIpLastTwoHours: emailsByIp,
-    identitiesByPhoneLastDay: identitiesByPhone,
+    ...velocity,
     orderAmount: amount,
     averageOrderValue,
     giftCardValue,
@@ -909,6 +971,7 @@ export function ingestShopifyOrder(input: { storeId: string; webhookId: string; 
     if (matchedRule && (!existingOrder || !existingCaseBeforeEvaluation?.evidence.some((evidence) => evidence.label === matchedRule.label))) matchedRule.matches += 1;
   }
   if (result.score < 25) {
+    if (existingCaseBeforeEvaluation) applyRiskResult(existingCaseBeforeEvaluation, signals, result);
     refreshGiftCardLinks(store.id);
     return { duplicate: false as const, case: null, risk: result };
   }
@@ -916,15 +979,10 @@ export function ingestShopifyOrder(input: { storeId: string; webhookId: string; 
   const existingCase = existingCaseBeforeEvaluation;
   if (existingCase) {
     const previousScore = existingCase.score;
-    existingCase.score = Math.max(existingCase.score, result.score);
-    if (result.score >= previousScore) {
-      existingCase.severity = result.severity;
-      existingCase.reason = result.evidence[0]?.label ?? existingCase.reason;
-    }
-    existingCase.signals = clone(signals);
-    existingCase.evidence = [...existingCase.evidence, ...result.evidence.filter((evidence) => !existingCase.evidence.some((current) => current.label === evidence.label))];
+    const wasEligible = canReevaluate(existingCase);
+    applyRiskResult(existingCase, signals, result);
     refreshGiftCardLinks(store.id);
-    return { duplicate: false as const, case: result.score > previousScore ? clone(existingCase) : null, risk: result };
+    return { duplicate: false as const, case: wasEligible && result.score > previousScore ? clone(existingCase) : null, risk: result };
   }
   const fraudCase: FraudCase = {
     id: randomUUID(), tenantId: store.tenantId, storeId: store.id, storeName: store.name,

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createRule } from "@/lib/operational-store";
+import { createRule, reevaluateOpenCases } from "@/lib/operational-store";
 import type { RiskRule } from "@/lib/types";
 import { hydrateOperationalState, persistOperationalState } from "@/lib/persistence.server";
 
@@ -17,6 +17,7 @@ export async function POST(request: Request, context: { params: Promise<{ tenant
     enabled: rule.enabled ?? true, logic: rule.logic, conditions: rule.conditions, action: rule.action,
     locked: false, recommended: false,
   });
+  const reconciliation = reevaluateOpenCases(tenantId);
   await persistOperationalState();
-  return NextResponse.json({ rule: created }, { status: 201 });
+  return NextResponse.json({ rule: created, cases: reconciliation.cases }, { status: 201 });
 }

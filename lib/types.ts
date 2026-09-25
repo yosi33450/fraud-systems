@@ -53,6 +53,7 @@ export interface FraudCase {
   evidence: Evidence[];
   items: { name: string; quantity: number; price: number }[];
   signals?: {
+    conditionValues?: Record<string, number>;
     ordersByEmailLastHour: number;
     ordersByIpLastTwoHours: number;
     giftCardOrdersByIpLastTwoHours: number;

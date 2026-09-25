@@ -1,7 +1,9 @@
 import { rules as defaultRules } from "@/lib/initial-state";
 import type { Evidence, RiskCondition, RiskRule, Severity } from "@/lib/types";
+import { velocityDefaults, velocityKey } from "@/lib/order-velocity";
 
 export interface OrderSignals {
+  conditionValues?: Record<string, number>;
   ordersByEmailLastHour: number;
   ordersByIpLastTwoHours: number;
   giftCardOrdersByIpLastTwoHours: number;
@@ -25,13 +27,19 @@ export interface RiskResult {
   severity: Severity;
   evidence: Evidence[];
   matchedRuleIds: string[];
-  version: "2026.09-v2";
+  version: "2026.09-v3";
 }
 
 const severityRank: Record<Severity, number> = { low: 0, medium: 1, high: 2, critical: 3 };
 const baseScore: Record<Severity, number> = { low: 18, medium: 45, high: 72, critical: 92 };
 
 const signalValue = (condition: RiskCondition, signals: OrderSignals): number | boolean => {
+  if (condition.field in velocityDefaults) {
+    const minutes = condition.windowMinutes ?? velocityDefaults[condition.field];
+    if (signals.conditionValues) return signals.conditionValues[velocityKey(condition.field, minutes)] ?? 0;
+    // Legacy/API signals are only valid for their explicitly named fixed window.
+    if (minutes !== velocityDefaults[condition.field]) return 0;
+  }
   switch (condition.field) {
     case "orders_by_email": return signals.ordersByEmailLastHour;
     case "orders_by_ip": return signals.ordersByIpLastTwoHours;
@@ -68,7 +76,16 @@ export function evaluateRisk(signals: OrderSignals, now = new Date(), rules: Ris
   const evidence: Evidence[] = matched.map((rule, index) => ({
     id: `${index + 1}`,
     label: rule.label,
-    description: rule.description || `${rule.conditions.length} תנאים בחוק התקיימו.`,
+    description: rule.conditions.map((condition) => {
+      const actual = signalValue(condition, signals);
+      if (condition.field in velocityDefaults) {
+        const minutes = condition.windowMinutes ?? velocityDefaults[condition.field];
+        const subject = condition.field === "orders_by_email" ? "הזמנות מאותו אימייל" : condition.field === "orders_by_ip" ? "הזמנות מאותה כתובת IP" : condition.field === "gift_card_orders_by_ip" ? "רכישות גיפטקארד מאותה כתובת IP" : condition.field === "emails_by_ip" ? "אימיילים שונים מאותה כתובת IP" : "אימיילים שונים לאותו טלפון";
+        return `נמצאו ${actual} ${subject} ב־${minutes} הדקות שעד ההזמנה, כולל ההזמנה הנוכחית. הסף: ${condition.operator === "gt" ? "יותר מ־" : condition.operator === "eq" ? "בדיוק " : "לפחות "}${condition.value}.`;
+      }
+      if (condition.field === "order_amount") return `סכום הרכישה הבודדת: ${actual}. הסף: ${condition.operator === "gt" ? "מעל " : condition.operator === "eq" ? "בדיוק " : "לפחות "}${condition.value}.`;
+      return rule.description || "התנאי התקיים.";
+    }).join(" "),
     source: sourceFor(rule),
     delta: baseScore[rule.action.severity],
     timestamp: now.toISOString(),
@@ -86,5 +103,5 @@ export function evaluateRisk(signals: OrderSignals, now = new Date(), rules: Ris
   const severity = severityRank[shopifySeverity] > severityRank[ruleSeverity] ? shopifySeverity : ruleSeverity;
   const score = evidence.length === 0 ? 0 : Math.min(100, baseScore[severity] + Math.max(0, evidence.length - 1) * 2);
 
-  return { score, severity, evidence, matchedRuleIds: matched.map((rule) => rule.id), version: "2026.09-v2" };
+  return { score, severity, evidence, matchedRuleIds: matched.map((rule) => rule.id), version: "2026.09-v3" };
 }
