@@ -72,3 +72,22 @@ visual system; this avoids fragile specificity escalation and preserves layout f
 Validate the investigation queue first, then propagate the same tokens to every screen.
 Check desktop, tablet and 375px mobile, keyboard focus, open/close dialogs and forms
 without submitting live actions. Run typecheck, build and existing financial-link tests.
+
+## QA record
+
+- Reviewed all ten workspaces on desktop and checked each at 375px: no page-level
+  horizontal overflow. Investigations also reviewed at 768px and 1440px.
+- Group dialog preserves the separate purchase/redemption totals; the large purchase
+  list remains independently scrollable. Escape returns focus to the originating row.
+- Store connection and rule editing now reuse the existing native centered dialog:
+  focus trapping, Escape dismissal and focus restoration without changing submissions.
+- Switch checked state, current navigation, condition-select labels and login error
+  associations are exposed to assistive technology. Closed mobile navigation is hidden
+  from focus. Changing workspaces returns the viewport to the heading.
+- Core text/action colors have contrast ratios of 5.98:1 or higher on the canvas;
+  semantic badge pairings are 5.90:1 or higher. This is not a full WCAG certification.
+- Build/type checks pass; all 16 existing gift evidence and monetary-summary tests pass.
+- No data, API, authentication, risk-engine or persistence modules changed. No forms
+  were submitted, scans triggered, or case decisions changed during visual QA.
+- Loading/error screens were reviewed in source; loading and login also observed in
+  the browser. No deliberate production errors were induced to exercise the boundary.

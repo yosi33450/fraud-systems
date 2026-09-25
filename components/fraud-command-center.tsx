@@ -91,6 +91,7 @@ const tenantId = "tenant-primary";
 
 export function FraudCommandCenter() {
   const [view, setView] = useState<View>("overview");
+  useEffect(() => { window.scrollTo({ top: 0, left: 0, behavior: "instant" }); }, [view]);
   const [selectedCase, setSelectedCase] = useState<FraudCase | null>(null);
   const [caseData, setCaseData] = useState(initialCases);
   const [giftLedger, setGiftLedger] = useState<DashboardSnapshot["giftCardLedger"]>();
