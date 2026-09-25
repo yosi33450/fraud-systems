@@ -7,7 +7,9 @@ const configured = () => Boolean(process.env.BLOB_READ_WRITE_TOKEN || process.en
 const pathFor = (tenantId: string, storeId: string) => `private/gift-ledger/${encodeURIComponent(tenantId)}/${encodeURIComponent(storeId)}.json`;
 
 async function read(tenantId: string, storeId: string) {
-  const result = await get(pathFor(tenantId, storeId), { access: "private", useCache: false });
+  // Compression turns the HTTP ETag into W/"...". Request the identity
+  // representation so Blob's conditional-write API receives the strong ETag.
+  const result = await get(pathFor(tenantId, storeId), { access: "private", useCache: false, headers: { "Accept-Encoding": "identity" } });
   if (!result || result.statusCode !== 200) return { orders: [] as GiftCardOrderEvidence[], etag: undefined };
   const encrypted = JSON.parse(await new Response(result.stream).text());
   return { orders: decryptPrivateData<GiftCardOrderEvidence[]>(encrypted), etag: result.blob.etag };
