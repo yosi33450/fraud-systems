@@ -1,9 +1,7 @@
 import type { Metadata } from "next";
 import "@fontsource-variable/heebo";
-import "@fontsource-variable/noto-sans-hebrew";
-import "@fontsource/ibm-plex-mono/400.css";
-import "@fontsource/ibm-plex-mono/500.css";
 import "./globals.css";
+import "./product-ui.css";
 
 export const metadata: Metadata = {
   title: "Shield Ledger — מרכז מניעת הונאות",

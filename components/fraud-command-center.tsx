@@ -276,14 +276,14 @@ export function FraudCommandCenter() {
         </button>
         <nav className="nav-list">
           {nav.map(({ id, label, Icon, count }) => (
-            <button key={id} className={view === id ? "nav-active" : ""} onClick={() => { setView(id); setMobileNav(false); }}>
+            <button key={id} className={view === id ? "nav-active" : ""} aria-current={view === id ? "page" : undefined} onClick={() => { setView(id); setMobileNav(false); }}>
               <Icon size={18} strokeWidth={1.8} aria-hidden="true" /><span>{label}</span>
               {count && (id !== "cases" || caseData.some((item) => !["resolved", "false-positive"].includes(item.status))) ? <small>{id === "cases" ? caseData.filter((item) => !["resolved", "false-positive"].includes(item.status)).length : count}</small> : null}
             </button>
           ))}
         </nav>
         <div className="sidebar-footer">
-          <button onClick={() => setView("platform")}><Gauge size={18} /><span>ניהול הפלטפורמה</span><span className="owner-chip">בעלים</span></button>
+          <button aria-current={view === "platform" ? "page" : undefined} onClick={() => setView("platform")}><Gauge size={18} /><span>ניהול הפלטפורמה</span><span className="owner-chip">בעלים</span></button>
           <button onClick={() => setView("notifications")}><Settings size={18} /><span>הגדרות התראות</span></button>
           <div className="user-block"><div className="user-avatar"><CircleUserRound size={17} /></div><div><strong>חשבון בעלים</strong><span>בעל הפלטפורמה</span></div><ChevronLeft size={15} /></div>
         </div>

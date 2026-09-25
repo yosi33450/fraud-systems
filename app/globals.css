@@ -1,3 +1,5 @@
+/* Structural compatibility layer. Visual tokens live in product-ui.css. */
+@layer legacy {
 :root {
   --paper: #f6f8f7;
   --surface: #ffffff;
@@ -1428,4 +1430,5 @@ p { text-wrap: pretty; }
   .gift-card-route { grid-template-columns: minmax(0, 1fr) 18px minmax(0, 1fr); }
   .gift-card-link-result { display: grid; grid-template-columns: auto auto; align-items: center; justify-content: start; }
   .gift-card-link-result small { grid-column: 1 / -1; }
+}
 }
