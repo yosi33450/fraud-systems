@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { connectShopifyStore } from "@/lib/operational-store";
-import { requestOrganizationAccessToken, testShopifyConnection } from "@/lib/shopify-admin.server";
+import { ensureOrderCreateWebhook, requestOrganizationAccessToken, testShopifyConnection } from "@/lib/shopify-admin.server";
 import { syncOrdersLast30Days } from "@/lib/shopify-sync.server";
 import { hydrateOperationalState, persistOperationalState } from "@/lib/persistence.server";
 
@@ -28,6 +28,7 @@ export async function POST(request: Request, context: { params: Promise<{ tenant
       name: data.shop.name,
       domain: data.shop.myshopifyDomain,
       accessToken: token.accessToken,
+      clientSecret: String(clientSecret),
       expiresIn: token.expiresIn,
     });
     const sync = await syncOrdersLast30Days({
@@ -36,8 +37,13 @@ export async function POST(request: Request, context: { params: Promise<{ tenant
       shopDomain: store.domain,
       accessToken: token.accessToken,
     });
+    const webhook = await ensureOrderCreateWebhook({
+      shopDomain: store.domain,
+      accessToken: token.accessToken,
+      uri: new URL(`/api/shopify/webhooks/${store.id}`, request.url).toString(),
+    });
     await persistOperationalState();
-    return NextResponse.json({ connected: true, store: sync.store, sync });
+    return NextResponse.json({ connected: true, store: sync.store, sync, webhook });
   } catch (error) {
     await persistOperationalState().catch(() => undefined);
     const message = error instanceof Error ? error.message : "SHOPIFY_CONNECTION_FAILED";

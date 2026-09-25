@@ -1,6 +1,6 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
-import { ingestShopifyOrder, resolveStore } from "@/lib/operational-store";
+import { getStoreWebhookSecret, ingestShopifyOrder, resolveStore } from "@/lib/operational-store";
 import { notifyStoreOwners } from "@/lib/email-notifications.server";
 import { hydrateOperationalState, persistOperationalState } from "@/lib/persistence.server";
 
@@ -19,7 +19,7 @@ export async function POST(request: Request, context: { params: Promise<{ storeI
   const rawBody = await request.text();
   const store = resolveStore(storeId);
   if (!store) return NextResponse.json({ error: "STORE_NOT_FOUND" }, { status: 404 });
-  const secret = process.env.SHOPIFY_WEBHOOK_SECRET;
+  const secret = getStoreWebhookSecret(storeId) ?? process.env.SHOPIFY_WEBHOOK_SECRET;
 
   if (!secret) {
     return NextResponse.json({ error: "WEBHOOK_SECRET_NOT_CONFIGURED" }, { status: 503 });

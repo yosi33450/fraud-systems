@@ -384,6 +384,8 @@ function Overview({ cases, query, setQuery, severity, setSeverity, store, setSto
   onShowAll: () => void; onOpenNotifications: () => void; onOpenStores: () => void;
 }) {
   const hasStores = stores.length > 0;
+  const automaticallyClosed = cases.filter(isAutomaticallyResolved).length;
+  const merchantDecisions = cases.filter((item) => ["fraud", "false-positive"].includes(item.status) || (item.status === "resolved" && !isAutomaticallyResolved(item))).length;
   const [showClosed, setShowClosed] = useState(false);
   const [expandedClusters, setExpandedClusters] = useState<Set<string>>(new Set());
   const activeCases = cases.filter((item) => ["new", "review", "action"].includes(item.status));
@@ -404,7 +406,7 @@ function Overview({ cases, query, setQuery, severity, setSeverity, store, setSto
         <Metric icon={<ShieldAlert />} label="ממתינים להחלטה" value={String(cases.filter((item) => ["new", "review", "action"].includes(item.status)).length)} detail={`${cases.filter((item) => item.severity === "critical" && ["new", "review", "action"].includes(item.status)).length} דורשים טיפול מיידי`} tone="critical" />
         <Metric icon={<Fingerprint />} label="סכום בהזמנות חשודות" value={formatCurrency(cases.filter((item) => ["new", "review", "action"].includes(item.status)).reduce((sum, item) => sum + item.amount, 0))} detail="בתיקים שעדיין פתוחים" />
         <Metric icon={<Mail />} label="התראות לבעלי החנות" value={String(deliveries.filter((item) => ["sent", "simulated"].includes(item.status)).length)} detail="נשלחו באימייל" tone="warning" />
-        <Metric icon={<CheckCircle2 />} label="התראות סגורות" value={String(cases.filter((item) => ["fraud", "false-positive", "resolved"].includes(item.status)).length)} detail="אוטומטית או בהחלטת בעל החנות" tone="success" />
+        <Metric icon={<CheckCircle2 />} label="נסגרו אוטומטית" value={String(automaticallyClosed)} detail={`${merchantDecisions} נסגרו בהחלטת בעל החנות`} tone="success" />
       </section>
       <section className="signal-row">
         <div className="signal-card"><div className="signal-kicker"><Mail size={16} /> התראות לבעלים</div><strong>התראה נשלחת מיד על סיכון גבוה או קריטי</strong><p>בעל החנות מקבל אימייל עם ההזמנה והסיבה, ואז מסמן בבדיקה, טופל, תקין או הונאה.</p><button onClick={onOpenNotifications}>הגדר נמענים <ChevronLeft size={14} /></button></div>

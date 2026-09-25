@@ -72,7 +72,7 @@ type OperationalState = {
   webhookIds: Set<string>;
   orders: StoredOrder[];
   audit: AuditEntry[];
-  storeConnections: Map<string, { accessToken: string; expiresAt: string }>;
+  storeConnections: Map<string, { accessToken: string; expiresAt: string; webhookSecret?: string }>;
 };
 
 export type PersistedOperationalState = {
@@ -89,7 +89,7 @@ export type PersistedOperationalState = {
   webhookIds: string[];
   orders: StoredOrder[];
   audit: AuditEntry[];
-  storeConnections: Array<[string, { accessToken: string; expiresAt: string }]>;
+  storeConnections: Array<[string, { accessToken: string; expiresAt: string; webhookSecret?: string }]>;
 };
 
 const clone = <T,>(value: T): T => structuredClone(value);
@@ -513,6 +513,7 @@ export function connectShopifyStore(input: {
   name: string;
   domain: string;
   accessToken: string;
+  clientSecret: string;
   expiresIn: number;
 }) {
   ensureBaselineRules(input.tenantId);
@@ -526,6 +527,7 @@ export function connectShopifyStore(input: {
   if (!existing) state.stores.unshift(store);
   state.storeConnections.set(store.id, {
     accessToken: input.accessToken,
+    webhookSecret: input.clientSecret,
     expiresAt: new Date(Date.now() + input.expiresIn * 1000).toISOString(),
   });
   state.audit.unshift({
@@ -541,6 +543,10 @@ export function getStoreConnection(tenantId: string, storeId: string) {
   if (!connection) throw new Error("STORE_CONNECTION_NOT_FOUND");
   if (new Date(connection.expiresAt).getTime() <= Date.now()) throw new Error("SHOPIFY_TOKEN_EXPIRED");
   return { store: clone(store), ...clone(connection) };
+}
+
+export function getStoreWebhookSecret(storeId: string) {
+  return state.storeConnections.get(storeId)?.webhookSecret;
 }
 
 export function completeHistoricalSync(tenantId: string, storeId: string, scanned: number, latestOrderAt?: string) {

@@ -32,6 +32,14 @@ export const CREATE_WEBHOOK_SUBSCRIPTION_MUTATION = `#graphql
   }
 `;
 
+export const WEBHOOK_SUBSCRIPTIONS_QUERY = `#graphql
+  query ShieldLedgerWebhookSubscriptions($first: Int!) {
+    webhookSubscriptions(first: $first) {
+      nodes { id topic uri }
+    }
+  }
+`;
+
 export const ADD_CUSTOMER_TAGS_MUTATION = `#graphql
   mutation ShieldLedgerBlockCustomer($id: ID!, $tags: [String!]!) {
     tagsAdd(id: $id, tags: $tags) {
@@ -136,6 +144,26 @@ export async function registerOrderWebhook(input: {
   if (result.userErrors.length) throw new Error(result.userErrors.map((error) => error.message).join("; "));
   if (!result.webhookSubscription) throw new Error("WEBHOOK_SUBSCRIPTION_NOT_CREATED");
   return result.webhookSubscription;
+}
+
+export async function ensureOrderCreateWebhook(input: { shopDomain: string; accessToken: string; uri: string }) {
+  const existing = await shopifyAdminRequest<{
+    webhookSubscriptions: { nodes: Array<{ id: string; topic: string; uri: string }> };
+  }>({
+    shopDomain: input.shopDomain,
+    accessToken: input.accessToken,
+    query: WEBHOOK_SUBSCRIPTIONS_QUERY,
+    variables: { first: 100 },
+  });
+  const subscription = existing.webhookSubscriptions.nodes.find((item) => item.topic === "ORDERS_CREATE" && item.uri === input.uri);
+  if (subscription) return { ...subscription, created: false as const };
+  const created = await registerOrderWebhook({
+    shopDomain: input.shopDomain,
+    accessToken: input.accessToken,
+    topic: "ORDERS_CREATE",
+    uri: input.uri,
+  });
+  return { ...created, created: true as const };
 }
 
 export async function tagBlockedCustomer(input: { shopDomain: string; accessToken: string; customerId: string }) {
