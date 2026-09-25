@@ -470,8 +470,11 @@ button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focu
 .field-label textarea { resize: vertical; line-height: 1.5; }
 .field-label input:focus, .field-label select:focus, .field-label textarea:focus, .condition-editor select:focus, .condition-editor input:focus { border-color: var(--trust); box-shadow: 0 0 0 3px rgb(0 122 90 / .1); }
 .condition-editor-list { display: flex; flex-direction: column; gap: 9px; }
-.condition-editor { display: grid; grid-template-columns: 28px minmax(190px, 1fr) auto 80px auto 75px auto 38px; align-items: center; gap: 8px; padding: 11px; background: #fff; border: 1px solid var(--hairline); border-radius: 12px; font-size: 10px; }
+.condition-editor { display: grid; grid-template-columns: 28px minmax(190px, 1fr) minmax(118px, auto) minmax(142px, auto) 38px; align-items: center; gap: 8px; padding: 11px; background: #fff; border: 1px solid var(--hairline); border-radius: 12px; font-size: 10px; }
 .condition-editor input { width: 100%; }
+.condition-value-field { display: grid; grid-template-columns: auto minmax(58px, 1fr); align-items: center; gap: 7px; color: var(--muted); white-space: nowrap; }
+.condition-window-field { grid-template-columns: auto minmax(58px, 1fr) auto; }
+.condition-value-field small { color: var(--muted); font-size: inherit; }
 .condition-number { width: 24px; height: 24px; display: grid; place-items: center; border-radius: 50%; color: var(--trust); background: var(--trust-soft); font-family: "Heebo Variable", sans-serif; font-weight: 700; font-variant-numeric: tabular-nums; }
 .boolean-condition { grid-column: span 5; color: var(--trust); font-weight: 700; }
 .add-condition-button { margin-top: 10px; padding: 8px 10px; border: 0; background: transparent; color: var(--trust); font-weight: 700; }
@@ -522,9 +525,11 @@ button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focu
   .recommendation-grid, .severity-options { grid-template-columns: 1fr; }
   .condition-rules article { grid-template-columns: 40px 1fr; }
   .condition-rules article > .secondary-button { grid-column: 1 / -1; }
-  .condition-editor { grid-template-columns: 28px 1fr 70px; }
-  .condition-editor > span:not(.condition-number):not(.boolean-condition) { display: none; }
-  .condition-editor .icon-button { grid-column: 3; }
+  .condition-editor { grid-template-columns: 28px minmax(0, 1fr); align-items: start; }
+  .condition-editor > select, .condition-editor .boolean-condition, .condition-editor .condition-value-field { grid-column: 2; width: 100%; }
+  .condition-editor .condition-value-field { grid-template-columns: 54px minmax(0, 1fr); }
+  .condition-editor .condition-window-field { grid-template-columns: 54px minmax(0, 1fr) auto; }
+  .condition-editor .icon-button { grid-column: 2; justify-self: end; }
 }
 
 /* Accessibility-led identity: calm Shopify operations desk, not a template. */
