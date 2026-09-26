@@ -56,6 +56,21 @@ test('coupon usage is visible without an employee prefix and other tenants stay 
   assert.equal(api.getEmployeeDiscountActivity('other-tenant').totalOrders, 0);
 });
 
+test('all-history usage includes older saved orders without changing the 30-day view', () => {
+  const store = setup('coupon-test', 'strongful.myshopify.com');
+  const oldDate = new Date(Date.now() - 75 * 86_400_000).toISOString();
+  order(store, 1, ['OVED30'], { created_at: oldDate });
+  order(store, 2, ['OVED30']);
+  const recent = api.getEmployeeDiscountActivity('coupon-test');
+  const all = api.getEmployeeDiscountActivity('coupon-test', 'all');
+  assert.equal(recent.period, '30d');
+  assert.equal(recent.codes.find((item) => item.code === 'oved30')?.orders, 1);
+  assert.equal(all.period, 'all');
+  assert.equal(all.codes.find((item) => item.code === 'oved30')?.orders, 2);
+  assert.equal(all.earliestOrderAt, oldDate);
+  assert.equal(api.getEmployeeDiscountActivity('other-tenant', 'all').codes.length, 0);
+});
+
 test('legacy blank Strongful setting migrates, but an explicitly cleared prefix stays cleared', () => {
   setup('coupon-test', 'strongful.myshopify.com');
   const legacy = api.exportOperationalState();

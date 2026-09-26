@@ -194,6 +194,8 @@ export interface EmployeeDiscountUse {
 }
 
 export interface EmployeeDiscountActivity {
+  period: "30d" | "all";
+  earliestOrderAt?: string;
   prefix: string;
   ordersChecked: number;
   ordersWithAnyDiscountCode: number;

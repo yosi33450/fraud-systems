@@ -731,9 +731,9 @@ export function getEmployeeSettings(tenantId: string): EmployeeMonitoringSetting
   return clone(saved ?? { tenantId, couponPrefix: pilotPrefix, zeroAmount: true, giftCardAddressChange: true, repeatGiftCardUses: true, repeatUsesThreshold: 3, windowMinutes: 1440 });
 }
 
-export function getEmployeeDiscountActivity(tenantId: string): EmployeeDiscountActivity {
+export function getEmployeeDiscountActivity(tenantId: string, period: "30d" | "all" = "30d"): EmployeeDiscountActivity {
   const prefix = getEmployeeSettings(tenantId).couponPrefix.trim().toLowerCase();
-  const cutoff = Date.now() - 30 * 86_400_000;
+  const cutoff = period === "30d" ? Date.now() - 30 * 86_400_000 : Number.NEGATIVE_INFINITY;
   const owners = new Map<string, Employee[]>();
   for (const employee of state.employees.filter((item) => item.tenantId === tenantId)) {
     for (const code of new Set(employee.couponCodes ?? [])) {
@@ -745,9 +745,12 @@ export function getEmployeeDiscountActivity(tenantId: string): EmployeeDiscountA
   const uniqueOrders = new Map<string, number>();
   let ordersChecked = 0;
   let ordersWithAnyDiscountCode = 0;
+  let earliestOrderAt: string | undefined;
   for (const order of state.orders) {
-    if (order.tenantId !== tenantId || Date.parse(order.createdAt) < cutoff) continue;
+    const orderTime = Date.parse(order.createdAt);
+    if (order.tenantId !== tenantId || !Number.isFinite(orderTime) || orderTime < cutoff) continue;
     ordersChecked += 1;
+    if (!earliestOrderAt || orderTime < Date.parse(earliestOrderAt)) earliestOrderAt = order.createdAt;
     if (order.couponCodes?.length) ordersWithAnyDiscountCode += 1;
     const codes = [...new Set((order.couponCodes ?? []).map((code) => code.trim().toLowerCase()).filter(Boolean))];
     if (!codes.length) continue;
@@ -776,7 +779,7 @@ export function getEmployeeDiscountActivity(tenantId: string): EmployeeDiscountA
     byCode.set(use.code, item);
   }
   return {
-    prefix, ordersChecked, ordersWithAnyDiscountCode, totalOrders: uniqueOrders.size, totalAmount: [...uniqueOrders.values()].reduce((sum, amount) => sum + amount, 0),
+    period, earliestOrderAt, prefix, ordersChecked, ordersWithAnyDiscountCode, totalOrders: uniqueOrders.size, totalAmount: [...uniqueOrders.values()].reduce((sum, amount) => sum + amount, 0),
     codes: [...byCode.values()].sort((a, b) => b.orders - a.orders || a.code.localeCompare(b.code)),
     recentUses: uses.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt)).slice(0, 100),
   };
