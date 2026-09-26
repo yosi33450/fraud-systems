@@ -9,6 +9,7 @@ create table if not exists public.shield_ledger_state (
 alter table public.shield_ledger_state enable row level security;
 
 revoke all on table public.shield_ledger_state from anon, authenticated;
+grant select, insert, update on table public.shield_ledger_state to service_role;
 
 -- Production deployments normally use a service-role key. If a dedicated
 -- server access key is used instead, replace the placeholder below with the

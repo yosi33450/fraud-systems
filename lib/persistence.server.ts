@@ -1,6 +1,7 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { gunzipSync, gzipSync } from "node:zlib";
 import { get, put } from "@vercel/blob";
 import { exportOperationalState, restoreOperationalState, type PersistedOperationalState } from "@/lib/operational-store";
 
@@ -32,7 +33,7 @@ const encryptionKey = () => {
 export const encryptPrivateData = (snapshot: unknown): EncryptedState => {
   const iv = randomBytes(12);
   const cipher = createCipheriv("aes-256-gcm", encryptionKey(), iv);
-  const ciphertext = Buffer.concat([cipher.update(JSON.stringify(snapshot), "utf8"), cipher.final()]);
+  const ciphertext = Buffer.concat([cipher.update(gzipSync(JSON.stringify(snapshot))), cipher.final()]);
   return {
     ciphertext: ciphertext.toString("base64"),
     iv: iv.toString("base64"),
@@ -46,8 +47,9 @@ export const decryptPrivateData = <T = PersistedOperationalState,>(payload: Encr
   const plaintext = Buffer.concat([
     decipher.update(Buffer.from(payload.ciphertext, "base64")),
     decipher.final(),
-  ]).toString("utf8");
-  return JSON.parse(plaintext) as T;
+  ]);
+  const content = plaintext[0] === 0x1f && plaintext[1] === 0x8b ? gunzipSync(plaintext) : plaintext;
+  return JSON.parse(content.toString("utf8")) as T;
 };
 
 const supabaseConfiguration = () => {
@@ -69,14 +71,40 @@ const supabaseHeaders = (configuration: NonNullable<ReturnType<typeof supabaseCo
 
 const blobConfigured = () => Boolean(process.env.BLOB_READ_WRITE_TOKEN || process.env.BLOB_STORE_ID);
 
+type PersistenceBackend = "blob" | "supabase" | "local";
+
+function persistenceBackend(): PersistenceBackend {
+  const selected = process.env.PERSISTENCE_BACKEND;
+  if (selected === "supabase") {
+    if (!supabaseConfiguration()) throw new Error("SUPABASE_PERSISTENCE_NOT_CONFIGURED");
+    return "supabase";
+  }
+  if (selected === "blob") {
+    if (!blobConfigured()) throw new Error("BLOB_PERSISTENCE_NOT_CONFIGURED");
+    return "blob";
+  }
+  if (selected === "local") {
+    if (process.env.VERCEL) throw new Error("LOCAL_PERSISTENCE_NOT_ALLOWED_ON_VERCEL");
+    return "local";
+  }
+  if (selected) throw new Error("INVALID_PERSISTENCE_BACKEND");
+
+  // Preserve existing deployments until a verified, explicit cutover is made.
+  if (blobConfigured()) return "blob";
+  if (supabaseConfiguration()) return "supabase";
+  if (process.env.VERCEL) throw new Error("PERSISTENCE_NOT_CONFIGURED");
+  return "local";
+}
+
 async function loadEncryptedState(): Promise<EncryptedState | null> {
-  if (blobConfigured()) {
+  const backend = persistenceBackend();
+  if (backend === "blob") {
     const result = await get(blobPath, { access: "private", useCache: false });
     if (!result || result.statusCode !== 200 || !result.stream) return null;
     return JSON.parse(await new Response(result.stream).text()) as EncryptedState;
   }
-  const supabase = supabaseConfiguration();
-  if (supabase) {
+  if (backend === "supabase") {
+    const supabase = supabaseConfiguration()!;
     const response = await fetch(`${supabase.url}/rest/v1/shield_ledger_state?id=eq.${stateId}&select=ciphertext,iv,auth_tag&limit=1`, {
       headers: supabaseHeaders(supabase),
       cache: "no-store",
@@ -85,7 +113,6 @@ async function loadEncryptedState(): Promise<EncryptedState | null> {
     const rows = await response.json() as EncryptedState[];
     return rows[0] ?? null;
   }
-  if (process.env.VERCEL) throw new Error("PERSISTENCE_NOT_CONFIGURED");
   try {
     return JSON.parse(await readFile(localFile, "utf8")) as EncryptedState;
   } catch (error) {
@@ -95,7 +122,8 @@ async function loadEncryptedState(): Promise<EncryptedState | null> {
 }
 
 async function saveEncryptedState(payload: EncryptedState) {
-  if (blobConfigured()) {
+  const backend = persistenceBackend();
+  if (backend === "blob") {
     await put(blobPath, JSON.stringify(payload), {
       access: "private",
       allowOverwrite: true,
@@ -105,8 +133,8 @@ async function saveEncryptedState(payload: EncryptedState) {
     });
     return;
   }
-  const supabase = supabaseConfiguration();
-  if (supabase) {
+  if (backend === "supabase") {
+    const supabase = supabaseConfiguration()!;
     const response = await fetch(`${supabase.url}/rest/v1/shield_ledger_state`, {
       method: "POST",
       headers: {
@@ -118,7 +146,6 @@ async function saveEncryptedState(payload: EncryptedState) {
     if (!response.ok) throw new Error(`PERSISTENCE_WRITE_FAILED_${response.status}`);
     return;
   }
-  if (process.env.VERCEL) throw new Error("PERSISTENCE_NOT_CONFIGURED");
   await mkdir(localDirectory, { recursive: true });
   await writeFile(temporaryFile, JSON.stringify(payload), { encoding: "utf8", mode: 0o600 });
   await rename(temporaryFile, localFile);

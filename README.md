@@ -26,7 +26,8 @@ Copy `.env.example` to `.env.local` and set:
 - `EMAIL_FROM`: verified sender address used for risk alerts.
 - `APP_URL`: public dashboard URL included in alert emails.
 - `STATE_ENCRYPTION_KEY`: at least 32 characters; encrypts the durable operational snapshot, including Shopify access tokens and customer data.
-- `BLOB_READ_WRITE_TOKEN`: private Vercel Blob store token for the zero-cost single-store pilot. Blob is preferred automatically when configured.
+- `BLOB_READ_WRITE_TOKEN`: token for the legacy private Vercel Blob store. Keep it during migration and recovery.
+- `PERSISTENCE_BACKEND`: set to `supabase` only after the latest encrypted state has been imported and verified in the new database. Until then, leaving this unset preserves the existing Blob behavior even if Supabase credentials are present.
 - `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`: preferred production persistence. The service-role key is server-only and must never use a `NEXT_PUBLIC_` prefix.
 - `SUPABASE_PUBLISHABLE_KEY` and `PERSISTENCE_API_KEY`: alternative server-only RLS credential used by the pilot deployment when a service-role key isn't provisioned.
 - `DASHBOARD_PASSWORD` and `AUTH_SECRET`: protect the owner dashboard when it is publicly deployed.
@@ -35,7 +36,7 @@ Local development stores the same encrypted snapshot under `.data/`. The directo
 
 ## Database setup
 
-Apply `db/migrations/001_shield_ledger_state.sql` to a Supabase project, then configure the server-side environment variables above. The pilot table has RLS enabled, grants no access to `anon` or `authenticated`, and stores only an AES-256-GCM encrypted payload. A normalized schema for the production multi-tenant version remains in `db/schema.sql`.
+Apply `db/migrations/001_shield_ledger_state.sql` to a Supabase project, then configure the server-side environment variables above. The pilot table has RLS enabled, grants no access to `anon` or `authenticated`, and stores only an AES-256-GCM encrypted payload. Do not enable `PERSISTENCE_BACKEND=supabase` while the table is empty: this would start the app without its store connection, cases, and decisions. Preserve the old Blob and encryption key until the imported snapshot's counts and checksum have been verified. A normalized schema for the production multi-tenant version remains in `db/schema.sql`.
 
 ## Implemented
 
