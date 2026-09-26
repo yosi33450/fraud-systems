@@ -171,11 +171,34 @@ export interface Employee {
 export interface EmployeeMonitoringSettings {
   tenantId: string;
   couponPrefix: string;
+  couponPrefixConfigured?: boolean;
   zeroAmount: boolean;
   giftCardAddressChange: boolean;
   repeatGiftCardUses: boolean;
   repeatUsesThreshold: number;
   windowMinutes: number;
+}
+
+export interface EmployeeDiscountUse {
+  storeId: string;
+  orderId: string;
+  orderNumber?: string;
+  code: string;
+  amount: number;
+  email: string;
+  createdAt: string;
+  assignedEmployeeId?: string;
+  buyerMatchesEmployee: boolean;
+  buyerIdentityAvailable: boolean;
+  assignmentConflict: boolean;
+}
+
+export interface EmployeeDiscountActivity {
+  prefix: string;
+  totalOrders: number;
+  totalAmount: number;
+  codes: Array<{ code: string; orders: number; amount: number; assignedEmployeeId?: string; assignmentConflict: boolean; lastUsedAt: string }>;
+  recentUses: EmployeeDiscountUse[];
 }
 
 export interface BlacklistReport {
@@ -196,6 +219,7 @@ export interface DashboardSnapshot {
   stores: Store[];
   employees: Employee[];
   employeeSettings?: EmployeeMonitoringSettings;
+  employeeDiscountActivity?: EmployeeDiscountActivity;
   rules: RiskRule[];
   reports: BlacklistReport[];
   notifications: NotificationSettings;

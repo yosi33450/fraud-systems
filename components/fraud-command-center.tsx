@@ -51,7 +51,7 @@ import { createSnapshotRefresh } from "@/lib/snapshot-refresh";
 import { summarizeGiftCluster, type MoneyTotal } from "@/lib/gift-cluster-summary";
 import type { GiftLedger } from "@/lib/gift-card-evidence";
 import { cases as initialCases, employees, rules, stores } from "@/lib/initial-state";
-import type { BlacklistReport, CaseStatus, DashboardSnapshot, Employee, EmployeeMonitoringSettings, FraudCase, NotificationDelivery, NotificationSettings, RiskCondition, RiskConditionField, RiskRule, Severity, Store } from "@/lib/types";
+import type { BlacklistReport, CaseStatus, DashboardSnapshot, Employee, EmployeeDiscountActivity, EmployeeMonitoringSettings, FraudCase, NotificationDelivery, NotificationSettings, RiskCondition, RiskConditionField, RiskRule, Severity, Store } from "@/lib/types";
 
 type View = "overview" | "cases" | "gift-cards" | "stores" | "employees" | "rules" | "notifications" | "network" | "team" | "platform";
 type RuleReconciliation = { reviewed: number; updated: number; resolved: number; reopened: number; active: number };
@@ -107,6 +107,7 @@ export function FraudCommandCenter() {
   const [ruleData, setRuleData] = useState(rules);
   const [storeData, setStoreData] = useState<Store[]>(stores);
   const [employeeData, setEmployeeData] = useState<Employee[]>(employees);
+  const [employeeDiscountActivity, setEmployeeDiscountActivity] = useState<EmployeeDiscountActivity>({ prefix: "", totalOrders: 0, totalAmount: 0, codes: [], recentUses: [] });
   const [employeeSettings, setEmployeeSettings] = useState<EmployeeMonitoringSettings>({ tenantId, couponPrefix: "", zeroAmount: true, giftCardAddressChange: true, repeatGiftCardUses: true, repeatUsesThreshold: 3, windowMinutes: 1440 });
   const [reports, setReports] = useState<BlacklistReport[]>([]);
   const [notifications, setNotifications] = useState<NotificationSettings>({ tenantId, enabled: false, recipients: [], severities: ["critical", "high"], reminderMinutes: 30 });
@@ -133,6 +134,7 @@ export function FraudCommandCenter() {
     setGiftLedger(snapshot.giftCardLedger);
     setStoreData(snapshot.stores);
     setEmployeeData(snapshot.employees);
+    setEmployeeDiscountActivity(snapshot.employeeDiscountActivity ?? { prefix: "", totalOrders: 0, totalAmount: 0, codes: [], recentUses: [] });
     if (snapshot.employeeSettings) setEmployeeSettings(snapshot.employeeSettings);
     setRuleData(snapshot.rules);
     setReports(snapshot.reports);
@@ -160,7 +162,7 @@ export function FraudCommandCenter() {
       canRefresh: () => {
         const context = refreshContext.current;
         return document.visibilityState === "visible" && navigator.onLine
-          && ["overview", "cases", "gift-cards", "stores"].includes(context.view)
+          && ["overview", "cases", "gift-cards", "stores", "employees"].includes(context.view)
           && !context.selectedCase && !context.connectOpen && !context.syncing
           && !document.querySelector('[role="dialog"], dialog[open]')
           && !document.activeElement?.matches('input, textarea, select, [contenteditable="true"]');
@@ -254,12 +256,14 @@ export function FraudCommandCenter() {
     if (!response.ok) throw new Error("EMPLOYEE_CREATE_FAILED");
     const payload = await response.json() as { employee: Employee };
     setEmployeeData((current) => [payload.employee, ...current]);
+    void refreshSnapshot();
   };
   const updateEmployeeProfile = async (id: string, input: Pick<Employee, "name" | "email" | "department"> & Partial<Pick<Employee, "privateEmail" | "address" | "couponCodes">>) => {
     const response = await fetch(`/api/tenants/${tenantId}/employees/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input) });
     if (!response.ok) throw new Error("EMPLOYEE_UPDATE_FAILED");
     const payload = await response.json() as { employee: Employee };
     setEmployeeData((current) => current.map((employee) => employee.id === id ? payload.employee : employee));
+    void refreshSnapshot();
     return payload.employee;
   };
 
@@ -268,6 +272,7 @@ export function FraudCommandCenter() {
     if (!response.ok) throw new Error("EMPLOYEE_SETTINGS_FAILED");
     const payload = await response.json() as { settings: EmployeeMonitoringSettings };
     setEmployeeSettings(payload.settings);
+    void refreshSnapshot();
   };
 
   const saveNotifications = async (next: NotificationSettings) => {
@@ -421,7 +426,7 @@ export function FraudCommandCenter() {
         ) : null}
         {view === "stores" ? <StoresScreen stores={storeData} onConnect={() => setConnectOpen(true)} onSync={syncShopifyStore} syncing={syncState === "loading"} syncProgress={syncProgress} /> : null}
         {view === "gift-cards" ? <GiftCardWorkspace ledger={giftLedger} stores={storeData} cases={caseData} onOpenCase={openCase} onRefresh={refreshSnapshot} /> : null}
-        {view === "employees" ? <EmployeesScreen employees={employeeData} settings={employeeSettings} stores={storeData} onCreate={createEmployee} onUpdate={updateEmployeeProfile} onSaveSettings={saveEmployeeMonitoring} /> : null}
+        {view === "employees" ? <EmployeesScreen employees={employeeData} activity={employeeDiscountActivity} settings={employeeSettings} stores={storeData} onCreate={createEmployee} onUpdate={updateEmployeeProfile} onSaveSettings={saveEmployeeMonitoring} /> : null}
         {view === "rules" ? <RulesScreen rules={ruleData} onToggle={toggleRule} onSave={saveRule} onCreate={createRule} /> : null}
         {view === "notifications" ? <NotificationsScreen settings={notifications} deliveries={deliveries} onSave={saveNotifications} /> : null}
         {view === "network" ? <NetworkScreen reports={reports} cases={caseData} onRelease={releaseBlock} /> : null}
@@ -725,7 +730,7 @@ function StoresScreen({ stores, onConnect, onSync, syncing, syncProgress }: { st
   </div>;
 }
 
-function EmployeesScreen({ employees, settings, stores, onCreate, onUpdate, onSaveSettings }: { employees: Employee[]; settings: EmployeeMonitoringSettings; stores: Store[]; onCreate: (input: Pick<Employee, "name" | "email" | "department"> & Partial<Pick<Employee, "privateEmail" | "address" | "couponCodes">>) => Promise<void>; onUpdate: (id: string, input: Pick<Employee, "name" | "email" | "department"> & Partial<Pick<Employee, "privateEmail" | "address" | "couponCodes">>) => Promise<Employee>; onSaveSettings: (input: EmployeeMonitoringSettings) => Promise<void> }) {
+function EmployeesScreen({ employees, activity, settings, stores, onCreate, onUpdate, onSaveSettings }: { employees: Employee[]; activity: EmployeeDiscountActivity; settings: EmployeeMonitoringSettings; stores: Store[]; onCreate: (input: Pick<Employee, "name" | "email" | "department"> & Partial<Pick<Employee, "privateEmail" | "address" | "couponCodes">>) => Promise<void>; onUpdate: (id: string, input: Pick<Employee, "name" | "email" | "department"> & Partial<Pick<Employee, "privateEmail" | "address" | "couponCodes">>) => Promise<Employee>; onSaveSettings: (input: EmployeeMonitoringSettings) => Promise<void> }) {
   const [adding, setAdding] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -760,21 +765,23 @@ function EmployeesScreen({ employees, settings, stores, onCreate, onUpdate, onSa
     } catch { setError("לא ניתן להוסיף את העובד. ייתכן שהאימייל כבר קיים."); }
     finally { setSaving(false); }
   };
-  const refundsToReview = employees.reduce((total, employee) => total + employee.refunded, 0);
-  const highRiskEmployees = employees.filter((employee) => employee.risk === "critical" || employee.risk === "high").length;
-  return <div className="page-content product-page employees-page"><PageHeading eyebrow="בדיקה פנימית" title="רכישות וזיכויים של עובדים" description="המערכת משווה את כתובות העובדים להזמנות ומציפה רק מקרים שדורשים בדיקה — בלי לקבוע מראש שנעשתה הונאה." action={<button className="primary-button" onClick={() => setAdding((value) => !value)}><Plus size={16} /> הוספת עובד לניטור</button>} />
-    <section className="compact-overview"><div><span>עובדים בניטור</span><strong>{employees.length}</strong><small>לפי אימייל ארגוני</small></div><div><span>זיכויים שנמצאו</span><strong>{refundsToReview}</strong><small>ממתינים לבדיקה אנושית</small></div><div><span>סיכון גבוה</span><strong>{highRiskEmployees}</strong><small>עובדים עם דפוס חריג</small></div></section>
-    <section className="employee-monitoring-settings"><div className="section-heading"><div><h2>חוקי ניטור עובדים</h2><span>נפרדים מחוקי הסיכון הכלליים של החנות</span></div></div><div className="employee-rules-grid">
+  return <div className="page-content product-page employees-page"><PageHeading eyebrow="בדיקה פנימית" title="הטבות ורכישות עובדים" description="מעקב אחר קודי הנחה לעובדים, ההזמנות שבהן השתמשו בהם והתאמות לפרטי עובדים. קוד הנחה אינו גיפטקארד." action={<button className="primary-button" onClick={() => setAdding((value) => !value)}><Plus size={16} /> הוספת עובד לניטור</button>} />
+    <section className="compact-overview"><div><span>עובדים בניטור</span><strong>{employees.length}</strong><small>פרטי קשר וקודים משויכים</small></div><div><span>הזמנות עם קוד {activity.prefix ? activity.prefix.toUpperCase() : "עובדים"}</span><strong>{activity.totalOrders}</strong><small>ב־30 הימים האחרונים</small></div><div><span>קודי הנחה שהופיעו בהזמנות</span><strong>{activity.codes.length}</strong><small>לא כולל קודים שלא נוצלו</small></div></section>
+    <section className="employee-discount-section" aria-labelledby="employee-discount-title"><div className="section-heading"><div><h2 id="employee-discount-title">שימוש בקודי ההנחה</h2><span>הזמנות Shopify שבהן הוזן קוד המתחיל ב־{activity.prefix ? <bdi>{activity.prefix.toUpperCase()}</bdi> : "תחילית שתגדיר"} · 30 ימים אחרונים</span></div><strong className="employee-discount-total">{formatCurrency(activity.totalAmount)} <small>סך הזמנות, לא גובה ההנחה</small></strong></div>
+      {activity.codes.length ? <><div className="employee-code-list">{activity.codes.map((item) => { const owner = employees.find((employee) => employee.id === item.assignedEmployeeId); return <div className="employee-code-row" key={item.code}><strong dir="ltr">{item.code}</strong><span>{owner ? `משויך ל${owner.name}` : item.assignmentConflict ? "משויך ליותר מעובד אחד — יש לתקן" : "טרם שויך לעובד"}</span><span>{item.orders} הזמנות</span><bdi>{formatCurrency(item.amount)}</bdi></div>; })}</div><details className="employee-discount-orders"><summary>הצג הזמנות ושימושים אחרונים ({activity.recentUses.length}) <ChevronDown size={16} /></summary><div className="table-wrap"><table className="case-table"><thead><tr><th>תאריך</th><th>קוד הנחה</th><th>הזמנה</th><th>רוכש</th><th>קשר לעובד</th><th>סכום הזמנה</th></tr></thead><tbody>{activity.recentUses.map((use) => { const owner = employees.find((employee) => employee.id === use.assignedEmployeeId); return <tr key={`${use.storeId}:${use.orderId}:${use.code}`}><td>{new Intl.DateTimeFormat("he-IL", { dateStyle: "short", timeStyle: "short" }).format(new Date(use.createdAt))}</td><td dir="ltr">{use.code}</td><td>{use.orderNumber ?? `#${use.orderId.split("/").at(-1)}`}</td><td dir="ltr">{use.email || "לא התקבל"}</td><td>{use.assignmentConflict ? "קוד משויך לכמה עובדים" : owner ? use.buyerMatchesEmployee ? `תואם ל${owner.name}` : use.buyerIdentityAvailable ? `קוד של ${owner.name} · פרטי רוכש אחרים` : `קוד של ${owner.name} · אין פרטי רוכש לאימות` : "קוד לא משויך"}</td><td>{formatCurrency(use.amount)}</td></tr>; })}</tbody></table></div></details></> : <div className="employee-discount-empty"><strong>עדיין לא נמצאו הזמנות עם קודי הנחה מהתחילית הזו</strong><span>המעקב מתבסס על קודי ההנחה שנקלטו בהזמנות. סריקת הקודים הקיימים בחנות זמינה למטה, בנפרד ממעקב השימוש.</span></div>}
+    </section>
+    <section className="employee-monitoring-settings"><div className="section-heading"><div><h2>הגדרות ניטור עובדים</h2><span>קודי הנחה והזמנות עובדים · בנפרד מחוקי הסיכון הכלליים</span></div></div><h3 className="employee-settings-subtitle">קודי הנחה לעובדים</h3><div className="employee-rules-grid">
+      <label>תחילית קודי הנחה לעובדים<input dir="ltr" value={draft.couponPrefix} onChange={(event) => setDraft({ ...draft, couponPrefix: event.target.value })} placeholder="OVED" /></label>
+      <label>חנות לסריקת קודי הנחה<select value={couponStoreId} onChange={(event) => setCouponStoreId(event.target.value)}>{stores.map((store) => <option key={store.id} value={store.id}>{store.name}</option>)}</select></label>
+    </div><div className="employee-settings-actions"><button className="secondary-button" onClick={() => void scanCoupons()} disabled={scanningCoupons}>{scanningCoupons ? "סורק…" : "אתר קודי הנחה בחנות"}</button><button className="primary-button" onClick={() => void onSaveSettings(draft).then(() => setSettingsNotice("הגדרות ניטור העובדים נשמרו.")).catch(() => setSettingsNotice("שמירת ההגדרות נכשלה."))}>שמור הגדרות</button></div>{settingsNotice ? <p role="status">{settingsNotice}</p> : null}{availableCoupons.length ? <div className="coupon-results"><strong>קודים קיימים שנמצאו בחנות</strong><p>{availableCoupons.slice(0, 40).join(" · ")}</p><small>קוד שקיים בחנות לא בהכרח שימש בהזמנה. שיוך לעובד נעשה בפרטי העובד.</small></div> : null}<details className="employee-secondary-rules"><summary>בדיקות נוספות לעובדים <ChevronDown size={16} /></summary><div className="employee-rules-grid">
       <label><input type="checkbox" checked={draft.zeroAmount} onChange={(event) => setDraft({ ...draft, zeroAmount: event.target.checked })} /> התראה על הזמנה בסכום ₪0 עם התאמה לעובד</label>
-      <label><input type="checkbox" checked={draft.giftCardAddressChange} onChange={(event) => setDraft({ ...draft, giftCardAddressChange: event.target.checked })} /> התראה כשגיפטקארד של עובד ממומש בכתובת אחרת</label>
+      <label><input type="checkbox" checked={draft.giftCardAddressChange} onChange={(event) => setDraft({ ...draft, giftCardAddressChange: event.target.checked })} /> התראה כשגיפטקארד הקשור לעובד ממומש בכתובת אחרת</label>
       <label><input type="checkbox" checked={draft.repeatGiftCardUses} onChange={(event) => setDraft({ ...draft, repeatGiftCardUses: event.target.checked })} /> התראה על מימושים חוזרים של גיפטקארדים הקשורים לעובד</label>
       <label>מספר מימושים<input type="number" min="2" value={draft.repeatUsesThreshold} onChange={(event) => setDraft({ ...draft, repeatUsesThreshold: Number(event.target.value) })} /></label>
       <label>חלון זמן בשעות<input type="number" min="1" value={Math.max(1, draft.windowMinutes / 60)} onChange={(event) => setDraft({ ...draft, windowMinutes: Number(event.target.value) * 60 })} /></label>
-      <label>תחילית קופונים של עובדים<input dir="ltr" value={draft.couponPrefix} onChange={(event) => setDraft({ ...draft, couponPrefix: event.target.value })} placeholder="oved" /></label>
-      <label>חנות לסריקת קופונים<select value={couponStoreId} onChange={(event) => setCouponStoreId(event.target.value)}>{stores.map((store) => <option key={store.id} value={store.id}>{store.name}</option>)}</select></label>
-    </div><div className="employee-settings-actions"><button className="secondary-button" onClick={() => void scanCoupons()} disabled={scanningCoupons}>{scanningCoupons ? "סורק…" : "משוך קודים מהחנות"}</button><button className="primary-button" onClick={() => void onSaveSettings(draft).then(() => setSettingsNotice("חוקי העובדים נשמרו.")).catch(() => setSettingsNotice("שמירת החוקים נכשלה."))}>שמור חוקי עובדים</button></div>{settingsNotice ? <p role="status">{settingsNotice}</p> : null}{availableCoupons.length ? <div className="coupon-results"><strong>קודים שנמצאו</strong><p>{availableCoupons.slice(0, 40).join(" · ")}</p></div> : null}<p className="context-note"><strong>הנפקה ידנית:</strong> ניטור זה עדיין אינו פעיל. הנפקה מהניהול אינה יוצרת הזמנת רכישה, ולכן החיבור הנוכחי להזמנות לא יכול לזהות אותה. נדרשת הרשאת Shopify מסוג <bdi>read_gift_cards</bdi> כדי לסרוק גם כרטיסים ללא הזמנה.</p></section>
+    </div><p className="context-note">מעקב אחר הנפקה ידנית של גיפטקארד עדיין אינו פעיל; הוא דורש גישה למאגר הכרטיסים של Shopify.</p></details></section>
     {adding ? <form className="employee-form" onSubmit={submit}><label>שם מלא<input name="name" required placeholder="שם העובד" /></label><label>אימייל עבודה<input name="workEmail" required type="email" dir="ltr" placeholder="employee@company.co.il" /></label><label>אימייל פרטי<input name="privateEmail" type="email" dir="ltr" placeholder="name@gmail.com" /></label><label>כתובת<input name="address" placeholder="כתובת העובד להשוואת הזמנות" /></label><label>קודי קופון משויכים<input name="couponCodes" dir="ltr" placeholder="oved30, ovedtx" /><small>אפשר להפריד בין קודים בפסיק</small></label><label>מחלקה<input name="department" required placeholder="למשל שירות לקוחות" /></label><button className="primary-button" disabled={saving}>{saving ? "שומר…" : "הוסף לניטור"}</button>{error ? <p role="alert">{error}</p> : null}</form> : null}
-    <section className="case-section"><div className="section-heading"><div><h2>עובדים שנבדקים אוטומטית</h2><span>פרטי זיהוי וקופונים המשויכים לכל עובד</span></div></div><div className="table-wrap"><table className="case-table"><thead><tr><th>עובד</th><th>מחלקה</th><th>רכישות שנמצאו</th><th>זיכויים שנמצאו</th><th>מצב לבדיקה</th><th /></tr></thead><tbody>{employees.map((employee) => <tr key={employee.id}><td><strong>{employee.name}</strong><small>{employee.email}</small></td><td>{employee.department}</td><td className="mono">{employee.purchases}</td><td className="mono">{employee.refunded}</td><td><SeverityBadge severity={employee.risk} /></td><td><button className="icon-button" onClick={() => setSelectedEmployee(employee)} aria-label={`פרטי ${employee.name}`}><ChevronLeft size={16} /></button></td></tr>)}</tbody></table>{employees.length === 0 ? <div className="empty-state"><UsersRound size={25} /><strong>לא נוספו עובדים לניטור</strong><span>אפשר להוסיף עובד ידנית ולשייך אליו קופונים.</span></div> : null}</div></section>
+    <section className="case-section"><div className="section-heading"><div><h2>עובדים בניטור</h2><span>פרטי זיהוי וקודי הנחה המשויכים לכל עובד</span></div></div><div className="table-wrap"><table className="case-table"><thead><tr><th>עובד</th><th>קודי הנחה</th><th>הזמנות קשורות</th><th>זיכויים שנמצאו</th><th>מצב לבדיקה</th><th /></tr></thead><tbody>{employees.map((employee) => <tr key={employee.id}><td><strong>{employee.name}</strong><small>{employee.email}</small></td><td dir="ltr">{employee.couponCodes?.length ? employee.couponCodes.join(", ") : "—"}</td><td className="mono">{employee.purchases}</td><td className="mono">{employee.refunded}</td><td><SeverityBadge severity={employee.risk} /></td><td><button className="icon-button" onClick={() => setSelectedEmployee(employee)} aria-label={`פרטי ${employee.name}`}><ChevronLeft size={16} /></button></td></tr>)}</tbody></table>{employees.length === 0 ? <div className="empty-state"><UsersRound size={25} /><strong>לא נוספו עובדים לניטור</strong><span>אפשר להוסיף עובד ידנית ולשייך אליו קודי הנחה.</span></div> : null}</div></section>
     {selectedEmployee ? <CenteredDialog className="employee-detail-dialog" label={`פרטי ${selectedEmployee.name}`} onClose={() => setSelectedEmployee(null)}>
       <header className="drawer-header"><h2>עריכת {selectedEmployee.name}</h2><button className="icon-button" onClick={() => setSelectedEmployee(null)} aria-label="סגירה"><X size={19} /></button></header>
       <form className="employee-detail-body employee-form" onSubmit={async (event) => {

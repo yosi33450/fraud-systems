@@ -1513,10 +1513,29 @@ p { text-wrap: pretty; }
 .employee-detail-body dt { color: var(--muted); }
 .employee-detail-body dd { margin: 0; font-weight: 650; overflow-wrap: anywhere; }
 .employee-monitoring-settings { padding: 24px; margin-bottom: 20px; border: 1px solid var(--product-border); border-radius: 16px; background: #fff; }
+.employee-settings-subtitle { margin: 20px 0 0; font-size: 15px; }
+.employee-secondary-rules { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--product-border); }
+.employee-secondary-rules summary { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; font-size: 14px; font-weight: 650; }
+.employee-secondary-rules .context-note { margin-bottom: 0; }
 .employee-rules-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 28px; margin: 18px 0; }
 .employee-rules-grid label { display: flex; align-items: center; gap: 9px; font-size: 14px; }
 .employee-rules-grid label:has(input[type="number"]), .employee-rules-grid label:has(input[dir="ltr"]), .employee-rules-grid label:has(select) { justify-content: space-between; }
 .employee-rules-grid input:not([type="checkbox"]), .employee-rules-grid select { width: 150px; max-width: 55%; min-height: 38px; padding: 7px 9px; border: 1px solid var(--product-border); border-radius: 8px; }
 .employee-settings-actions { display: flex; gap: 9px; }
 .coupon-results { margin-top: 12px; overflow-wrap: anywhere; font-size: 13px; }
+.employee-discount-section { margin-bottom: 20px; padding: 22px 24px; border: 1px solid var(--product-border); border-radius: var(--radius-panel); background: #fff; }
+.employee-discount-section .section-heading { align-items: center; gap: 18px; }
+.employee-discount-total { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; font-variant-numeric: tabular-nums; font-size: 20px; white-space: nowrap; }
+.employee-discount-total small { color: var(--product-secondary); font-size: 12px; font-weight: 500; }
+.employee-code-list { margin-top: 16px; border-top: 1px solid var(--product-border); }
+.employee-code-row { display: grid; grid-template-columns: minmax(110px, 1fr) minmax(160px, 2fr) minmax(90px, 1fr) minmax(90px, 1fr); align-items: center; gap: 12px; min-height: 50px; border-bottom: 1px solid var(--product-border); font-size: 14px; }
+.employee-code-row strong { justify-self: start; font-size: 15px; }
+.employee-code-row span { color: var(--product-secondary); }
+.employee-code-row bdi { font-variant-numeric: tabular-nums; font-weight: 650; }
+.employee-discount-orders { margin-top: 16px; }
+.employee-discount-orders summary { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; color: var(--trust); font-size: 14px; font-weight: 650; }
+.employee-discount-orders .table-wrap { margin-top: 14px; }
+.employee-discount-empty { display: flex; flex-direction: column; gap: 6px; padding: 24px 0 4px; color: var(--product-secondary); font-size: 14px; }
+.employee-discount-empty strong { color: var(--ink); }
+@media (max-width: 700px) { .employee-discount-section { padding: 18px; } .employee-discount-section .section-heading { align-items: flex-start; flex-direction: column; } .employee-discount-total { align-items: flex-start; } .employee-code-row { grid-template-columns: 1fr auto; gap: 4px 10px; padding: 10px 0; } .employee-code-row span { grid-column: 1; } .employee-code-row bdi { grid-column: 2; grid-row: 1 / 3; } }
 @media (max-width: 700px) { .centered-dialog.order-investigation { width: calc(100vw - 16px); max-height: calc(100dvh - 16px); } .order-investigation .drawer-body { padding: 12px; } .order-investigation .identity-grid { grid-template-columns: 1fr; } .employee-rules-grid { grid-template-columns: 1fr; } }

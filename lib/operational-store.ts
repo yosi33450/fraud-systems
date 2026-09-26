@@ -4,7 +4,7 @@ import { evaluateRisk, type OrderSignals } from "@/lib/risk-engine";
 import { computeVelocitySignals, createVelocityLookup } from "@/lib/order-velocity";
 import { isSharedServiceEmail } from "@/lib/customer-identity";
 import { buildGiftLedger, hasFlaggedGiftSource, receiptGiftCard, type GiftCardOrderEvidence } from "@/lib/gift-card-evidence";
-import type { BlacklistReport, CaseStatus, DashboardSnapshot, Employee, EmployeeMonitoringSettings, FraudCase, GiftCardRedemption, GiftCardTrace, NotificationDelivery, NotificationSettings, RiskRule, Store } from "@/lib/types";
+import type { BlacklistReport, CaseStatus, DashboardSnapshot, Employee, EmployeeDiscountActivity, EmployeeMonitoringSettings, FraudCase, GiftCardRedemption, GiftCardTrace, NotificationDelivery, NotificationSettings, RiskRule, Store } from "@/lib/types";
 
 type ShopifyLineItem = {
   title?: string;
@@ -56,6 +56,7 @@ type StoredOrder = {
   tenantId: string;
   storeId: string;
   shopifyOrderId: string;
+  orderNumber?: string;
   email: string;
   phone: string;
   address: string;
@@ -208,6 +209,12 @@ export function restoreOperationalState(snapshot: PersistedOperationalState) {
     ...store,
     realtimeStatus: store.realtimeStatus ?? "setup-required",
   }));
+  // Pilot migration: older employee settings had no discount-code prefix.
+  for (const [tenantId, settings] of state.employeeSettingsByTenant) {
+    if (!settings.couponPrefix && !settings.couponPrefixConfigured && state.stores.some((store) => store.tenantId === tenantId && /^strongful\.myshopify\.com$/i.test(store.domain))) {
+      state.employeeSettingsByTenant.set(tenantId, { ...settings, couponPrefix: "oved" });
+    }
+  }
   migrateLegacyRules();
 }
 
@@ -418,6 +425,7 @@ export function getDashboardSnapshot(tenantId: string): DashboardSnapshot {
     stores: clone(tenantStores),
     employees: clone(state.employees.filter((item) => item.tenantId === tenantId)),
     employeeSettings: getEmployeeSettings(tenantId),
+    employeeDiscountActivity: getEmployeeDiscountActivity(tenantId),
     rules: clone(state.rulesByTenant.get(tenantId) ?? []),
     reports: clone(state.reports.filter((item) => item.tenantId === tenantId)),
     notifications: clone(state.notificationsByTenant.get(tenantId) ?? {
@@ -718,11 +726,62 @@ export function recordNotificationDelivery(delivery: NotificationDelivery) {
 }
 
 export function getEmployeeSettings(tenantId: string): EmployeeMonitoringSettings {
-  return clone(state.employeeSettingsByTenant.get(tenantId) ?? { tenantId, couponPrefix: "", zeroAmount: true, giftCardAddressChange: true, repeatGiftCardUses: true, repeatUsesThreshold: 3, windowMinutes: 1440 });
+  const saved = state.employeeSettingsByTenant.get(tenantId);
+  const pilotPrefix = state.stores.some((store) => store.tenantId === tenantId && /^strongful\.myshopify\.com$/i.test(store.domain)) ? "oved" : "";
+  return clone(saved ?? { tenantId, couponPrefix: pilotPrefix, zeroAmount: true, giftCardAddressChange: true, repeatGiftCardUses: true, repeatUsesThreshold: 3, windowMinutes: 1440 });
+}
+
+export function getEmployeeDiscountActivity(tenantId: string): EmployeeDiscountActivity {
+  const prefix = getEmployeeSettings(tenantId).couponPrefix.trim().toLowerCase();
+  const empty: EmployeeDiscountActivity = { prefix, totalOrders: 0, totalAmount: 0, codes: [], recentUses: [] };
+  if (!prefix) return empty;
+  const cutoff = Date.now() - 30 * 86_400_000;
+  const owners = new Map<string, Employee[]>();
+  for (const employee of state.employees.filter((item) => item.tenantId === tenantId)) {
+    for (const code of new Set(employee.couponCodes ?? [])) {
+      const key = code.trim().toLowerCase();
+      owners.set(key, [...(owners.get(key) ?? []), employee]);
+    }
+  }
+  const uses: EmployeeDiscountActivity["recentUses"] = [];
+  const uniqueOrders = new Map<string, number>();
+  for (const order of state.orders) {
+    if (order.tenantId !== tenantId || Date.parse(order.createdAt) < cutoff) continue;
+    const codes = [...new Set((order.couponCodes ?? []).map((code) => code.trim().toLowerCase()).filter((code) => code.startsWith(prefix)))];
+    if (!codes.length) continue;
+    uniqueOrders.set(`${order.storeId}:${order.shopifyOrderId}`, order.amount);
+    for (const code of codes) {
+      const assigned = owners.get(code) ?? [];
+      const employee = assigned.length === 1 ? assigned[0] : undefined;
+      uses.push({
+        storeId: order.storeId, orderId: order.shopifyOrderId, orderNumber: order.orderNumber,
+        code, amount: order.amount, email: order.email, createdAt: order.createdAt,
+        assignedEmployeeId: employee?.id, assignmentConflict: assigned.length > 1,
+        buyerIdentityAvailable: Boolean(order.email || order.address),
+        buyerMatchesEmployee: Boolean(employee && (
+          (order.email && [employee.email, employee.privateEmail].some((value) => value && normalizeEmail(value) === order.email))
+          || (order.address && employee.address && normalizeAddress(employee.address) === normalizeAddress(order.address))
+        )),
+      });
+    }
+  }
+  const byCode = new Map<string, EmployeeDiscountActivity["codes"][number]>();
+  for (const use of uses) {
+    const item = byCode.get(use.code) ?? { code: use.code, orders: 0, amount: 0, assignedEmployeeId: use.assignedEmployeeId, assignmentConflict: use.assignmentConflict, lastUsedAt: use.createdAt };
+    item.orders += 1;
+    item.amount += use.amount;
+    if (Date.parse(use.createdAt) > Date.parse(item.lastUsedAt)) item.lastUsedAt = use.createdAt;
+    byCode.set(use.code, item);
+  }
+  return {
+    prefix, totalOrders: uniqueOrders.size, totalAmount: [...uniqueOrders.values()].reduce((sum, amount) => sum + amount, 0),
+    codes: [...byCode.values()].sort((a, b) => b.orders - a.orders || a.code.localeCompare(b.code)),
+    recentUses: uses.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt)).slice(0, 100),
+  };
 }
 
 export function saveEmployeeSettings(tenantId: string, input: EmployeeMonitoringSettings) {
-  const settings = { ...input, tenantId, couponPrefix: input.couponPrefix.trim().toLowerCase(), repeatUsesThreshold: Math.max(2, Math.floor(input.repeatUsesThreshold)), windowMinutes: Math.max(1, Math.floor(input.windowMinutes)) };
+  const settings = { ...input, tenantId, couponPrefix: input.couponPrefix.trim().toLowerCase(), couponPrefixConfigured: true, repeatUsesThreshold: Math.max(2, Math.floor(input.repeatUsesThreshold)), windowMinutes: Math.max(1, Math.floor(input.windowMinutes)) };
   state.employeeSettingsByTenant.set(tenantId, settings);
   state.audit.unshift({ id: randomUUID(), tenantId, action: "employee.settings.updated", resourceType: "employee", resourceId: tenantId, createdAt: new Date().toISOString(), metadata: {} });
   return clone(settings);
@@ -1113,7 +1172,7 @@ export function ingestShopifyOrder(input: { storeId: string; webhookId: string; 
 
   const order: StoredOrder = {
     tenantId: store.tenantId, storeId: store.id,
-    shopifyOrderId,
+    shopifyOrderId, orderNumber: payload.name ?? existingOrder?.orderNumber,
     email, phone, address, couponCodes, amount, giftCardValue, ip, customerId, createdAt,
   };
   if (existingOrder) Object.assign(existingOrder, order);
