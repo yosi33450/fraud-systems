@@ -47,6 +47,7 @@ import { SeverityBadge } from "@/components/severity-badge";
 import { GiftCardWorkspace } from "@/components/gift-card-workspace";
 import { CenteredDialog } from "@/components/centered-dialog";
 import { SidebarItem, useWorkspaceNavigation } from "@/components/workspace-navigation";
+import { createSnapshotRefresh } from "@/lib/snapshot-refresh";
 import { summarizeGiftCluster, type MoneyTotal } from "@/lib/gift-cluster-summary";
 import type { GiftLedger } from "@/lib/gift-card-evidence";
 import { cases as initialCases, employees, rules, stores } from "@/lib/initial-state";
@@ -107,7 +108,9 @@ export function FraudCommandCenter() {
   const [reports, setReports] = useState<BlacklistReport[]>([]);
   const [notifications, setNotifications] = useState<NotificationSettings>({ tenantId, enabled: false, recipients: [], severities: ["critical", "high"], reminderMinutes: 30 });
   const [deliveries, setDeliveries] = useState<NotificationDelivery[]>([]);
-  const [syncState, setSyncState] = useState<"loading" | "live" | "error">("loading");
+  const [syncState, setSyncState] = useState<"loading" | "live" | "error" | "expired">("loading");
+  const snapshotRefresh = useRef<ReturnType<typeof createSnapshotRefresh<DashboardSnapshot>> | null>(null);
+  const refreshContext = useRef({ view, selectedCase, connectOpen: false, syncing: true });
   const [mobileNav, setMobileNav] = useState(false);
   const { collapsed, toggleCollapsed } = useWorkspaceNavigation(mobileNav, setMobileNav);
   const [connectOpen, setConnectOpen] = useState(false);
@@ -133,18 +136,53 @@ export function FraudCommandCenter() {
     setSyncState("live");
   };
 
-  const refreshSnapshot = async () => {
-    setSyncState("loading");
-    try {
-      const response = await fetch(`/api/tenants/${tenantId}/snapshot`, { cache: "no-store" });
-      if (!response.ok) throw new Error("SNAPSHOT_FAILED");
-      applySnapshot(await response.json() as DashboardSnapshot);
-    } catch {
-      setSyncState("error");
-    }
-  };
+  const refreshSnapshot = async () => { await snapshotRefresh.current?.refresh(); };
 
-  useEffect(() => { void refreshSnapshot(); }, []);
+  useEffect(() => {
+    refreshContext.current = { view, selectedCase, connectOpen, syncing: syncState === "loading" };
+  }, [view, selectedCase, connectOpen, syncState]);
+
+  useEffect(() => {
+    const refresher = createSnapshotRefresh<DashboardSnapshot>({
+      load: async (signal) => {
+        const response = await fetch(`/api/tenants/${tenantId}/snapshot`, { cache: "no-store", signal });
+        if (response.status === 401) throw new Error("SESSION_EXPIRED");
+        if (!response.ok) throw new Error("SNAPSHOT_FAILED");
+        return await response.json() as DashboardSnapshot;
+      },
+      apply: applySnapshot,
+      state: setSyncState,
+      canRefresh: () => {
+        const context = refreshContext.current;
+        return document.visibilityState === "visible" && navigator.onLine
+          && ["overview", "cases", "gift-cards", "stores"].includes(context.view)
+          && !context.selectedCase && !context.connectOpen && !context.syncing
+          && !document.querySelector('[role="dialog"], dialog[open]')
+          && !document.activeElement?.matches('input, textarea, select, [contenteditable="true"]');
+      },
+    });
+    snapshotRefresh.current = refresher;
+    void refresher.refresh();
+    const refreshQuietly = () => { void refresher.refresh(true); };
+    const interval = window.setInterval(refreshQuietly, 30_000);
+    window.addEventListener("focus", refreshQuietly);
+    window.addEventListener("online", refreshQuietly);
+    document.addEventListener("visibilitychange", refreshQuietly);
+    // Discard background results when the user starts an action (including mutations).
+    const interrupt = () => { if (snapshotRefresh.current === refresher) refresher.interrupt(); };
+    document.addEventListener("pointerdown", interrupt, true);
+    document.addEventListener("keydown", interrupt, true);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener("focus", refreshQuietly);
+      window.removeEventListener("online", refreshQuietly);
+      document.removeEventListener("visibilitychange", refreshQuietly);
+      document.removeEventListener("pointerdown", interrupt, true);
+      document.removeEventListener("keydown", interrupt, true);
+      refresher.cancel();
+      snapshotRefresh.current = null;
+    };
+  }, []);
   useEffect(() => {
     if (new URLSearchParams(window.location.search).get("view") === "gift-cards") setView("gift-cards");
   }, []);
@@ -303,7 +341,7 @@ export function FraudCommandCenter() {
             <button id="mobile-navigation-trigger" className="icon-button mobile-menu" onClick={() => setMobileNav(true)} aria-label="פתיחת תפריט" aria-expanded={mobileNav} aria-controls="primary-navigation"><Menu size={20} /></button>
             <span className="workspace-current">{nav.find((item) => item.id === view)?.label ?? "ניהול הפלטפורמה"}</span>
           </div>
-          <div className={`topbar-context sync-${syncState} ${realtimeNeedsSetup && storeData.length ? "sync-warning" : ""}`}><span className="live-dot" />{syncState === "error" ? "בעיית סנכרון — המידע נשמר" : syncState === "loading" ? "מסנכרן…" : realtimeActive ? "ניטור בזמן אמת" : realtimeRegistered ? "ממתין להזמנה חדשה" : storeData.length ? "נדרש חיבור מחדש" : "אין חנות מחוברת"}</div>
+          <div className={`topbar-context sync-${syncState === "expired" ? "error" : syncState} ${realtimeNeedsSetup && storeData.length ? "sync-warning" : ""}`}><span className="live-dot" />{syncState === "expired" ? <a href="/login?next=%2F">הכניסה פגה — להתחברות מחדש</a> : syncState === "error" ? "העדכון נכשל — מוצגים הנתונים האחרונים" : syncState === "loading" ? "מסנכרן…" : realtimeActive ? "ניטור בזמן אמת" : realtimeRegistered ? "ממתין להזמנה חדשה" : storeData.length ? "נדרש חיבור מחדש" : "אין חנות מחוברת"}</div>
           <div className="topbar-actions">
             <button className="icon-button notification-button" onClick={() => setView("notifications")} aria-label="הגדרות התראות"><Bell size={19} /><span /></button>
           </div>
