@@ -82,3 +82,12 @@ test('live Shopify discount-code objects are normalized like historical codes', 
   assert.deepEqual(api.exportOperationalState().orders[0].couponCodes, ['oved30']);
   assert.equal(api.exportOperationalState().employees.find((entry) => entry.id === employee.id).purchases, 1);
 });
+
+test('late delivery of an old webhook does not move the displayed latest order backward', () => {
+  const store = setup();
+  order(store, 1, '2026-09-25T12:00:00Z');
+  order(store, 2, '2026-08-26T12:00:00Z', { email: 'older@example.com' });
+  const displayed = api.getDashboardSnapshot('rules-test').stores[0].lastEventAt;
+  const expected = new Intl.DateTimeFormat('he-IL', { dateStyle: 'short', timeStyle: 'short', timeZone: 'Asia/Jerusalem' }).format(new Date('2026-09-25T12:00:00Z'));
+  assert.equal(displayed, expected);
+});

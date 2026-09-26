@@ -401,8 +401,12 @@ export function getDashboardSnapshot(tenantId: string): DashboardSnapshot {
   const tenantStores = state.stores.filter((item) => item.tenantId === tenantId).map((store) => {
     const storeOrders = state.orders.filter((order) => order.storeId === store.id);
     const uniqueOrdersSince = (since: number) => new Set(storeOrders.filter((order) => new Date(order.createdAt).getTime() >= since).map((order) => order.shopifyOrderId)).size;
+    const latestOrderAt = storeOrders.reduce((latest, order) => Date.parse(order.createdAt) > Date.parse(latest) ? order.createdAt : latest, "1970-01-01T00:00:00.000Z");
     return {
       ...store,
+      lastEventAt: storeOrders.length
+        ? new Intl.DateTimeFormat("he-IL", { dateStyle: "short", timeStyle: "short", timeZone: "Asia/Jerusalem" }).format(new Date(latestOrderAt))
+        : store.lastEventAt,
       ordersLast30Days: uniqueOrdersSince(thirtyDaysAgo),
       realtimeStatus: store.realtimeStatus ?? "setup-required",
     };
