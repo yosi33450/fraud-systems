@@ -74,3 +74,11 @@ test('employee coupon matching and a fulfilled refund remain attached to the sam
   assert.equal(state.orders.length, 1);
   assert.equal(state.employees.find((entry) => entry.id === employee.id).refunded, 1);
 });
+
+test('live Shopify discount-code objects are normalized like historical codes', () => {
+  const store = setup();
+  const employee = api.addEmployee('rules-test', { name: 'Worker', email: 'worker@example.com', couponCodes: ['oved30'], department: 'Sales' });
+  order(store, 1, '2026-09-25T12:00:00Z', { discount_codes: [{ code: 'OVED30', amount: '30.00', type: 'percentage' }] });
+  assert.deepEqual(api.exportOperationalState().orders[0].couponCodes, ['oved30']);
+  assert.equal(api.exportOperationalState().employees.find((entry) => entry.id === employee.id).purchases, 1);
+});

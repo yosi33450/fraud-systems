@@ -48,7 +48,7 @@ export type ShopifyOrderPayload = {
   gateway_names?: string[];
   shopify_risk_facts?: string[];
   tags?: string | string[];
-  discount_codes?: string[];
+  discount_codes?: Array<string | { code?: string | null }>;
   transactions?: ShopifyOrderTransaction[];
 };
 
@@ -976,7 +976,11 @@ export function ingestShopifyOrder(input: { storeId: string; webhookId: string; 
   const ip = (payload.client_ip ?? payload.browser_ip ?? "").trim();
   const customerId = String(payload.customer?.admin_graphql_api_id ?? payload.customer?.id ?? "");
   const address = addressOf(payload);
-  const couponCodes = (payload.discount_codes ?? []).map((code) => code.trim().toLowerCase()).filter(Boolean);
+  const couponCodes = (payload.discount_codes ?? [])
+    .map((entry) => typeof entry === "string" ? entry : entry?.code)
+    .filter((code): code is string => typeof code === "string")
+    .map((code) => code.trim().toLowerCase())
+    .filter(Boolean);
   const amount = Number(payload.total_price ?? 0);
   const lineItems = payload.line_items ?? [];
   const giftCardValue = lineItems.reduce((total, item) => {
