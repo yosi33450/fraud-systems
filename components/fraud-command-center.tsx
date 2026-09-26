@@ -111,6 +111,7 @@ export function FraudCommandCenter() {
   const [notifications, setNotifications] = useState<NotificationSettings>({ tenantId, enabled: false, recipients: [], severities: ["critical", "high"], reminderMinutes: 30 });
   const [deliveries, setDeliveries] = useState<NotificationDelivery[]>([]);
   const [syncState, setSyncState] = useState<"loading" | "live" | "error" | "expired">("loading");
+  const [syncProgress, setSyncProgress] = useState<string | null>(null);
   const snapshotRefresh = useRef<ReturnType<typeof createSnapshotRefresh<DashboardSnapshot>> | null>(null);
   const refreshContext = useRef({ view, selectedCase, connectOpen: false, syncing: true });
   const [mobileNav, setMobileNav] = useState(false);
@@ -309,12 +310,31 @@ export function FraudCommandCenter() {
 
   const syncShopifyStore = async (storeId: string) => {
     setSyncState("loading");
+    setSyncProgress("מתחיל רענון של 30 יום…");
     try {
-      const response = await fetch(`/api/tenants/${tenantId}/stores/${storeId}/sync`, { method: "POST" });
-      if (!response.ok) throw new Error("SHOPIFY_SYNC_FAILED");
+      let after: string | null = null;
+      let scanned = 0;
+      const since = new Date(Date.now() - 30 * 86_400_000).toISOString();
+      const seenCursors = new Set<string>();
+      for (let page = 0; page < 1000; page += 1) {
+        const response = await fetch(`/api/tenants/${tenantId}/stores/${storeId}/sync`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ since, after, scanned }),
+        });
+        const result = await response.json() as { scanned?: number; nextCursor?: string | null; complete?: boolean; error?: string };
+        if (!response.ok || !Number.isSafeInteger(result.scanned)) throw new Error(result.error ?? "SHOPIFY_SYNC_FAILED");
+        scanned = result.scanned!;
+        setSyncProgress(`נבדקו ${scanned.toLocaleString("he-IL")} הזמנות…`);
+        if (result.complete) break;
+        if (!result.nextCursor || seenCursors.has(result.nextCursor) || page === 999) throw new Error("SHOPIFY_SYNC_CURSOR_FAILED");
+        seenCursors.add(result.nextCursor);
+        after = result.nextCursor;
+      }
       await refreshSnapshot();
+      setSyncProgress(null);
     } catch {
       setSyncState("error");
+      setSyncProgress("הרענון נעצר לפני השלמה. ההזמנות שכבר נקלטו נשמרו; אפשר לנסות שוב.");
     }
   };
 
@@ -388,7 +408,7 @@ export function FraudCommandCenter() {
             onOpenStores={() => setConnectOpen(true)}
           />
         ) : null}
-        {view === "stores" ? <StoresScreen stores={storeData} onConnect={() => setConnectOpen(true)} onSync={syncShopifyStore} syncing={syncState === "loading"} /> : null}
+        {view === "stores" ? <StoresScreen stores={storeData} onConnect={() => setConnectOpen(true)} onSync={syncShopifyStore} syncing={syncState === "loading"} syncProgress={syncProgress} /> : null}
         {view === "gift-cards" ? <GiftCardWorkspace ledger={giftLedger} stores={storeData} cases={caseData} onOpenCase={openCase} onRefresh={refreshSnapshot} /> : null}
         {view === "employees" ? <EmployeesScreen employees={employeeData} settings={employeeSettings} stores={storeData} onCreate={createEmployee} onUpdate={updateEmployeeProfile} onSaveSettings={saveEmployeeMonitoring} /> : null}
         {view === "rules" ? <RulesScreen rules={ruleData} onToggle={toggleRule} onSave={saveRule} onCreate={createRule} /> : null}
@@ -672,11 +692,12 @@ function ConnectStoreDialog({ onClose, onConnect }: { onClose: () => void; onCon
   </CenteredDialog>;
 }
 
-function StoresScreen({ stores, onConnect, onSync, syncing }: { stores: Store[]; onConnect: () => void; onSync: (storeId: string) => Promise<void>; syncing: boolean }) {
+function StoresScreen({ stores, onConnect, onSync, syncing, syncProgress }: { stores: Store[]; onConnect: () => void; onSync: (storeId: string) => Promise<void>; syncing: boolean; syncProgress: string | null }) {
   const connected = stores.filter((store) => ["active", "registered"].includes(store.realtimeStatus ?? "")).length;
   const ordersToday = stores.reduce((total, store) => total + store.ordersLast30Days, 0);
   return <div className="page-content product-page stores-page"><PageHeading eyebrow="חיבורי SHOPIFY" title="החנויות שמוגנות כרגע" description="לכל חנות סביבת עבודה נפרדת. כאן אפשר לראות אם הנתונים נקלטים ומתי התקבלה ההזמנה האחרונה." action={<button className="primary-button" onClick={onConnect}><Plus size={16} /> חיבור חנות</button>} />
     <section className="compact-overview"><div><span>חנויות מחוברות</span><strong>{connected} מתוך {stores.length}</strong><small>מקבלות הזמנות בזמן אמת</small></div><div><span>הזמנות ב־30 יום</span><strong>{ordersToday.toLocaleString("he-IL")}</strong><small>מכל החנויות בארגון</small></div><div><span>דורש טיפול</span><strong>{stores.length - connected}</strong><small>חיבורים שצריך לבדוק</small></div></section>
+    {syncProgress ? <p role="status" className="sync-progress-note">{syncProgress}</p> : null}
     {stores.length ? <div className="store-grid">{stores.map((item) => { const receiving = item.realtimeStatus === "active"; const registered = item.realtimeStatus === "registered"; const realtimeReady = receiving || registered; const configuring = item.realtimeStatus === "configuring"; const giftCardActive = item.giftCardTrackingStatus === "active"; const giftCardApproval = item.giftCardTrackingStatus === "shopify-approval-required" || item.giftCardTrackingStatus === "permission-required"; return <article className="store-card" key={item.id}><div className="store-card-top"><div className="store-logo"><StoreIcon /></div><span className={`connection-state ${realtimeReady ? "state-active" : "state-degraded"}`}>{receiving ? "אירועים נקלטים בזמן אמת" : registered ? "קליטה חיה הוגדרה · ממתין להזמנה" : configuring ? "מגדיר קליטה בזמן אמת" : "נדרש חיבור מחדש לזמן אמת"}</span></div><h2>{item.name}</h2><p className="mono">{item.domain}</p>{item.giftCardTrackingStatus ? <div className={`gift-card-tracking-state ${giftCardActive ? "tracking-active" : "tracking-permission"}`}><Gift size={16} /><div><strong>{giftCardActive ? `גישה למאגר כרטיסים · ${item.giftCardsTracked ?? 0} כרטיסים` : giftCardApproval ? "מעקב לפי הזמנות · ללא גישה ליתרות" : "מעקב לפי ראיות הזמנה"}</strong><span>{giftCardActive ? "מסלולי הרכישה והמימוש נמצאים במסך מעקב גיפטקארדים." : giftCardApproval ? "ניתן לקשר רכישה למימוש כשמזהה הכרטיס מופיע באירועי ההזמנה ובעסקאות. read_gift_cards נדרשת לגישה ליתרות ולמאגר הכרטיסים, לא למסלול הראיות הזה." : "פתח את מעקב הגיפטקארדים וסרוק את ההזמנות הזמינות."}</span></div></div> : null}{!realtimeReady ? <div className="realtime-notice"><Info size={16} /><div><strong>סנכרון 30 הימים הושלם, אך קליטה חיה עדיין לא הוגדרה</strong><span>יש לבצע חיבור מחדש פעם אחת כדי לרשום את ההתראה האוטומטית מול Shopify.</span></div></div> : null}<div className="store-stats"><div><span>הזמנות ב־30 יום</span><strong>{item.ordersLast30Days.toLocaleString("he-IL")}</strong></div><div><span>הזמנה אחרונה שנשמרה</span><strong>{item.lastEventAt}</strong></div><div><span>אירוע חי אחרון</span><strong>{item.lastWebhookAt ? new Intl.DateTimeFormat("he-IL", { dateStyle: "short", timeStyle: "short" }).format(new Date(item.lastWebhookAt)) : registered ? "ממתין להזמנה חדשה" : "עדיין לא התקבל"}</strong></div><div><span>סנכרון היסטורי אחרון</span><strong>{item.lastSyncAt ? new Intl.DateTimeFormat("he-IL", { dateStyle: "short", timeStyle: "short" }).format(new Date(item.lastSyncAt)) : "לא בוצע"}</strong></div></div><div className="store-actions"><button onClick={() => void onSync(item.id)} disabled={syncing}>{syncing ? "מסנכרן…" : "סנכרן 30 יום מחדש"}</button><button className={!realtimeReady ? "reconnect-attention" : ""} onClick={onConnect} aria-label={`חיבור מחדש של ${item.name}`}><RefreshCcw size={15} /> חיבור מחדש</button></div></article>; })}</div> : <div className="empty-panel"><div className="empty-panel-icon"><StoreIcon size={25} /></div><h2>עדיין לא חוברה חנות</h2><p>לא הוזנו פרטי חנות לדוגמה. החנות הראשונה שתחבר תופיע כאן עם נתונים אמיתיים בלבד.</p><button className="primary-button" onClick={onConnect}><Plus size={16} /> חיבור חנות Shopify</button></div>}
     <div className="security-note"><LockKeyhole size={20} /><div><strong>כל חנות רואה רק את המידע שלה</strong><p>פרטי החיבור נשמרים מוצפנים. רק בעל הפלטפורמה יכול לחבר חנות או להחליף הרשאות.</p></div></div>
   </div>;

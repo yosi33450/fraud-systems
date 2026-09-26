@@ -276,6 +276,31 @@ export async function syncOrdersLast30Days(input: { tenantId: string; storeId: s
   }
 }
 
+/** A bounded replay for the dashboard's manual refresh. Each page is persisted by the route. */
+export async function syncOrdersPage(input: { tenantId: string; storeId: string; shopDomain: string; accessToken: string; since: string; after?: string | null; scanned: number }) {
+  const data: OrdersBackfillResponse = await shopifyAdminRequest<OrdersBackfillResponse>({
+    shopDomain: input.shopDomain,
+    accessToken: input.accessToken,
+    query: ORDERS_BACKFILL_QUERY.replace("reverse: true", "reverse: false"),
+    variables: { first: 50, after: input.after ?? null, query: `created_at:>=${input.since}` },
+  });
+  let casesCreated = 0;
+  for (const order of data.orders.nodes) {
+    const result = ingestShopifyOrder({
+      storeId: input.storeId,
+      webhookId: `historical:${order.id}`,
+      topic: "HISTORICAL_SYNC",
+      payload: toPayload(order),
+    });
+    if (result.case) casesCreated += 1;
+  }
+  const scanned = input.scanned + data.orders.nodes.length;
+  const nextCursor = data.orders.pageInfo.hasNextPage ? data.orders.pageInfo.endCursor : null;
+  if (data.orders.pageInfo.hasNextPage && !nextCursor) throw new Error("SHOPIFY_SYNC_CURSOR_MISSING");
+  const store = nextCursor ? null : completeHistoricalSync(input.tenantId, input.storeId, scanned, data.orders.nodes.at(-1)?.createdAt);
+  return { scanned, casesCreated, nextCursor, complete: !nextCursor, store };
+}
+
 export async function syncShopifyOrderGiftCards(input: { tenantId: string; storeId: string; shopDomain: string; accessToken: string; orderId: string; webhookId: string; topic: string }) {
   const data = await shopifyAdminRequest<{ order: ShopifyOrderNode | null }>({
     shopDomain: input.shopDomain,

@@ -1447,6 +1447,7 @@ p { text-wrap: pretty; }
 .order-investigation .order-context[open] > summary svg { transform: rotate(180deg); }
 .order-investigation .order-context-details { max-height: none; overflow: visible; padding: 16px 18px; }
 .order-investigation .decision-bar { min-height: 72px; padding: 10px 20px; }
+.sync-progress-note { margin: 12px 0; padding: 10px 14px; border-radius: 10px; background: #eef5f0; color: #26513e; font-size: 14px; }
 .case-decision-notice { flex: 0 0 auto; margin: 0; padding: 9px 20px; color: #13563d; background: #e7f5ec; font-size: 13px; font-weight: 650; }
 .identity-selector { display: flex; flex-wrap: wrap; gap: 12px 22px; margin: 12px 0; padding: 14px; border: 1px solid var(--product-border); border-radius: 10px; }
 .identity-selector legend { padding: 0 5px; font-size: 13px; font-weight: 700; }
