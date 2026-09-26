@@ -126,7 +126,7 @@ export async function testShopifyConnection(shopDomain: string, accessToken: str
 export async function registerOrderWebhook(input: {
   shopDomain: string;
   accessToken: string;
-  topic: "ORDERS_CREATE" | "ORDERS_PAID" | "ORDERS_UPDATED" | "ORDER_TRANSACTIONS_CREATE" | "REFUNDS_CREATE";
+  topic: "ORDERS_CREATE" | "ORDERS_PAID" | "ORDERS_UPDATED" | "ORDER_TRANSACTIONS_CREATE" | "ORDERS_RISK_ASSESSMENT_CHANGED" | "REFUNDS_CREATE";
   uri: string;
 }) {
   const data = await shopifyAdminRequest<{
@@ -175,7 +175,7 @@ export async function ensureOrderWebhooks(input: { shopDomain: string; accessTok
     query: WEBHOOK_SUBSCRIPTIONS_QUERY,
     variables: { first: 100 },
   });
-  const topics = ["ORDERS_CREATE", "ORDERS_UPDATED", "ORDER_TRANSACTIONS_CREATE"] as const;
+  const topics = ["ORDERS_CREATE", "ORDERS_UPDATED", "ORDER_TRANSACTIONS_CREATE", "ORDERS_RISK_ASSESSMENT_CHANGED", "REFUNDS_CREATE"] as const;
   return Promise.all(topics.map(async (topic) => {
     const subscription = existing.webhookSubscriptions.nodes.find((item) => item.topic === topic && item.uri === input.uri);
     if (subscription) return { ...subscription, created: false as const };

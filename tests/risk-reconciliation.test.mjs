@@ -22,7 +22,7 @@ test('replaying historical orders excludes future orders and does not duplicate 
 });
 test('rule changes recompute saved history and clear stale scores, never delete orders',()=>{
   const store=setup();for(let n=0;n<4;n++)ingest(store,n,n*10);
-  api.updateRule('test','recommended-email-velocity',{conditions:[{id:'v',field:'orders_by_email',operator:'gt',value:5,windowMinutes:60}]});
+  api.updateRule('test','recommended-orders-hour',{conditions:[{id:'v',field:'orders_by_email',operator:'gt',value:5,windowMinutes:60}]});
   const r=api.reevaluateOpenCases('test');
   assert.equal(r.resolved,1);assert.equal(r.active,0);
   assert.equal(r.cases[0].resolution.source,'automatic-rule-change');assert.equal(r.cases[0].score,0);
@@ -40,8 +40,8 @@ test('manual resolved, false-positive and confirmed fraud are not reclassified b
 test('policy applies once, adds daily rules and does not overwrite later merchant edits',()=>{
   setup();const first=api.repairVelocityPolicy('test');assert.equal(first.alreadyApplied,false);
   const rules=new Map(api.exportOperationalState().rulesByTenant).get('test');
-  for(const id of ['recommended-email-velocity','recommended-ip-velocity'])assert.deepEqual(rules.find(r=>r.id===id).conditions[0],{id:id.includes('email')?'email-velocity':'ip-velocity',field:id.includes('email')?'orders_by_email':'orders_by_ip',operator:'gt',value:3,windowMinutes:60});
-  assert.equal(rules.filter(r=>r.id.includes('daily-velocity')).length,2);
+  assert.deepEqual(rules.find(r=>r.id==='recommended-orders-hour').conditions.map(c=>c.field),['orders_by_email','orders_by_ip','orders_by_phone']);
+  assert.equal(rules.find(r=>r.id==='recommended-orders-day').conditions.length,3);
   api.updateRule('test','recommended-order-spike',{conditions:[{id:'a',field:'order_amount',operator:'gt',value:2500}]});
   assert.equal(api.repairVelocityPolicy('test').alreadyApplied,true);
   assert.equal(new Map(api.exportOperationalState().rulesByTenant).get('test').find(r=>r.id==='recommended-order-spike').conditions[0].value,2500);
@@ -62,7 +62,7 @@ test('a replay can reduce risk and remove stale evidence rather than retaining m
   assert.equal(api.exportOperationalState().cases[0].resolution.source,'automatic-rule-change');
 });
 test('new daily policy detects previously unflagged stored purchases for factual Shopify replay',()=>{
-  const store=setup();api.updateRule('test','recommended-email-daily-velocity',{enabled:false});
+  const store=setup();api.updateRule('test','recommended-orders-day',{enabled:false});
   for(let n=0;n<6;n++)ingest(store,n,n*120);
   assert.equal(api.exportOperationalState().cases.length,0);
   api.repairVelocityPolicy('test');

@@ -11,7 +11,10 @@ export const ORDERS_BACKFILL_QUERY = `#graphql
       nodes {
         id
         name
+        tags
+        discountCodes
         createdAt
+        displayFulfillmentStatus
         email
       phone
       clientIp
@@ -70,7 +73,7 @@ export const GIFT_CARDS_QUERY = `#graphql
 export const ORDER_GIFT_CARD_DETAILS_QUERY = `#graphql
   query ShieldLedgerOrderGiftCardDetails($id: ID!) {
     order(id: $id) {
-      id name createdAt email phone clientIp paymentGatewayNames
+      id name createdAt email phone clientIp paymentGatewayNames tags discountCodes displayFulfillmentStatus
       risk { recommendation assessments { riskLevel facts { description sentiment } } }
       customAttributes { key value }
       transactions {
@@ -89,7 +92,10 @@ export const ORDER_GIFT_CARD_DETAILS_QUERY = `#graphql
 type ShopifyOrderNode = {
   id: string;
   name: string;
+  tags?: string[];
+  discountCodes?: string[];
   createdAt: string;
+  displayFulfillmentStatus?: string;
   email?: string | null;
   phone?: string | null;
   clientIp?: string | null;
@@ -136,6 +142,8 @@ const toPayload = (order: ShopifyOrderNode): ShopifyOrderPayload => ({
   id: order.id,
   admin_graphql_api_id: order.id,
   name: order.name,
+  tags: order.tags,
+  discount_codes: order.discountCodes,
   created_at: order.createdAt,
   email: selectCustomerEmail({
     orderEmail: order.email,
@@ -151,6 +159,7 @@ const toPayload = (order: ShopifyOrderNode): ShopifyOrderPayload => ({
     : order.risk?.recommendation?.toLowerCase() === "medium" ? "medium"
       : order.risk?.recommendation?.toLowerCase() === "low" ? "low" : "none",
   shopify_risk_facts: order.risk?.assessments.flatMap((assessment) => assessment.facts.filter((fact) => fact.sentiment === "NEGATIVE").map((fact) => fact.description)) ?? [],
+  payment_failures: order.transactions.filter((transaction) => ["FAILURE", "ERROR"].includes(transaction.status?.toUpperCase())).length,
   transactions: order.transactions.map((transaction) => ({
     id: transaction.id,
     gateway: transaction.gateway ?? undefined,
@@ -275,11 +284,16 @@ export async function syncShopifyOrderGiftCards(input: { tenantId: string; store
     variables: { id: input.orderId },
   });
   if (!data.order) throw new Error("SHOPIFY_ORDER_NOT_FOUND");
+  if (data.order.tags?.some((tag) => tag.trim().toLowerCase() === "external-order")) {
+    return ingestShopifyOrder({ storeId: input.storeId, webhookId: input.webhookId, topic: input.topic, payload: toPayload(data.order) });
+  }
   const containsGiftCard = data.order.lineItems.nodes.some((item) => item.isGiftCard)
     || data.order.transactions.some((transaction) => /gift.?card/i.test(`${transaction.gateway ?? ""} ${transaction.formattedGateway ?? ""}`));
   if (containsGiftCard) {
     await hydrateGiftEvidence(input.tenantId);
     await syncGiftEvidenceForOrder(input, input.orderId);
   }
-  return ingestShopifyOrder({ storeId: input.storeId, webhookId: input.webhookId, topic: input.topic, payload: toPayload(data.order) });
+  const payload = toPayload(data.order);
+  if (input.topic === "refunds/create") payload.refund_after_fulfillment = data.order.displayFulfillmentStatus === "FULFILLED";
+  return ingestShopifyOrder({ storeId: input.storeId, webhookId: input.webhookId, topic: input.topic, payload });
 }

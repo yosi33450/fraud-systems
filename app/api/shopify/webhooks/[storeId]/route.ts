@@ -47,9 +47,11 @@ export async function POST(request: Request, context: { params: Promise<{ storeI
     const orderPayload = payload as Parameters<typeof ingestShopifyOrder>[0]["payload"];
     const isGiftOrder = orderPayload.line_items?.some((item) => item.gift_card)
       || (payload as { payment_gateway_names?: string[] }).payment_gateway_names?.some((gateway) => /gift.?card/i.test(gateway));
-    if (topic === "order_transactions/create" || (topic.startsWith("orders/") && isGiftOrder)) {
-      const transaction = payload as { order_id?: string | number; admin_graphql_api_order_id?: string };
-      const rawOrderId = topic === "order_transactions/create" ? transaction.admin_graphql_api_order_id ?? transaction.order_id : orderPayload.admin_graphql_api_id ?? orderPayload.id;
+    if (topic === "order_transactions/create" || topic === "orders/risk_assessment_changed" || topic === "refunds/create" || (topic.startsWith("orders/") && isGiftOrder)) {
+      const transaction = payload as { order_id?: string | number; admin_graphql_api_order_id?: string; order?: { id?: string } };
+      const rawOrderId = topic === "order_transactions/create" || topic === "orders/risk_assessment_changed" || topic === "refunds/create"
+        ? transaction.admin_graphql_api_order_id ?? transaction.order_id ?? transaction.order?.id
+        : orderPayload.admin_graphql_api_id ?? orderPayload.id;
       if (!rawOrderId) return NextResponse.json({ error: "ORDER_ID_MISSING" }, { status: 400 });
       const orderId = String(rawOrderId).startsWith("gid://") ? String(rawOrderId) : `gid://shopify/Order/${rawOrderId}`;
       const connection = getStoreConnection(store.tenantId, storeId);

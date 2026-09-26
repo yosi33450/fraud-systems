@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { Resend } from "resend";
 import { getNotificationSettings, recordNotificationDelivery } from "@/lib/operational-store";
 import type { FraudCase, NotificationDelivery } from "@/lib/types";
@@ -22,6 +22,7 @@ export async function notifyStoreOwners(item: FraudCase) {
   if (!settings.enabled || !settings.severities.includes(item.severity) || settings.recipients.length === 0) return [];
   const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
   const deliveries: NotificationDelivery[] = [];
+  const alertRevision = createHash("sha256").update(JSON.stringify([item.id, item.severity, item.score, item.evidence.map((entry) => entry.label)])).digest("hex").slice(0, 20);
 
   for (const recipient of settings.recipients) {
     const delivery: NotificationDelivery = {
@@ -35,7 +36,7 @@ export async function notifyStoreOwners(item: FraudCase) {
           to: recipient,
           subject: `נדרשת בדיקה: ${item.orderNumber} · ${item.storeName}`,
           html: emailHtml(item),
-        }, { headers: { "Idempotency-Key": `risk-alert-${item.id}-${recipient}` } });
+        }, { headers: { "Idempotency-Key": `risk-alert-${alertRevision}-${recipient}` } });
         delivery.status = result.error ? "failed" : "sent";
         delivery.providerId = result.data?.id;
       } catch { delivery.status = "failed"; }

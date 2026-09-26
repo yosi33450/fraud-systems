@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
-import { addEmployee } from "@/lib/operational-store";
+import { updateEmployee } from "@/lib/operational-store";
 import { hydrateOperationalState, persistOperationalState } from "@/lib/persistence.server";
 
-export async function POST(request: Request, context: { params: Promise<{ tenantId: string }> }) {
+export async function PATCH(request: Request, context: { params: Promise<{ tenantId: string; employeeId: string }> }) {
   await hydrateOperationalState();
-  const { tenantId } = await context.params;
+  const { tenantId, employeeId } = await context.params;
   const body: unknown = await request.json().catch(() => null);
   if (!body || typeof body !== "object") return NextResponse.json({ error: "INVALID_EMPLOYEE" }, { status: 400 });
   const { name, email, privateEmail, address, couponCodes, department } = body as Record<string, unknown>;
@@ -12,14 +12,13 @@ export async function POST(request: Request, context: { params: Promise<{ tenant
     return NextResponse.json({ error: "INVALID_EMPLOYEE" }, { status: 400 });
   }
   try {
-    const employee = addEmployee(tenantId, { name, email, department,
-      privateEmail: typeof privateEmail === "string" ? privateEmail : "",
-      address: typeof address === "string" ? address : "",
+    const employee = updateEmployee(tenantId, employeeId, { name, email, department,
+      privateEmail: typeof privateEmail === "string" ? privateEmail : "", address: typeof address === "string" ? address : "",
       couponCodes: Array.isArray(couponCodes) ? couponCodes.filter((code): code is string => typeof code === "string").slice(0, 30) : [] });
     await persistOperationalState();
-    return NextResponse.json({ employee }, { status: 201 });
+    return NextResponse.json({ employee });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "EMPLOYEE_CREATE_FAILED";
-    return NextResponse.json({ error: message }, { status: message === "EMPLOYEE_ALREADY_EXISTS" ? 409 : 500 });
+    const message = error instanceof Error ? error.message : "EMPLOYEE_UPDATE_FAILED";
+    return NextResponse.json({ error: message }, { status: message === "EMPLOYEE_NOT_FOUND" ? 404 : message === "EMPLOYEE_ALREADY_EXISTS" ? 409 : 500 });
   }
 }

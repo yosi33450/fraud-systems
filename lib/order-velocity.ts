@@ -7,10 +7,11 @@ export type VelocityOrder = {
   amount: number; giftCardValue: number;
 };
 export const velocityDefaults: Record<string, number> = {
-  orders_by_email: 60, orders_by_ip: 120, gift_card_orders_by_ip: 120,
+  orders_by_email: 60, orders_by_ip: 120, orders_by_phone: 60,
+  gift_card_orders_by_ip: 120, gift_card_orders_by_email: 120, gift_card_orders_by_phone: 120,
   emails_by_ip: 120, identities_by_phone: 1440,
 };
-export const velocityKey = (field: string, minutes: number) => `${field}:${minutes}`;
+export const velocityKey = (field: string, minutes: number, minimum = 0) => `${field}:${minutes}${field.startsWith("gift_card_orders_by_") ? `:${minimum}` : ""}`;
 const emailKey = (value: string) => {
   const email = value.trim().toLowerCase();
   return email.includes("@") && !isSharedServiceEmail(email) ? email : "";
@@ -61,23 +62,27 @@ export function computeVelocitySignals(current: VelocityOrder, history: Velocity
     const time = Date.parse(order.createdAt);
     return (order.amount > 0 || order.giftCardValue > 0) && Number.isFinite(time) && time <= end;
   }) : [];
-  const requested = new Map(Object.entries(velocityDefaults).map(([field, minutes]) => [velocityKey(field, minutes), { field, minutes }]));
+  const requested = new Map(Object.entries(velocityDefaults).map(([field, minutes]) => [velocityKey(field, minutes), { field, minutes, minimum: 0 }]));
   for (const condition of conditions) {
     if (!(condition.field in velocityDefaults)) continue;
     const minutes = condition.windowMinutes ?? velocityDefaults[condition.field];
-    requested.set(velocityKey(condition.field, minutes), { field: condition.field, minutes });
+    const minimum = condition.minGiftCardValue ?? 0;
+    requested.set(velocityKey(condition.field, minutes, minimum), { field: condition.field, minutes, minimum });
   }
   const conditionValues: Record<string, number> = {};
   const email = emailKey(current.email);
   const phone = phoneKey(current.phone);
   const ip = current.ip.trim();
-  for (const [key, { field, minutes }] of requested) {
+  for (const [key, { field, minutes, minimum }] of requested) {
     const rows = Number.isFinite(minutes) && minutes > 0 ? eligible.filter((order) => Date.parse(order.createdAt) > end - minutes * 60_000) : [];
     const ipRows = ip ? rows.filter((order) => order.ip.trim() === ip) : [];
     switch (field) {
       case "orders_by_email": conditionValues[key] = email ? rows.filter((order) => emailKey(order.email) === email).length : 0; break;
       case "orders_by_ip": conditionValues[key] = ipRows.length; break;
-      case "gift_card_orders_by_ip": conditionValues[key] = ipRows.filter((order) => order.giftCardValue > 0).length; break;
+      case "orders_by_phone": conditionValues[key] = phone ? rows.filter((order) => phoneKey(order.phone) === phone).length : 0; break;
+      case "gift_card_orders_by_ip": conditionValues[key] = ipRows.filter((order) => order.giftCardValue > minimum).length; break;
+      case "gift_card_orders_by_email": conditionValues[key] = email ? rows.filter((order) => emailKey(order.email) === email && order.giftCardValue > minimum).length : 0; break;
+      case "gift_card_orders_by_phone": conditionValues[key] = phone ? rows.filter((order) => phoneKey(order.phone) === phone && order.giftCardValue > minimum).length : 0; break;
       case "emails_by_ip": conditionValues[key] = new Set(ipRows.map((order) => emailKey(order.email)).filter(Boolean)).size; break;
       case "identities_by_phone": conditionValues[key] = phone ? new Set(rows.filter((order) => phoneKey(order.phone) === phone).map((order) => emailKey(order.email)).filter(Boolean)).size : 0; break;
     }

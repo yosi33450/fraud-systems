@@ -67,6 +67,8 @@ export interface FraudCase {
     paymentFailures: number;
     billingShippingMismatch: boolean;
     shopifyRisk: "none" | "low" | "medium" | "high";
+    shopifyRiskFacts?: string[];
+    orderLocalHour?: number;
     employeeMatch: boolean;
     refundAfterFulfillment: boolean;
     blacklist: { email: boolean; phone: boolean; address: boolean; ip: boolean; customer: boolean };
@@ -131,13 +133,14 @@ export interface RiskRule {
     severity: Severity;
     openCase: boolean;
     emailOwner: boolean;
+    scoreBonus?: number;
   };
   locked?: boolean;
   recommended?: boolean;
   matches: number;
 }
 
-export type RiskConditionField = "orders_by_email" | "orders_by_ip" | "gift_card_orders_by_ip" | "emails_by_ip" | "identities_by_phone" | "order_amount" | "order_amount_vs_average" | "gift_card_value" | "linked_gift_card" | "payment_failures" | "network_match" | "employee_match" | "refund_after_fulfillment";
+export type RiskConditionField = "orders_by_email" | "orders_by_ip" | "orders_by_phone" | "gift_card_orders_by_ip" | "gift_card_orders_by_email" | "gift_card_orders_by_phone" | "emails_by_ip" | "identities_by_phone" | "order_amount" | "order_amount_vs_average" | "gift_card_value" | "linked_gift_card" | "payment_failures" | "network_match" | "employee_match" | "refund_after_fulfillment" | "billing_shipping_mismatch" | "order_local_hour";
 export type RiskConditionOperator = "gte" | "gt" | "eq";
 
 export interface RiskCondition {
@@ -146,6 +149,9 @@ export interface RiskCondition {
   operator: RiskConditionOperator;
   value: number | boolean;
   windowMinutes?: number;
+  minGiftCardValue?: number;
+  startHour?: number;
+  endHour?: number;
 }
 
 export interface Employee {
@@ -153,10 +159,23 @@ export interface Employee {
   tenantId: string;
   name: string;
   email: string;
+  privateEmail?: string;
+  address?: string;
+  couponCodes?: string[];
   department: string;
   purchases: number;
   refunded: number;
   risk: Severity;
+}
+
+export interface EmployeeMonitoringSettings {
+  tenantId: string;
+  couponPrefix: string;
+  zeroAmount: boolean;
+  giftCardAddressChange: boolean;
+  repeatGiftCardUses: boolean;
+  repeatUsesThreshold: number;
+  windowMinutes: number;
 }
 
 export interface BlacklistReport {
@@ -176,6 +195,7 @@ export interface DashboardSnapshot {
   cases: FraudCase[];
   stores: Store[];
   employees: Employee[];
+  employeeSettings?: EmployeeMonitoringSettings;
   rules: RiskRule[];
   reports: BlacklistReport[];
   notifications: NotificationSettings;

@@ -4,7 +4,7 @@ import { evaluateRisk, type OrderSignals } from "@/lib/risk-engine";
 import { computeVelocitySignals, createVelocityLookup } from "@/lib/order-velocity";
 import { isSharedServiceEmail } from "@/lib/customer-identity";
 import { buildGiftLedger, hasFlaggedGiftSource, receiptGiftCard, type GiftCardOrderEvidence } from "@/lib/gift-card-evidence";
-import type { BlacklistReport, CaseStatus, DashboardSnapshot, Employee, FraudCase, GiftCardRedemption, GiftCardTrace, NotificationDelivery, NotificationSettings, RiskRule, Store } from "@/lib/types";
+import type { BlacklistReport, CaseStatus, DashboardSnapshot, Employee, EmployeeMonitoringSettings, FraudCase, GiftCardRedemption, GiftCardTrace, NotificationDelivery, NotificationSettings, RiskRule, Store } from "@/lib/types";
 
 type ShopifyLineItem = {
   title?: string;
@@ -47,6 +47,8 @@ export type ShopifyOrderPayload = {
   client_ip?: string;
   gateway_names?: string[];
   shopify_risk_facts?: string[];
+  tags?: string | string[];
+  discount_codes?: string[];
   transactions?: ShopifyOrderTransaction[];
 };
 
@@ -61,6 +63,7 @@ type StoredOrder = {
   giftCardValue: number;
   ip: string;
   customerId: string;
+  couponCodes?: string[];
   createdAt: string;
 };
 
@@ -97,6 +100,7 @@ type OperationalState = {
   cases: FraudCase[];
   stores: Store[];
   employees: Employee[];
+  employeeSettingsByTenant: Map<string, EmployeeMonitoringSettings>;
   rulesByTenant: Map<string, RiskRule[]>;
   notificationsByTenant: Map<string, NotificationSettings>;
   deliveries: NotificationDelivery[];
@@ -116,6 +120,7 @@ export type PersistedOperationalState = {
   cases: FraudCase[];
   stores: Store[];
   employees: Employee[];
+  employeeSettingsByTenant?: Array<[string, EmployeeMonitoringSettings]>;
   rulesByTenant: Array<[string, RiskRule[]]>;
   notificationsByTenant: Array<[string, NotificationSettings]>;
   deliveries: NotificationDelivery[];
@@ -136,6 +141,7 @@ const createInitialState = (): OperationalState => ({
   cases: clone(seedCases),
   stores: clone(seedStores),
   employees: clone(seedEmployees),
+  employeeSettingsByTenant: new Map(),
   rulesByTenant: new Map([["tenant-primary", clone(seedRules)]]),
   notificationsByTenant: new Map(),
   deliveries: [],
@@ -164,6 +170,7 @@ export function exportOperationalState(): PersistedOperationalState {
     cases: state.cases,
     stores: state.stores,
     employees: state.employees,
+    employeeSettingsByTenant: [...state.employeeSettingsByTenant.entries()],
     rulesByTenant: [...state.rulesByTenant.entries()],
     notificationsByTenant: [...state.notificationsByTenant.entries()],
     deliveries: state.deliveries,
@@ -184,6 +191,7 @@ export function restoreOperationalState(snapshot: PersistedOperationalState) {
   state.cases = clone(snapshot.cases ?? []);
   state.stores = clone(snapshot.stores ?? []);
   state.employees = clone(snapshot.employees ?? []);
+  state.employeeSettingsByTenant = new Map(clone(snapshot.employeeSettingsByTenant ?? []));
   state.rulesByTenant = new Map(clone(snapshot.rulesByTenant ?? []));
   state.notificationsByTenant = new Map(clone(snapshot.notificationsByTenant ?? []));
   state.deliveries = clone(snapshot.deliveries ?? []);
@@ -236,14 +244,60 @@ const tenantStore = (tenantId: string, storeId: string) => {
 
 const baselineRules = (): RiskRule[] => [
   {
+    id: "recommended-orders-hour", label: "ריבוי הזמנות · שעה", description: "יותר מ־3 הזמנות באותו אימייל, IP או טלפון בחלון מתגלגל של שעה. אפשר להסיר או להוסיף מזהים בעריכת התנאים.",
+    category: "velocity", enabled: true, logic: "any", recommended: true, matches: 0,
+    conditions: (["email", "ip", "phone"] as const).map((identity) => ({ id: `orders-hour-${identity}`, field: `orders_by_${identity}` as const, operator: "gt", value: 3, windowMinutes: 60 })),
+    action: { severity: "high", openCase: true, emailOwner: true },
+  },
+  {
+    id: "recommended-orders-day", label: "ריבוי הזמנות · יום", description: "יותר מ־5 הזמנות באותו אימייל, IP או טלפון ב־24 שעות. אפשר לבחור את המזהים בעריכת התנאים.",
+    category: "velocity", enabled: true, logic: "any", recommended: true, matches: 0,
+    conditions: (["email", "ip", "phone"] as const).map((identity) => ({ id: `orders-day-${identity}`, field: `orders_by_${identity}` as const, operator: "gt", value: 5, windowMinutes: 1440 })),
+    action: { severity: "high", openCase: true, emailOwner: true },
+  },
+  {
+    id: "recommended-night-orders", label: "רכישה בשעות הלילה", description: "אות משלים בלבד: מוסיף מעט נקודות להזמנה בין 00:00 ל־05:00 לפי שעון ישראל, בלי לפתוח תיק בפני עצמו.",
+    category: "payment", enabled: true, logic: "all", recommended: true, matches: 0,
+    conditions: [{ id: "night-hours", field: "order_local_hour", operator: "eq", value: true, startHour: 0, endHour: 5 }],
+    action: { severity: "low", openCase: false, emailOwner: false, scoreBonus: 5 },
+  },
+  {
+    id: "recommended-phone-hourly-velocity", label: "ריבוי הזמנות מאותו טלפון בשעה", description: "יותר מ־3 הזמנות מאותו טלפון בתוך שעה.",
+    category: "velocity", enabled: false, logic: "all", recommended: true, matches: 0,
+    conditions: [{ id: "phone-hourly", field: "orders_by_phone", operator: "gt", value: 3, windowMinutes: 60 }],
+    action: { severity: "high", openCase: true, emailOwner: true },
+  },
+  {
+    id: "recommended-phone-daily-velocity", label: "ריבוי הזמנות מאותו טלפון ביום", description: "יותר מ־5 הזמנות מאותו טלפון בתוך 24 שעות.",
+    category: "velocity", enabled: false, logic: "all", recommended: true, matches: 0,
+    conditions: [{ id: "phone-daily", field: "orders_by_phone", operator: "gt", value: 5, windowMinutes: 1440 }],
+    action: { severity: "high", openCase: true, emailOwner: true },
+  },
+  {
+    id: "recommended-gift-card-repeat-100", label: "ריבוי רכישות Gift Card מעל ₪100", description: "3 רכישות Gift Card או יותר מעל ₪100 לרכישה בתוך שעתיים, לפי IP, אימייל או טלפון.",
+    category: "gift-card", enabled: true, logic: "any", recommended: true, matches: 0,
+    conditions: [
+      { id: "gift-repeat-ip", field: "gift_card_orders_by_ip", operator: "gte", value: 3, windowMinutes: 120, minGiftCardValue: 100 },
+      { id: "gift-repeat-email", field: "gift_card_orders_by_email", operator: "gte", value: 3, windowMinutes: 120, minGiftCardValue: 100 },
+      { id: "gift-repeat-phone", field: "gift_card_orders_by_phone", operator: "gte", value: 3, windowMinutes: 120, minGiftCardValue: 100 },
+    ],
+    action: { severity: "critical", openCase: true, emailOwner: true },
+  },
+  {
+    id: "recommended-gift-card-amount", label: "סכום Gift Card חריג בהזמנה", description: "התראה אם שווי Gift Cards בהזמנה בודדת גבוה מהסף שהוגדר.",
+    category: "gift-card", enabled: true, logic: "all", recommended: true, matches: 0,
+    conditions: [{ id: "gift-amount", field: "gift_card_value", operator: "gt", value: 1500 }],
+    action: { severity: "high", openCase: true, emailOwner: true },
+  },
+  {
     id: "recommended-ip-velocity", label: "ריבוי הזמנות מאותה כתובת IP בשעה", description: "יותר מ־3 רכישות באותה חנות ובאותו IP ב־60 דקות מתגלגלות. IP אינו הוכחת זהות.",
-    category: "velocity", enabled: true, logic: "all", recommended: true, matches: 0,
+    category: "velocity", enabled: false, logic: "all", recommended: true, matches: 0,
     conditions: [{ id: "ip-velocity", field: "orders_by_ip", operator: "gt", value: 3, windowMinutes: 60 }],
     action: { severity: "high", openCase: true, emailOwner: true },
   },
   {
     id: "recommended-gift-card-ip-velocity", label: "ריבוי רכישות Gift Card מאותו IP", description: "פותח התראה קריטית כאשר מאותו IP נוצרות 3 הזמנות Gift Card או יותר בתוך שעתיים, גם אם האימייל משתנה.",
-    category: "gift-card", enabled: true, logic: "all", recommended: true, matches: 0,
+    category: "gift-card", enabled: false, logic: "all", recommended: true, matches: 0,
     conditions: [{ id: "gift-card-ip-velocity", field: "gift_card_orders_by_ip", operator: "gte", value: 3, windowMinutes: 120 }],
     action: { severity: "critical", openCase: true, emailOwner: true },
   },
@@ -264,14 +318,14 @@ const baselineRules = (): RiskRule[] => [
   },
   {
     id: "recommended-email-velocity", label: "ריבוי הזמנות מאותו אימייל", description: "פותח התראה כאשר אותו אימייל מבצע 4 הזמנות או יותר בתוך שעה.",
-    category: "velocity", enabled: true, logic: "all", recommended: true, matches: 0,
+    category: "velocity", enabled: false, logic: "all", recommended: true, matches: 0,
     conditions: [{ id: "email-velocity", field: "orders_by_email", operator: "gt", value: 3, windowMinutes: 60 }],
     action: { severity: "high", openCase: true, emailOwner: true },
   },
   ...(["email", "ip"] as const).map((identity): RiskRule => ({
     id: `recommended-${identity}-daily-velocity`, label: `ריבוי הזמנות מאותו ${identity === "email" ? "אימייל" : "IP"} ביום`,
     description: "יותר מ־5 רכישות באותה חנות ב־24 שעות מתגלגלות, כולל הרכישה הנוכחית.",
-    category: "velocity", enabled: true, logic: "all", recommended: true, matches: 0,
+    category: "velocity", enabled: false, logic: "all", recommended: true, matches: 0,
     conditions: [{ id: `${identity}-daily-velocity`, field: identity === "email" ? "orders_by_email" : "orders_by_ip", operator: "gt", value: 5, windowMinutes: 1440 }],
     action: { severity: "high", openCase: true, emailOwner: true },
   })),
@@ -327,10 +381,13 @@ const migrateLegacyRules = () => {
       legacy.conditions = [{ id: condition.id, field: "order_amount", operator: "gt", value: threshold }];
     }
 
-    const requiredRules = baselineRules().filter((rule) => ["recommended-order-high", "recommended-order-critical", "recommended-linked-gift-card"].includes(rule.id));
+    const introducingGroupedVelocity = !rules.some((rule) => rule.id === "recommended-orders-hour");
+    const requiredRules = baselineRules().filter((rule) => ["recommended-order-high", "recommended-order-critical", "recommended-linked-gift-card", "recommended-orders-hour", "recommended-orders-day", "recommended-night-orders", "recommended-gift-card-repeat-100", "recommended-gift-card-amount"].includes(rule.id));
     for (const requiredRule of requiredRules) {
       if (!rules.some((rule) => rule.id === requiredRule.id)) rules.push(clone(requiredRule));
     }
+    const superseded = new Set(["recommended-ip-velocity", "recommended-email-velocity", "recommended-phone-hourly-velocity", "recommended-email-daily-velocity", "recommended-ip-daily-velocity", "recommended-phone-daily-velocity", "recommended-gift-card-ip-velocity"]);
+    if (introducingGroupedVelocity) for (const rule of rules) if (superseded.has(rule.id) && rule.recommended && rule.conditions.length === 1) rule.enabled = false;
   }
 };
 
@@ -356,6 +413,7 @@ export function getDashboardSnapshot(tenantId: string): DashboardSnapshot {
     cases: clone(state.cases.filter((item) => item.tenantId === tenantId)),
     stores: clone(tenantStores),
     employees: clone(state.employees.filter((item) => item.tenantId === tenantId)),
+    employeeSettings: getEmployeeSettings(tenantId),
     rules: clone(state.rulesByTenant.get(tenantId) ?? []),
     reports: clone(state.reports.filter((item) => item.tenantId === tenantId)),
     notifications: clone(state.notificationsByTenant.get(tenantId) ?? {
@@ -497,6 +555,7 @@ const fallbackSignalsForCase = (item: FraudCase, tenantCases: FraudCase[]): Orde
     paymentFailures: hasEvidence(/כשל|failed payment/i) ? 3 : 0,
     billingShippingMismatch: hasEvidence(/כתובות החיוב והמשלוח שונות/i),
     shopifyRisk: item.context?.shopifyRisk === "high" ? "high" : item.context?.shopifyRisk === "medium" ? "medium" : item.context?.shopifyRisk === "low" ? "low" : "none",
+    shopifyRiskFacts: item.context?.riskFacts ?? [],
     employeeMatch: item.evidence.some((evidence) => evidence.source === "employee"),
     refundAfterFulfillment: hasEvidence(/זיכוי לאחר/i),
     blacklist: {
@@ -510,6 +569,16 @@ export function reevaluateOpenCases(tenantId: string) {
   const rules = state.rulesByTenant.get(tenantId) ?? [];
   const candidates = tenantCases.filter(canReevaluate);
   const velocityFor = createVelocityLookup(state.orders, rules.flatMap((rule) => rule.conditions));
+  const employeeSettings = getEmployeeSettings(tenantId);
+  const preserveEmployeeEvidence = (item: FraudCase, result: ReturnType<typeof evaluateRisk>) => {
+    const evidence = item.evidence.filter((entry) => entry.source === "employee" && (
+      (employeeSettings.zeroAmount && entry.description.includes("סכום ₪0"))
+      || (employeeSettings.giftCardAddressChange && entry.description.includes("כתובת אחרת"))
+      || (employeeSettings.repeatGiftCardUses && entry.description.includes("מימושי Gift Card"))
+    ));
+    if (evidence.length) { result.evidence.unshift(...evidence); result.score = Math.max(72, result.score); if (["low", "medium"].includes(result.severity)) result.severity = "high"; }
+    return result;
+  };
   let resolved = 0;
   let updated = 0;
   let reopened = 0;
@@ -525,7 +594,8 @@ export function reevaluateOpenCases(tenantId: string) {
     const signals: OrderSignals = { ...base, orderAmount: current.amount, linkedGiftCard: false,
       ...velocityFor(current) };
     const timestamp = Number.isFinite(Date.parse(current.createdAt)) ? new Date(current.createdAt) : new Date();
-    return { item, signals, timestamp, baseResult: evaluateRisk(signals, timestamp, rules) };
+    signals.orderLocalHour = Number(new Intl.DateTimeFormat("en-US", { hour: "2-digit", hourCycle: "h23", timeZone: "Asia/Jerusalem" }).format(timestamp));
+    return { item, signals, timestamp, baseResult: preserveEmployeeEvidence(item, evaluateRisk(signals, timestamp, rules)) };
   });
   // Establish genuine source-order risk first. Stale linked alerts must not keep
   // each other alive after the false velocity alerts have been removed.
@@ -542,7 +612,7 @@ export function reevaluateOpenCases(tenantId: string) {
       sourceCases.map((source) => ({ storeId: source.storeId, orderId: source.context?.shopifyOrderId, status: source.status })))
       || Boolean(item.context?.giftCards?.redeemed.some((redemption) => redemption.identityChanged && redemption.confidence === "exact-id" &&
         sourceCases.some((source) => source.storeId === item.storeId && source.orderNumber === redemption.purchaseOrderNumber && ["new", "review", "action", "fraud"].includes(source.status))));
-    const result = evaluateRisk(signals, timestamp, rules);
+    const result = preserveEmployeeEvidence(item, evaluateRisk(signals, timestamp, rules));
     applyRiskResult(item, signals, result);
     if (result.score < 25) {
       if (!wasAutoResolved) resolved += 1;
@@ -572,12 +642,12 @@ export function reevaluateOpenCases(tenantId: string) {
  * Never reapply on hydration: later edits remain the merchant's choice.
  */
 export function repairVelocityPolicy(tenantId: string) {
-  const migration = "risk.velocity-windows-v3";
+  const migration = "risk.velocity-windows-v4";
   const alreadyApplied = state.audit.some((event) => event.tenantId === tenantId && event.action === migration);
   if (!alreadyApplied) {
     const rules = state.rulesByTenant.get(tenantId);
     if (!rules) throw new Error("RULE_NOT_FOUND");
-    const policyIds = ["recommended-email-velocity", "recommended-ip-velocity", "recommended-email-daily-velocity", "recommended-ip-daily-velocity", "recommended-order-spike"];
+    const policyIds = ["recommended-orders-hour", "recommended-orders-day", "recommended-order-spike"];
     for (const baseline of baselineRules().filter((rule) => policyIds.includes(rule.id))) {
       const existing = rules.find((rule) => rule.id === baseline.id);
       if (existing) Object.assign(existing, { label: baseline.label, description: baseline.description, conditions: clone(baseline.conditions), logic: baseline.logic, enabled: true });
@@ -593,7 +663,7 @@ export function repairVelocityPolicy(tenantId: string) {
 // The caller fetches their original Shopify details before creating any case.
 export function pendingVelocityPolicyOrders(tenantId: string) {
   const policy = (state.rulesByTenant.get(tenantId) ?? []).filter((rule) => [
-    "recommended-email-velocity", "recommended-ip-velocity", "recommended-email-daily-velocity", "recommended-ip-daily-velocity", "recommended-order-spike",
+    "recommended-orders-hour", "recommended-orders-day", "recommended-order-spike",
   ].includes(rule.id));
   const known = new Set(state.cases.filter((item) => item.tenantId === tenantId).map((item) => `${item.storeId}:${item.context?.shopifyOrderId}`));
   const orders = state.orders.filter((order) => order.tenantId === tenantId && Number.isFinite(Date.parse(order.createdAt)) && !known.has(`${order.storeId}:${order.shopifyOrderId}`));
@@ -630,20 +700,49 @@ export function recordNotificationDelivery(delivery: NotificationDelivery) {
   state.deliveries.unshift(clone(delivery));
 }
 
-export function addEmployee(tenantId: string, input: Pick<Employee, "name" | "email" | "department">) {
+export function getEmployeeSettings(tenantId: string): EmployeeMonitoringSettings {
+  return clone(state.employeeSettingsByTenant.get(tenantId) ?? { tenantId, couponPrefix: "", zeroAmount: true, giftCardAddressChange: true, repeatGiftCardUses: true, repeatUsesThreshold: 3, windowMinutes: 1440 });
+}
+
+export function saveEmployeeSettings(tenantId: string, input: EmployeeMonitoringSettings) {
+  const settings = { ...input, tenantId, couponPrefix: input.couponPrefix.trim().toLowerCase(), repeatUsesThreshold: Math.max(2, Math.floor(input.repeatUsesThreshold)), windowMinutes: Math.max(1, Math.floor(input.windowMinutes)) };
+  state.employeeSettingsByTenant.set(tenantId, settings);
+  state.audit.unshift({ id: randomUUID(), tenantId, action: "employee.settings.updated", resourceType: "employee", resourceId: tenantId, createdAt: new Date().toISOString(), metadata: {} });
+  return clone(settings);
+}
+
+export function addEmployee(tenantId: string, input: Pick<Employee, "name" | "email" | "department"> & Partial<Pick<Employee, "privateEmail" | "address" | "couponCodes">>) {
   const email = normalizeEmail(input.email);
   if (state.employees.some((employee) => employee.tenantId === tenantId && normalizeEmail(employee.email) === email)) {
     throw new Error("EMPLOYEE_ALREADY_EXISTS");
   }
   const employee: Employee = {
-    id: randomUUID(), tenantId, name: input.name.trim(), email, department: input.department.trim(),
+    id: randomUUID(), tenantId, name: input.name.trim(), email, privateEmail: normalizeEmail(input.privateEmail ?? ""), address: input.address?.trim() ?? "", couponCodes: input.couponCodes?.map((code) => code.trim().toLowerCase()).filter(Boolean) ?? [], department: input.department.trim(),
     purchases: 0, refunded: 0, risk: "low",
   };
+  employee.purchases = state.orders.filter((order) => order.tenantId === tenantId && (
+    [employee.email, employee.privateEmail].includes(order.email) || Boolean(employee.address && order.address && normalizeAddress(employee.address) === normalizeAddress(order.address))
+    || Boolean(order.couponCodes?.some((code) => employee.couponCodes?.includes(code)))
+  )).length;
   state.employees.unshift(employee);
   state.audit.unshift({
     id: randomUUID(), tenantId, action: "employee.created", resourceType: "employee", resourceId: employee.id,
     createdAt: new Date().toISOString(), metadata: { department: employee.department },
   });
+  return clone(employee);
+}
+
+export function updateEmployee(tenantId: string, employeeId: string, input: Pick<Employee, "name" | "email" | "department"> & Partial<Pick<Employee, "privateEmail" | "address" | "couponCodes">>) {
+  const employee = state.employees.find((candidate) => candidate.tenantId === tenantId && candidate.id === employeeId);
+  if (!employee) throw new Error("EMPLOYEE_NOT_FOUND");
+  const email = normalizeEmail(input.email);
+  if (state.employees.some((candidate) => candidate.tenantId === tenantId && candidate.id !== employeeId && normalizeEmail(candidate.email) === email)) throw new Error("EMPLOYEE_ALREADY_EXISTS");
+  Object.assign(employee, { name: input.name.trim(), email, privateEmail: normalizeEmail(input.privateEmail ?? ""), address: input.address?.trim() ?? "", couponCodes: input.couponCodes?.map((code) => code.trim().toLowerCase()).filter(Boolean) ?? [], department: input.department.trim() });
+  employee.purchases = state.orders.filter((order) => order.tenantId === tenantId && (
+    [employee.email, employee.privateEmail].includes(order.email) || Boolean(employee.address && order.address && normalizeAddress(employee.address) === normalizeAddress(order.address))
+    || Boolean(order.couponCodes?.some((code) => employee.couponCodes?.includes(code)))
+  )).length;
+  state.audit.unshift({ id: randomUUID(), tenantId, action: "employee.updated", resourceType: "employee", resourceId: employeeId, createdAt: new Date().toISOString(), metadata: {} });
   return clone(employee);
 }
 
@@ -842,6 +941,19 @@ export function ingestShopifyOrder(input: { storeId: string; webhookId: string; 
 
   const payload = input.payload;
   const shopifyOrderId = String(payload.admin_graphql_api_id ?? payload.id ?? randomUUID());
+  const tags = Array.isArray(payload.tags) ? payload.tags : String(payload.tags ?? "").split(",");
+  if (tags.some((tag) => tag.trim().toLowerCase() === "external-order")) {
+    state.orders = state.orders.filter((order) => !(order.storeId === store.id && order.shopifyOrderId === shopifyOrderId));
+    const existingCase = state.cases.find((item) => item.storeId === store.id && item.context?.shopifyOrderId === shopifyOrderId);
+    if (existingCase && canReevaluate(existingCase)) {
+      existingCase.status = "resolved";
+      existingCase.reason = "הזמנה חיצונית — אינה נכללת בניתוח";
+      existingCase.resolution = { source: "automatic-rule-change", at: new Date().toISOString(), note: "להזמנה יש תג external-order והיא הוחרגה מהניתוח." };
+      existingCase.score = 0;
+      existingCase.evidence = [];
+    }
+    return { duplicate: false as const, case: null };
+  }
   const rawEmail = normalizeEmail(payload.email ?? payload.customer?.email ?? "");
   const sharedServiceEmail = isSharedServiceEmail(rawEmail);
   const email = sharedServiceEmail ? "" : rawEmail;
@@ -849,6 +961,7 @@ export function ingestShopifyOrder(input: { storeId: string; webhookId: string; 
   const ip = (payload.client_ip ?? payload.browser_ip ?? "").trim();
   const customerId = String(payload.customer?.admin_graphql_api_id ?? payload.customer?.id ?? "");
   const address = addressOf(payload);
+  const couponCodes = (payload.discount_codes ?? []).map((code) => code.trim().toLowerCase()).filter(Boolean);
   const amount = Number(payload.total_price ?? 0);
   const lineItems = payload.line_items ?? [];
   const giftCardValue = lineItems.reduce((total, item) => {
@@ -912,14 +1025,25 @@ export function ingestShopifyOrder(input: { storeId: string; webhookId: string; 
   }) || evidenceLinkedGiftSignal(store.id, shopifyOrderId);
   const existingOrder = state.orders.find((order) => order.storeId === store.id && order.shopifyOrderId === shopifyOrderId);
   const existingCaseBeforeEvaluation = state.cases.find((item) => item.storeId === store.id && (item.context?.shopifyOrderId === shopifyOrderId || (payload.name && item.orderNumber === payload.name)));
+  const newlyHighShopifyRisk = payload.risk_level === "high" && existingCaseBeforeEvaluation?.signals?.shopifyRisk !== "high";
   if (existingCaseBeforeEvaluation?.context && !existingCaseBeforeEvaluation.context.shopifyOrderId) existingCaseBeforeEvaluation.context.shopifyOrderId = shopifyOrderId;
+  if (existingCaseBeforeEvaluation?.context) {
+    existingCaseBeforeEvaluation.context.shopifyRisk = payload.risk_level ?? existingCaseBeforeEvaluation.context.shopifyRisk;
+    if (payload.shopify_risk_facts?.length) existingCaseBeforeEvaluation.context.riskFacts = payload.shopify_risk_facts;
+  }
   const recentOrders = state.orders.filter((order) => order.storeId === store.id && order.shopifyOrderId !== shopifyOrderId);
   const velocity = computeVelocitySignals({ tenantId: store.tenantId, storeId: store.id, shopifyOrderId, email, ip, phone, amount, giftCardValue, createdAt },
     recentOrders, (state.rulesByTenant.get(store.tenantId) ?? []).flatMap((rule) => rule.conditions));
   const { ordersByIpLastTwoHours: sameIp, giftCardOrdersByIpLastTwoHours: giftCardOrdersByIp, emailsByIpLastTwoHours: emailsByIp } = velocity;
   const averageOrderValue = recentOrders.length ? recentOrders.reduce((sum, order) => sum + order.amount, 0) / recentOrders.length : amount;
   const giftCardBaseline = recentOrders.length ? recentOrders.reduce((sum, order) => sum + order.giftCardValue, 0) / Math.max(1, recentOrders.length) : giftCardValue;
-  const employeeMatch = state.employees.some((employee) => employee.tenantId === store.tenantId && normalizeEmail(employee.email) === email);
+  const employeeFor = (candidate: { email: string; address: string; couponCodes?: string[] }) => state.employees.find((employee) => employee.tenantId === store.tenantId && (
+    Boolean(candidate.email && [employee.email, employee.privateEmail].some((value) => value && normalizeEmail(value) === candidate.email))
+    || Boolean(candidate.address && employee.address && normalizeAddress(employee.address) === normalizeAddress(candidate.address))
+    || Boolean(candidate.couponCodes?.some((code) => employee.couponCodes?.includes(code)))
+  ));
+  const matchedEmployee = employeeFor({ email, address, couponCodes });
+  const employeeMatch = Boolean(matchedEmployee);
 
   const signals: OrderSignals = {
     ...velocity,
@@ -931,6 +1055,8 @@ export function ingestShopifyOrder(input: { storeId: string; webhookId: string; 
     paymentFailures: Number(payload.payment_failures ?? 0),
     billingShippingMismatch: Boolean(payload.billing_address && payload.shipping_address && !sameAddress(payload.billing_address, payload.shipping_address)),
     shopifyRisk: payload.risk_level ?? "none",
+    shopifyRiskFacts: payload.shopify_risk_facts ?? [],
+    orderLocalHour: Number(new Intl.DateTimeFormat("en-US", { hour: "2-digit", hourCycle: "h23", timeZone: "Asia/Jerusalem" }).format(new Date(createdAt))),
     employeeMatch,
     refundAfterFulfillment: Boolean(payload.refund_after_fulfillment),
     blacklist: {
@@ -952,10 +1078,12 @@ export function ingestShopifyOrder(input: { storeId: string; webhookId: string; 
   const order: StoredOrder = {
     tenantId: store.tenantId, storeId: store.id,
     shopifyOrderId,
-    email, phone, address, amount, giftCardValue, ip, customerId, createdAt,
+    email, phone, address, couponCodes, amount, giftCardValue, ip, customerId, createdAt,
   };
   if (existingOrder) Object.assign(existingOrder, order);
   else state.orders.push(order);
+  if (matchedEmployee && !existingOrder) matchedEmployee.purchases += 1;
+  if (matchedEmployee && input.topic === "refunds/create" && payload.refund_after_fulfillment) matchedEmployee.refunded += 1;
   const orderTime = new Date(createdAt).getTime();
   const now = new Date();
   const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
@@ -966,6 +1094,34 @@ export function ingestShopifyOrder(input: { storeId: string; webhookId: string; 
   }
 
   const result = evaluateRisk(signals, new Date(createdAt), state.rulesByTenant.get(store.tenantId) ?? []);
+  const employeeSettings = getEmployeeSettings(store.tenantId);
+  const employeeFindings: string[] = [];
+  if (matchedEmployee && employeeSettings.zeroAmount && amount === 0) employeeFindings.push(`הזמנה בסכום ₪0 תואמת לפרטי העובד ${matchedEmployee.name}.`);
+  const employeeRedemptions = redeemedGiftCards.flatMap((redemption) => {
+    const card = storeGiftCards.find((candidate) => candidate.giftCardId === redemption.giftCardId);
+    const purchase = state.orders.find((candidate) => candidate.storeId === store.id && candidate.shopifyOrderId === card?.purchaseOrderId);
+    const sourceEmployee = purchase ? employeeFor(purchase) : undefined;
+    return sourceEmployee && purchase ? [{ redemption, card, purchase, sourceEmployee }] : [];
+  });
+  if (employeeSettings.giftCardAddressChange && employeeRedemptions.some(({ purchase }) => purchase.address && address && normalizeAddress(purchase.address) !== normalizeAddress(address))) {
+    employeeFindings.push("Gift Card שנרכש באמצעות פרטי עובד מומש בהזמנה עם כתובת אחרת.");
+  }
+  if (employeeSettings.repeatGiftCardUses) {
+    const end = Date.parse(createdAt);
+    const uses = new Set(employeeRedemptions.flatMap(({ sourceEmployee }) => storeGiftCards.filter((card) => {
+      const purchase = state.orders.find((candidate) => candidate.storeId === store.id && candidate.shopifyOrderId === card.purchaseOrderId);
+      return purchase && employeeFor(purchase)?.id === sourceEmployee.id;
+    }).flatMap((card) => card.redemptions.filter((redemption) => {
+      const time = Date.parse(redemption.redeemedAt);
+      return Number.isFinite(time) && time <= end && time > end - employeeSettings.windowMinutes * 60_000;
+    }).map((redemption) => redemption.transactionId ?? `${redemption.giftCardId}:${redemption.orderId}`))));
+    if (uses.size >= employeeSettings.repeatUsesThreshold) employeeFindings.push(`${uses.size} מימושי Gift Card הקשורים לעובד בתוך ${employeeSettings.windowMinutes} דקות.`);
+  }
+  if (employeeFindings.length) {
+    result.evidence.unshift({ id: `employee-${shopifyOrderId}`, label: "ניטור עובדים", description: employeeFindings.join(" "), source: "employee", delta: 72, timestamp: createdAt });
+    result.score = Math.max(result.score, 72);
+    if (result.severity === "low" || result.severity === "medium") result.severity = "high";
+  }
   for (const ruleId of result.matchedRuleIds) {
     const matchedRule = state.rulesByTenant.get(store.tenantId)?.find((rule) => rule.id === ruleId);
     if (matchedRule && (!existingOrder || !existingCaseBeforeEvaluation?.evidence.some((evidence) => evidence.label === matchedRule.label))) matchedRule.matches += 1;
@@ -982,7 +1138,7 @@ export function ingestShopifyOrder(input: { storeId: string; webhookId: string; 
     const wasEligible = canReevaluate(existingCase);
     applyRiskResult(existingCase, signals, result);
     refreshGiftCardLinks(store.id);
-    return { duplicate: false as const, case: wasEligible && result.score > previousScore ? clone(existingCase) : null, risk: result };
+    return { duplicate: false as const, case: wasEligible && (result.score > previousScore || newlyHighShopifyRisk) ? clone(existingCase) : null, risk: result };
   }
   const fraudCase: FraudCase = {
     id: randomUUID(), tenantId: store.tenantId, storeId: store.id, storeName: store.name,
