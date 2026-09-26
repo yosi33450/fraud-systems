@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { getStoreConnection, resolveStore } from "@/lib/operational-store";
+import { resolveStore } from "@/lib/operational-store";
+import { getFreshStoreConnection } from "@/lib/shopify-connection.server";
 import { hydrateOperationalState } from "@/lib/persistence.server";
 import { shopifyAdminRequest } from "@/lib/shopify-admin.server";
 
@@ -28,7 +29,7 @@ export async function GET(request: Request, context: { params: Promise<{ tenantI
   if (!store || store.tenantId !== tenantId) return NextResponse.json({ error: "STORE_NOT_FOUND" }, { status: 404 });
   if (!/^[a-z0-9_-]{2,24}$/.test(prefix)) return NextResponse.json({ error: "INVALID_PREFIX" }, { status: 400 });
   try {
-    const connection = getStoreConnection(tenantId, storeId);
+    const connection = await getFreshStoreConnection(tenantId, storeId);
     const codes = new Set<string>();
     let after: string | null = null;
     for (let page = 0; page < 40; page++) {

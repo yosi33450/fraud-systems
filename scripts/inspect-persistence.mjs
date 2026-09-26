@@ -39,6 +39,7 @@ function summary(text) {
     deliveries: state.deliveries?.length ?? 0,
     audit: state.audit?.length ?? 0,
     storeConnections: state.storeConnections?.length ?? 0,
+    latestConnectionExpiry: state.storeConnections?.reduce((latest, [, connection]) => connection.expiresAt > latest ? connection.expiresAt : latest, "") ?? "",
     latestOrderAt: state.orders?.reduce((latest, order) => order.createdAt > latest ? order.createdAt : latest, "") ?? "",
   };
 }

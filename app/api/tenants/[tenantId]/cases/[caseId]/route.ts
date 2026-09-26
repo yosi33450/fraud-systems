@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { decideCase, getStoreConnection } from "@/lib/operational-store";
+import { decideCase } from "@/lib/operational-store";
+import { getFreshStoreConnection } from "@/lib/shopify-connection.server";
 import { tagBlockedCustomer } from "@/lib/shopify-admin.server";
 import type { CaseStatus } from "@/lib/types";
 import { hydrateOperationalState, persistOperationalState } from "@/lib/persistence.server";
@@ -19,7 +20,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ tenan
     let shopifyBlock: "not-needed" | "tagged" | "pending" = "not-needed";
     if (status === "fraud" && item.context?.customerId) {
       try {
-        const connection = getStoreConnection(tenantId, item.storeId);
+        const connection = await getFreshStoreConnection(tenantId, item.storeId);
         await tagBlockedCustomer({ shopDomain: connection.store.domain, accessToken: connection.accessToken, customerId: item.context.customerId });
         shopifyBlock = "tagged";
       } catch (blockError) {

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { getStoreConnection, pendingVelocityPolicyOrders, reevaluateOpenCases, repairVelocityPolicy } from "@/lib/operational-store";
+import { pendingVelocityPolicyOrders, reevaluateOpenCases, repairVelocityPolicy } from "@/lib/operational-store";
+import { getFreshStoreConnection } from "@/lib/shopify-connection.server";
 import { hydrateOperationalState, persistOperationalState } from "@/lib/persistence.server";
 import { hydrateGiftEvidence } from "@/lib/gift-card-persistence.server";
 import { syncShopifyOrderGiftCards } from "@/lib/shopify-sync.server";
@@ -22,7 +23,7 @@ export async function POST(request: Request, context: { params: Promise<{ tenant
     // Bounded and retryable; never send historical owner emails during repair.
     for (const order of pending.slice(0, 10)) {
       try {
-        const connection = getStoreConnection(tenantId, order.storeId);
+        const connection = await getFreshStoreConnection(tenantId, order.storeId);
         const result = await syncShopifyOrderGiftCards({ tenantId, ...order,
           shopDomain: connection.store.domain, accessToken: connection.accessToken,
           topic: "HISTORICAL_SYNC", webhookId: `velocity-v3:${order.orderId}` });

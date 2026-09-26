@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { getStoreConnection, releaseBlacklistCase } from "@/lib/operational-store";
+import { releaseBlacklistCase } from "@/lib/operational-store";
+import { getFreshStoreConnection } from "@/lib/shopify-connection.server";
 import { untagBlockedCustomer } from "@/lib/shopify-admin.server";
 import { hydrateOperationalState, persistOperationalState } from "@/lib/persistence.server";
 
@@ -13,7 +14,7 @@ export async function DELETE(_request: Request, context: { params: Promise<{ ten
     let shopifyRelease: "not-needed" | "released" | "pending" = "not-needed";
     if (result.case.context?.customerId) {
       try {
-        const connection = getStoreConnection(tenantId, result.case.storeId);
+        const connection = await getFreshStoreConnection(tenantId, result.case.storeId);
         await untagBlockedCustomer({ shopDomain: connection.store.domain, accessToken: connection.accessToken, customerId: result.case.context.customerId });
         shopifyRelease = "released";
       } catch (releaseError) {

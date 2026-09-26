@@ -34,6 +34,8 @@ Copy `.env.example` to `.env.local` and set:
 
 Local development stores the same encrypted snapshot under `.data/`. The directory is excluded from Git. Production deployments fail closed when neither private Vercel Blob nor Supabase persistence is configured, preventing accidental use of ephemeral serverless memory.
 
+For legacy Shopify organization connections, set server-only `SHOPIFY_CLIENT_ID`. Newly connected stores save their client ID in the encrypted state. Expiring Shopify access tokens are renewed automatically with the existing app credentials; no merchant reconnection is required while those credentials remain valid.
+
 ## Database setup
 
 Apply `db/migrations/001_shield_ledger_state.sql` to a Supabase project, then configure the server-side environment variables above. The pilot table has RLS enabled, grants no access to `anon` or `authenticated`, and stores only an AES-256-GCM encrypted payload. Do not enable `PERSISTENCE_BACKEND=supabase` while the table is empty: this would start the app without its store connection, cases, and decisions. Preserve the old Blob and encryption key until the imported snapshot's counts and checksum have been verified. A normalized schema for the production multi-tenant version remains in `db/schema.sql`.

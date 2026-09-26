@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getStoreConnection } from "@/lib/operational-store";
+import { getFreshStoreConnection } from "@/lib/shopify-connection.server";
 import { ensureOrderWebhooks } from "@/lib/shopify-admin.server";
 import { syncOrdersPage } from "@/lib/shopify-sync.server";
 import { hydrateOperationalState, persistOperationalState } from "@/lib/persistence.server";
@@ -10,7 +10,7 @@ export async function POST(request: Request, context: { params: Promise<{ tenant
   await hydrateOperationalState();
   const { tenantId, storeId } = await context.params;
   try {
-    const connection = getStoreConnection(tenantId, storeId);
+    const connection = await getFreshStoreConnection(tenantId, storeId);
     const body = await request.json().catch(() => ({})) as { since?: string; after?: string | null; scanned?: number };
     const lowerBound = Date.now() - 31 * 86_400_000;
     const since = body.since && Number.isFinite(Date.parse(body.since)) && Date.parse(body.since) >= lowerBound && Date.parse(body.since) <= Date.now()

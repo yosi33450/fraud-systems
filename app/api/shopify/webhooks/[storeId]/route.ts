@@ -1,6 +1,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
-import { getStoreConnection, getStoreWebhookSecret, ingestShopifyOrder, resolveStore } from "@/lib/operational-store";
+import { getStoreWebhookSecret, ingestShopifyOrder, resolveStore } from "@/lib/operational-store";
+import { getFreshStoreConnection } from "@/lib/shopify-connection.server";
 import { notifyStoreOwners } from "@/lib/email-notifications.server";
 import { hydrateOperationalState, persistOperationalState } from "@/lib/persistence.server";
 import { syncShopifyOrderGiftCards } from "@/lib/shopify-sync.server";
@@ -54,7 +55,7 @@ export async function POST(request: Request, context: { params: Promise<{ storeI
         : orderPayload.admin_graphql_api_id ?? orderPayload.id;
       if (!rawOrderId) return NextResponse.json({ error: "ORDER_ID_MISSING" }, { status: 400 });
       const orderId = String(rawOrderId).startsWith("gid://") ? String(rawOrderId) : `gid://shopify/Order/${rawOrderId}`;
-      const connection = getStoreConnection(store.tenantId, storeId);
+      const connection = await getFreshStoreConnection(store.tenantId, storeId);
       result = await syncShopifyOrderGiftCards({
         tenantId: store.tenantId,
         storeId,

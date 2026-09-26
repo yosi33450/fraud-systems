@@ -112,7 +112,7 @@ type OperationalState = {
   giftCards: StoredGiftCard[];
   giftCardOrders: GiftCardOrderEvidence[];
   audit: AuditEntry[];
-  storeConnections: Map<string, { accessToken: string; expiresAt: string; webhookSecret?: string }>;
+  storeConnections: Map<string, { accessToken: string; expiresAt: string; webhookSecret?: string; clientId?: string }>;
 };
 
 export type PersistedOperationalState = {
@@ -132,7 +132,7 @@ export type PersistedOperationalState = {
   giftCards?: StoredGiftCard[];
   giftCardOrders?: GiftCardOrderEvidence[];
   audit: AuditEntry[];
-  storeConnections: Array<[string, { accessToken: string; expiresAt: string; webhookSecret?: string }]>;
+  storeConnections: Array<[string, { accessToken: string; expiresAt: string; webhookSecret?: string; clientId?: string }]>;
 };
 
 const clone = <T,>(value: T): T => structuredClone(value);
@@ -756,6 +756,7 @@ export function connectShopifyStore(input: {
   name: string;
   domain: string;
   accessToken: string;
+  clientId: string;
   clientSecret: string;
   expiresIn: number;
 }) {
@@ -772,6 +773,7 @@ export function connectShopifyStore(input: {
   if (!existing) state.stores.unshift(store);
   state.storeConnections.set(store.id, {
     accessToken: input.accessToken,
+    clientId: input.clientId,
     webhookSecret: input.clientSecret,
     expiresAt: new Date(Date.now() + input.expiresIn * 1000).toISOString(),
   });
@@ -783,11 +785,24 @@ export function connectShopifyStore(input: {
 }
 
 export function getStoreConnection(tenantId: string, storeId: string) {
+  const connection = getStoreConnectionForRefresh(tenantId, storeId);
+  if (new Date(connection.expiresAt).getTime() <= Date.now()) throw new Error("SHOPIFY_TOKEN_EXPIRED");
+  return connection;
+}
+
+export function getStoreConnectionForRefresh(tenantId: string, storeId: string) {
   const store = tenantStore(tenantId, storeId);
   const connection = state.storeConnections.get(storeId);
   if (!connection) throw new Error("STORE_CONNECTION_NOT_FOUND");
-  if (new Date(connection.expiresAt).getTime() <= Date.now()) throw new Error("SHOPIFY_TOKEN_EXPIRED");
   return { store: clone(store), ...clone(connection) };
+}
+
+export function updateStoreAccessToken(tenantId: string, storeId: string, accessToken: string, expiresIn: number) {
+  tenantStore(tenantId, storeId);
+  const connection = state.storeConnections.get(storeId);
+  if (!connection) throw new Error("STORE_CONNECTION_NOT_FOUND");
+  connection.accessToken = accessToken;
+  connection.expiresAt = new Date(Date.now() + expiresIn * 1000).toISOString();
 }
 
 export function getStoreWebhookSecret(storeId: string) {

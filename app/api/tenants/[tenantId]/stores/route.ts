@@ -29,6 +29,7 @@ export async function POST(request: Request, context: { params: Promise<{ tenant
       name: data.shop.name,
       domain: data.shop.myshopifyDomain,
       accessToken: token.accessToken,
+      clientId: String(clientId),
       clientSecret: String(clientSecret),
       expiresIn: token.expiresIn,
     });

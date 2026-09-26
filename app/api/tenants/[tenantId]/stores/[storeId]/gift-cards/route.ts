@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { getStoreConnection, resolveStore, giftCardAlertOrderIds } from "@/lib/operational-store";
+import { resolveStore, giftCardAlertOrderIds } from "@/lib/operational-store";
+import { getFreshStoreConnection } from "@/lib/shopify-connection.server";
 import { hydrateOperationalState } from "@/lib/persistence.server";
 import { scanGiftEvidencePage, syncGiftEvidenceForOrder } from "@/lib/gift-card-sync.server";
 import { ensureOrderWebhooks } from "@/lib/shopify-admin.server";
@@ -17,7 +18,7 @@ export async function POST(request: Request, context: { params: Promise<{ tenant
     console.info(JSON.stringify({ route: "gift-ledger-scan", event: "start", requestId: request.headers.get("x-vercel-id") }));
     const body = await request.json() as { mode?: string; after?: string | null; since?: string; until?: string };
     if (body.mode && !["alerts", "all"].includes(body.mode)) return NextResponse.json({ error: "INVALID_SCAN" }, { status: 400 });
-    const connection = { tenantId, storeId, shopDomain: store.domain, accessToken: getStoreConnection(tenantId, storeId).accessToken };
+    const connection = { tenantId, storeId, shopDomain: store.domain, accessToken: (await getFreshStoreConnection(tenantId, storeId)).accessToken };
     const until = body.until ?? new Date().toISOString();
     const since = body.since ?? new Date(Date.parse(until) - 30 * 86400000).toISOString();
     const interval = Date.parse(until) - Date.parse(since);
