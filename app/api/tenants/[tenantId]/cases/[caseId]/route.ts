@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { decideCase } from "@/lib/operational-store";
+import { decideCase, relatedOpenCases } from "@/lib/operational-store";
 import { getFreshStoreConnection } from "@/lib/shopify-connection.server";
 import { tagBlockedCustomer } from "@/lib/shopify-admin.server";
 import type { CaseStatus } from "@/lib/types";
@@ -12,11 +12,17 @@ export async function PATCH(request: Request, context: { params: Promise<{ tenan
   const { tenantId, caseId } = await context.params;
   const body: unknown = await request.json().catch(() => null);
   const status = body && typeof body === "object" && "status" in body ? (body as { status?: unknown }).status : null;
+  const includeRelated = body && typeof body === "object" && "includeRelated" in body ? (body as { includeRelated?: unknown }).includeRelated : false;
   if (typeof status !== "string" || !allowedStatuses.has(status as CaseStatus)) {
     return NextResponse.json({ error: "INVALID_CASE_STATUS" }, { status: 400 });
   }
+  if (typeof includeRelated !== "boolean" || (includeRelated && status !== "fraud")) return NextResponse.json({ error: "INVALID_SCOPE" }, { status: 400 });
   try {
+    const targets = includeRelated ? relatedOpenCases(tenantId, caseId) : [];
     const item = decideCase(tenantId, caseId, status as CaseStatus);
+    const cases = includeRelated ? targets.filter((target) => target.id !== caseId).map((target) => decideCase(tenantId, target.id, "fraud")) : [];
+    // Keep the internal decision durable even if Shopify's customer-tag request is slow.
+    await persistOperationalState();
     let shopifyBlock: "not-needed" | "tagged" | "pending" = "not-needed";
     if (status === "fraud" && item.context?.customerId) {
       try {
@@ -28,8 +34,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ tenan
         console.error("[shopify-block] customer tag pending", { tenantId, caseId, code: blockError instanceof Error ? blockError.message : "TAG_FAILED" });
       }
     }
-    await persistOperationalState();
-    return NextResponse.json({ case: item, shopifyBlock });
+    return NextResponse.json({ case: item, cases, shopifyBlock });
   } catch (error) {
     const message = error instanceof Error ? error.message : "CASE_UPDATE_FAILED";
     return NextResponse.json({ error: message }, { status: message === "CASE_NOT_FOUND" ? 404 : 500 });

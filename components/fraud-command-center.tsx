@@ -98,6 +98,7 @@ export function FraudCommandCenter() {
   useEffect(() => { window.scrollTo({ top: 0, left: 0, behavior: "instant" }); }, [view]);
   const [selectedCase, setSelectedCase] = useState<FraudCase | null>(null);
   const [decisionNotice, setDecisionNotice] = useState("");
+  const [decisionVersion, setDecisionVersion] = useState(0);
   const [caseData, setCaseData] = useState(initialCases);
   const [giftLedger, setGiftLedger] = useState<DashboardSnapshot["giftCardLedger"]>();
   const [query, setQuery] = useState("");
@@ -191,21 +192,29 @@ export function FraudCommandCenter() {
     if (new URLSearchParams(window.location.search).get("view") === "gift-cards") setView("gift-cards");
   }, []);
 
-  const decideCase = async (status: CaseStatus) => {
+  const decideCase = async (status: CaseStatus, includeRelated = false) => {
     if (!selectedCase) return;
     const previous = selectedCase;
     setCaseData((current) => current.map((item) => item.id === selectedCase.id ? { ...item, status } : item));
     setSelectedCase((current) => current ? { ...current, status } : current);
     try {
       const response = await fetch(`/api/tenants/${tenantId}/cases/${selectedCase.id}`, {
-        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status }),
+        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status, includeRelated }),
       });
       if (!response.ok) throw new Error("CASE_UPDATE_FAILED");
-      const payload = await response.json() as { case: FraudCase; shopifyBlock?: "not-needed" | "tagged" | "pending" };
-      setCaseData((current) => current.map((item) => item.id === payload.case.id ? payload.case : item));
-      setSelectedCase(payload.case);
-      setDecisionNotice(status === "fraud" ? `ההונאה אושרה וזיהויי הלקוח נוספו למאגר ההתאמות המוצפן.${payload.shopifyBlock === "tagged" ? " הלקוח סומן גם ב־Shopify." : payload.shopifyBlock === "pending" ? " סימון הלקוח ב־Shopify טרם הושלם." : ""} המאגר מתריע על רכישות נוספות; הוא אינו חוסם תשלום בקופה.` : "סטטוס התיק עודכן.");
-      if (status === "fraud") void refreshSnapshot();
+      const payload = await response.json() as { case: FraudCase; cases?: FraudCase[]; shopifyBlock?: "not-needed" | "tagged" | "pending" };
+      const updated = [payload.case, ...(payload.cases ?? [])];
+      const byId = new Map(updated.map((item) => [item.id, item]));
+      setCaseData((current) => current.map((item) => byId.get(item.id) ?? item));
+      if (status === "fraud") {
+        setSelectedCase(null);
+        setDecisionVersion((value) => value + 1);
+        setDecisionNotice(`${updated.length} ${updated.length === 1 ? "הזמנה סומנה" : "הזמנות סומנו"} כהונאה וזיהויי הלקוחות נוספו למאגר ההתאמות.${payload.shopifyBlock === "tagged" ? " הלקוח סומן גם ב־Shopify." : payload.shopifyBlock === "pending" ? " סימון הלקוח ב־Shopify טרם הושלם." : ""} המאגר מתריע בלבד ואינו חוסם תשלום.`);
+        void refreshSnapshot();
+      } else {
+        setSelectedCase(payload.case);
+        setDecisionNotice("סטטוס התיק עודכן.");
+      }
     } catch {
       setCaseData((current) => current.map((item) => item.id === previous.id ? previous : item));
       setSelectedCase(previous);
@@ -386,9 +395,11 @@ export function FraudCommandCenter() {
             <button className="icon-button notification-button" onClick={() => setView("notifications")} aria-label="הגדרות התראות"><Bell size={19} /><span /></button>
           </div>
         </header>
+        {decisionNotice && !selectedCase ? <div className="decision-toast" role="status"><CheckCircle2 size={18} /><span>{decisionNotice}</span><button className="icon-button" onClick={() => setDecisionNotice("")} aria-label="סגירת הודעה"><X size={17} /></button></div> : null}
 
         {view === "overview" || view === "cases" ? (
           <Overview
+            key={`${view}-${decisionVersion}`}
             cases={visibleCases}
             ledger={giftLedger}
             query={query}
@@ -418,7 +429,7 @@ export function FraudCommandCenter() {
         {view === "platform" ? <PlatformScreen /> : null}
       </main>
 
-      {selectedCase ? <InvestigationDrawer item={selectedCase} storeDomain={storeData.find((store) => store.id === selectedCase.storeId)?.domain} notice={decisionNotice} onClose={() => setSelectedCase(null)} onDecide={decideCase} /> : null}
+      {selectedCase ? <InvestigationDrawer item={selectedCase} storeDomain={storeData.find((store) => store.id === selectedCase.storeId)?.domain} notice={decisionNotice} relatedCount={relatedCaseCount(caseData, selectedCase)} onClose={() => setSelectedCase(null)} onDecide={decideCase} /> : null}
       {connectOpen ? <ConnectStoreDialog onClose={() => setConnectOpen(false)} onConnect={connectShopifyStore} /> : null}
     </div>
   );
@@ -443,6 +454,16 @@ type CaseCluster = {
 
 const severityOrder: Record<Severity, number> = { low: 0, medium: 1, high: 2, critical: 3 };
 const isRealEmail = (value: string) => value.includes("@") && !value.startsWith("לא זמין");
+
+function relatedCaseCount(cases: FraudCase[], source: FraudCase): number {
+  const email = source.email.trim().toLowerCase();
+  const realEmail = isRealEmail(email) && !isPayPlusPlaceholder(source) && !/general-customer@payplus/i.test(email);
+  const customerId = realEmail ? source.context?.customerId : undefined;
+  return cases.filter((item) => item.storeId === source.storeId && item.tenantId === source.tenantId
+    && ["new", "review", "action"].includes(item.status)
+    && (item.id === source.id || (realEmail && item.email.trim().toLowerCase() === email)
+      || (customerId && !isPayPlusPlaceholder(item) && customerId === item.context?.customerId))).length;
+}
 
 function clusterCases(items: FraudCase[]): CaseCluster[] {
   const parents = items.map((_, index) => index);
@@ -627,7 +648,8 @@ function GiftCardTrail({ item }: { item: FraudCase }) {
   </section>;
 }
 
-function InvestigationDrawer({ item, storeDomain, notice, onClose, onDecide }: { item: FraudCase; storeDomain?: string; notice: string; onClose: () => void; onDecide: (status: CaseStatus) => void }) {
+function InvestigationDrawer({ item, storeDomain, notice, relatedCount, onClose, onDecide }: { item: FraudCase; storeDomain?: string; notice: string; relatedCount: number; onClose: () => void; onDecide: (status: CaseStatus, includeRelated?: boolean) => void }) {
+  const [confirmingFraud, setConfirmingFraud] = useState(false);
   const closedByRules = isAutomaticallyResolved(item);
   const numericOrderId = item.context?.shopifyOrderId?.match(/\d+$/)?.[0];
   const shopifyUrl = storeDomain && numericOrderId ? `https://${storeDomain}/admin/orders/${numericOrderId}` : null;
@@ -641,12 +663,12 @@ function InvestigationDrawer({ item, storeDomain, notice, onClose, onDecide }: {
       <div className="drawer-body">
         <section className={`case-summary-strip ${closedByRules ? "case-summary-resolved" : ""}`}><div><span>{closedByRules ? "מצב התראה" : "סיבת ההתראה"}</span><h3>{closedByRules ? "ההתראה אינה פעילה" : item.reason}</h3><p>{closedByRules ? item.resolution?.note ?? "ההזמנה אינה עומדת כרגע באף חוק סיכון פעיל. לא התקבלה החלטה אנושית לגביה." : "המערכת מציגה את העובדות שנמצאו. ההחלטה נשארת בידי בעל החנות."}</p></div><dl><div><dt>ציון</dt><dd>{item.score}</dd></div><div><dt>תנאים</dt><dd>{item.evidence.length}</dd></div><div><dt>סכום</dt><dd>{formatCurrency(item.amount)}</dd></div></dl></section>
         <div className="drawer-grid">
-          <section className="evidence-section"><div className="section-heading"><div><h3>ספר הראיות</h3><span>התנאים שהתקיימו בפועל, לפי זמן ומקור</span></div></div><div className="evidence-columns" aria-hidden="true"><span>מקור</span><span>תנאי ותוצאה</span><span>זמן</span></div><div className="evidence-ledger">{item.evidence.map((evidence) => <article key={evidence.id} className="evidence-node"><span className={`evidence-source source-${evidence.source}`}>{sourceLabels[evidence.source]}</span><div className="evidence-finding"><h4>{evidence.label}</h4><p>{evidence.description}</p></div><time className="evidence-time mono">{formatEvidenceTime(evidence.timestamp)}</time></article>)}</div></section>
-          <details className="order-context"><summary>פרטי ההזמנה והקשר ללקוח <ChevronDown size={17} /></summary><div className="order-context-details"><h3>זהות והקשר להזמנה</h3><p className="context-note">הפרטים עוזרים לחבר בין עסקאות. כתובת IP לבדה אינה מזהה אדם בוודאות.</p>{missingBuyerIdentity ? <div className="identity-data-notice"><Info size={18} /><div><strong>{isPayPlusPlaceholder(item) ? "PayPlus העבירה ל-Shopify לקוח טכני, לא את זהות הקונה" : "Shopify לא החזירה שם לקוח להזמנה"}</strong><span>{item.context?.phone ? "קיים מספר טלפון ולכן אפשר לזהות ולקשר לפי הטלפון." : "לא התקבלו מספיק פרטי קשר כדי לזהות את האדם או לקשר אותו להזמנות אחרות."}</span></div></div> : null}<div className="identity-grid"><div><span><Wifi size={15} /> כתובת IP</span><strong className="mono">{item.context?.ip || "לא התקבלה מ־Shopify"}</strong></div><div><span><CreditCard size={15} /> אמצעי תשלום</span><strong>{item.context?.paymentGateways.join(", ") || "לא התקבל"}</strong></div><div><span><MapPin size={15} /> כתובת משלוח</span><strong>{item.context?.address || "לא התקבלה מ־Shopify"}</strong></div><div><span><Phone size={15} /> טלפון</span><strong className="mono">{item.context?.phone || "לא התקבל מ־Shopify"}</strong></div></div>{item.context?.ip ? <p className="context-note">ב־2 השעות האחרונות זוהו מה־IP הזה <strong>{item.context.ipOrderCountLastTwoHours ?? 1} הזמנות</strong>, מתוכן <strong>{item.context.ipGiftCardOrderCountLastTwoHours ?? 0} רכישות Gift Card</strong>, באמצעות <strong>{item.context.ipDistinctEmailsLastTwoHours ?? 1} אימיילים שונים</strong>.</p> : null}{item.context?.riskFacts.length ? <div className="shopify-risk-facts"><strong>אותות סיכון מ־Shopify</strong><ul>{item.context.riskFacts.map((fact) => <li key={fact}>{fact}</li>)}</ul></div> : null}<GiftCardTrail item={item} /><h3>פרטי ההזמנה</h3><dl><div><dt>לקוח</dt><dd>{customerDisplayName(item)}</dd></div><div><dt>אימייל</dt><dd className="mono">{isRealEmail(item.email) ? item.email : "לא התקבל מ־Shopify"}</dd></div><div><dt>סכום</dt><dd className="mono">{formatCurrency(item.amount)}</dd></div><div><dt>חנות</dt><dd>{item.storeName}</dd></div></dl><h4>פריטים</h4><ul>{item.items.map((product) => <li key={product.name}><span>{product.quantity}× {product.name}</span><strong className="mono">{formatCurrency(product.quantity * product.price)}</strong></li>)}</ul>{shopifyUrl ? <a className="secondary-button full-button" href={shopifyUrl} target="_blank" rel="noopener noreferrer">פתח ב-Shopify <ExternalLink size={14} /></a> : <span className="context-note">קישור Shopify אינו זמין: מזהה ההזמנה או דומיין החנות חסרים.</span>}</div></details>
+          <details className="evidence-section"><summary>ספר הראיות <span>{item.evidence.length} תנאים</span><ChevronDown size={16} /></summary><div className="evidence-ledger">{item.evidence.map((evidence) => <article key={evidence.id} className="evidence-node"><span className={`evidence-source source-${evidence.source}`}>{sourceLabels[evidence.source]}</span><div className="evidence-finding"><h4>{evidence.label}</h4><p>{evidence.description}</p></div><time className="evidence-time mono">{formatEvidenceTime(evidence.timestamp)}</time></article>)}</div></details>
+          <details className="order-context" open><summary>פרטי ההזמנה והקשר ללקוח <ChevronDown size={17} /></summary><div className="order-context-details"><h3>זהות והקשר להזמנה</h3><p className="context-note">הפרטים עוזרים לחבר בין עסקאות. כתובת IP לבדה אינה מזהה אדם בוודאות.</p>{missingBuyerIdentity ? <div className="identity-data-notice"><Info size={18} /><div><strong>{isPayPlusPlaceholder(item) ? "PayPlus העבירה ל-Shopify לקוח טכני, לא את זהות הקונה" : "Shopify לא החזירה שם לקוח להזמנה"}</strong><span>{item.context?.phone ? "קיים מספר טלפון ולכן אפשר לזהות ולקשר לפי הטלפון." : "לא התקבלו מספיק פרטי קשר כדי לזהות את האדם או לקשר אותו להזמנות אחרות."}</span></div></div> : null}<div className="identity-grid"><div><span><Wifi size={15} /> כתובת IP</span><strong className="mono">{item.context?.ip || "לא התקבלה מ־Shopify"}</strong></div><div><span><CreditCard size={15} /> אמצעי תשלום</span><strong>{item.context?.paymentGateways.join(", ") || "לא התקבל"}</strong></div><div><span><MapPin size={15} /> כתובת משלוח</span><strong>{item.context?.address || "לא התקבלה מ־Shopify"}</strong></div><div><span><Phone size={15} /> טלפון</span><strong className="mono">{item.context?.phone || "לא התקבל מ־Shopify"}</strong></div></div>{item.context?.ip ? <p className="context-note">ב־2 השעות האחרונות זוהו מה־IP הזה <strong>{item.context.ipOrderCountLastTwoHours ?? 1} הזמנות</strong>, מתוכן <strong>{item.context.ipGiftCardOrderCountLastTwoHours ?? 0} רכישות Gift Card</strong>, באמצעות <strong>{item.context.ipDistinctEmailsLastTwoHours ?? 1} אימיילים שונים</strong>.</p> : null}{item.context?.riskFacts.length ? <div className="shopify-risk-facts"><strong>אותות סיכון מ־Shopify</strong><ul>{item.context.riskFacts.map((fact) => <li key={fact}>{fact}</li>)}</ul></div> : null}<GiftCardTrail item={item} /><h3>פרטי ההזמנה</h3><dl><div><dt>לקוח</dt><dd>{customerDisplayName(item)}</dd></div><div><dt>אימייל</dt><dd className="mono">{isRealEmail(item.email) ? item.email : "לא התקבל מ־Shopify"}</dd></div><div><dt>סכום</dt><dd className="mono">{formatCurrency(item.amount)}</dd></div><div><dt>חנות</dt><dd>{item.storeName}</dd></div></dl><h4>פריטים</h4><ul>{item.items.map((product) => <li key={product.name}><span>{product.quantity}× {product.name}</span><strong className="mono">{formatCurrency(product.quantity * product.price)}</strong></li>)}</ul>{shopifyUrl ? <a className="secondary-button full-button" href={shopifyUrl} target="_blank" rel="noopener noreferrer">פתח ב-Shopify <ExternalLink size={14} /></a> : <span className="context-note">קישור Shopify אינו זמין: מזהה ההזמנה או דומיין החנות חסרים.</span>}</div></details>
         </div>
       </div>
       {notice ? <p className="case-decision-notice" role="status">{notice}</p> : null}
-      <footer className="decision-bar"><div><span>סטטוס נוכחי</span><strong>{closedByRules ? "נסגר לפי החוקים" : caseStatusLabel(item)}</strong></div>{closedByRules ? <span className="decision-explanation">שינוי בחוקים שיחזיר התאמה יפתח את ההתראה מחדש אוטומטית.</span> : <div className="decision-actions">{item.status === "new" ? <button className="secondary-button" onClick={() => onDecide("review")}>העבר לבדיקה</button> : null}<button className="secondary-button" onClick={() => onDecide("false-positive")}>לא חשוד</button><button className="secondary-button" onClick={() => onDecide("resolved")}><CheckCircle2 size={16} /> סגור כטופל</button>{item.status !== "fraud" ? <button className="danger-button" onClick={() => onDecide("fraud")}><ShieldAlert size={16} /> אשר הונאה והוסף לחסימה</button> : null}</div>}</footer>
+      <footer className="decision-bar"><div><span>סטטוס נוכחי</span><strong>{closedByRules ? "נסגר לפי החוקים" : caseStatusLabel(item)}</strong></div>{closedByRules ? <span className="decision-explanation">שינוי בחוקים שיחזיר התאמה יפתח את ההתראה מחדש אוטומטית.</span> : confirmingFraud ? <div className="fraud-confirm"><strong>לאשר הונאה?</strong><span>רק הזמנות של אותו אימייל או מזהה לקוח באותה חנות. מימושים של לקוח אחר ו־IP משותף לא נכללים.</span><div><button className="secondary-button" onClick={() => setConfirmingFraud(false)}>ביטול</button><button className="danger-button" onClick={() => onDecide("fraud")}>רק הזמנה זו</button>{relatedCount > 1 ? <button className="danger-button" onClick={() => onDecide("fraud", true)}>כל {relatedCount} ההזמנות של אותו לקוח</button> : null}</div></div> : <div className="decision-actions">{item.status === "new" ? <button className="secondary-button" onClick={() => onDecide("review")}>העבר לבדיקה</button> : null}<button className="secondary-button" onClick={() => onDecide("false-positive")}>לא חשוד</button><button className="secondary-button" onClick={() => onDecide("resolved")}><CheckCircle2 size={16} /> סגור כטופל</button>{item.status !== "fraud" ? <button className="danger-button" onClick={() => setConfirmingFraud(true)}><ShieldAlert size={16} /> אשר הונאה והוסף לחסימה</button> : null}</div>}</footer>
   </CenteredDialog>;
 }
 
@@ -750,7 +772,7 @@ function EmployeesScreen({ employees, settings, stores, onCreate, onUpdate, onSa
       <label>חלון זמן בשעות<input type="number" min="1" value={Math.max(1, draft.windowMinutes / 60)} onChange={(event) => setDraft({ ...draft, windowMinutes: Number(event.target.value) * 60 })} /></label>
       <label>תחילית קופונים של עובדים<input dir="ltr" value={draft.couponPrefix} onChange={(event) => setDraft({ ...draft, couponPrefix: event.target.value })} placeholder="oved" /></label>
       <label>חנות לסריקת קופונים<select value={couponStoreId} onChange={(event) => setCouponStoreId(event.target.value)}>{stores.map((store) => <option key={store.id} value={store.id}>{store.name}</option>)}</select></label>
-    </div><div className="employee-settings-actions"><button className="secondary-button" onClick={() => void scanCoupons()} disabled={scanningCoupons}>{scanningCoupons ? "סורק…" : "משוך קודים מהחנות"}</button><button className="primary-button" onClick={() => void onSaveSettings(draft).then(() => setSettingsNotice("חוקי העובדים נשמרו.")).catch(() => setSettingsNotice("שמירת החוקים נכשלה."))}>שמור חוקי עובדים</button></div>{settingsNotice ? <p role="status">{settingsNotice}</p> : null}{availableCoupons.length ? <div className="coupon-results"><strong>קודים שנמצאו</strong><p>{availableCoupons.slice(0, 40).join(" · ")}</p></div> : null}<p className="context-note">זיהוי הנפקת Gift Card ידנית מחייב גישת read_gift_cards ואירוע ייעודי מ־Shopify; עד לקבלת ההרשאה ניטור זה אינו פעיל.</p></section>
+    </div><div className="employee-settings-actions"><button className="secondary-button" onClick={() => void scanCoupons()} disabled={scanningCoupons}>{scanningCoupons ? "סורק…" : "משוך קודים מהחנות"}</button><button className="primary-button" onClick={() => void onSaveSettings(draft).then(() => setSettingsNotice("חוקי העובדים נשמרו.")).catch(() => setSettingsNotice("שמירת החוקים נכשלה."))}>שמור חוקי עובדים</button></div>{settingsNotice ? <p role="status">{settingsNotice}</p> : null}{availableCoupons.length ? <div className="coupon-results"><strong>קודים שנמצאו</strong><p>{availableCoupons.slice(0, 40).join(" · ")}</p></div> : null}<p className="context-note"><strong>הנפקה ידנית:</strong> ניטור זה עדיין אינו פעיל. הנפקה מהניהול אינה יוצרת הזמנת רכישה, ולכן החיבור הנוכחי להזמנות לא יכול לזהות אותה. נדרשת הרשאת Shopify מסוג <bdi>read_gift_cards</bdi> כדי לסרוק גם כרטיסים ללא הזמנה.</p></section>
     {adding ? <form className="employee-form" onSubmit={submit}><label>שם מלא<input name="name" required placeholder="שם העובד" /></label><label>אימייל עבודה<input name="workEmail" required type="email" dir="ltr" placeholder="employee@company.co.il" /></label><label>אימייל פרטי<input name="privateEmail" type="email" dir="ltr" placeholder="name@gmail.com" /></label><label>כתובת<input name="address" placeholder="כתובת העובד להשוואת הזמנות" /></label><label>קודי קופון משויכים<input name="couponCodes" dir="ltr" placeholder="oved30, ovedtx" /><small>אפשר להפריד בין קודים בפסיק</small></label><label>מחלקה<input name="department" required placeholder="למשל שירות לקוחות" /></label><button className="primary-button" disabled={saving}>{saving ? "שומר…" : "הוסף לניטור"}</button>{error ? <p role="alert">{error}</p> : null}</form> : null}
     <section className="case-section"><div className="section-heading"><div><h2>עובדים שנבדקים אוטומטית</h2><span>פרטי זיהוי וקופונים המשויכים לכל עובד</span></div></div><div className="table-wrap"><table className="case-table"><thead><tr><th>עובד</th><th>מחלקה</th><th>רכישות שנמצאו</th><th>זיכויים שנמצאו</th><th>מצב לבדיקה</th><th /></tr></thead><tbody>{employees.map((employee) => <tr key={employee.id}><td><strong>{employee.name}</strong><small>{employee.email}</small></td><td>{employee.department}</td><td className="mono">{employee.purchases}</td><td className="mono">{employee.refunded}</td><td><SeverityBadge severity={employee.risk} /></td><td><button className="icon-button" onClick={() => setSelectedEmployee(employee)} aria-label={`פרטי ${employee.name}`}><ChevronLeft size={16} /></button></td></tr>)}</tbody></table>{employees.length === 0 ? <div className="empty-state"><UsersRound size={25} /><strong>לא נוספו עובדים לניטור</strong><span>אפשר להוסיף עובד ידנית ולשייך אליו קופונים.</span></div> : null}</div></section>
     {selectedEmployee ? <CenteredDialog className="employee-detail-dialog" label={`פרטי ${selectedEmployee.name}`} onClose={() => setSelectedEmployee(null)}>
@@ -827,6 +849,15 @@ function RulesScreen({ rules, onToggle, onSave, onCreate }: { rules: RiskRule[];
   const [editing, setEditing] = useState<RiskRule | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const visibleRules = rules.filter((rule) => rule.enabled || !["recommended-ip-velocity", "recommended-email-velocity", "recommended-phone-hourly-velocity", "recommended-email-daily-velocity", "recommended-ip-daily-velocity", "recommended-phone-daily-velocity", "recommended-gift-card-ip-velocity"].includes(rule.id));
+  const ruleGroups = [
+    { id: "velocity", title: "ריבוי הזמנות", hint: "לפי אימייל, IP או טלפון · שעה ויום", rules: visibleRules.filter((rule) => rule.category === "velocity") },
+    { id: "gift-card", title: "גיפטקארדים", hint: "רכישות חוזרות, סכום ומימוש", rules: visibleRules.filter((rule) => rule.category === "gift-card") },
+    { id: "payment", title: "סכומי הזמנה ותשלום", hint: "ספי סכום, תשלום ושעות הלילה", rules: visibleRules.filter((rule) => rule.category === "payment") },
+    { id: "identity", title: "זהויות מקושרות", hint: "התאמות בין פרטי קשר", rules: visibleRules.filter((rule) => rule.category === "identity") },
+    { id: "network", title: "המאגר המשותף", hint: "התאמות לדיווחי הונאה", rules: visibleRules.filter((rule) => rule.category === "network") },
+    { id: "other", title: "חוקים נוספים", hint: "כללים מותאמים", rules: visibleRules.filter((rule) => !["velocity", "gift-card", "payment", "identity", "network"].includes(rule.category)) },
+  ].filter((group) => group.rules.length);
   const [notice, setNotice] = useState("");
 
   const updateCondition = (id: string, patch: Partial<RiskCondition>) => setEditing((current) => current ? { ...current, conditions: current.conditions.map((condition) => condition.id === id ? { ...condition, ...patch } : condition) } : current);
@@ -851,13 +882,13 @@ function RulesScreen({ rules, onToggle, onSave, onCreate }: { rules: RiskRule[];
 
     {notice ? <div className="rule-recalculation-notice" role="status"><CheckCircle2 size={17} /><div><strong>ההתראות חושבו מחדש</strong><span>{notice}</span></div></div> : null}
     {error ? <div className="inline-error" role="alert">{error}</div> : null}
-    <div className="rules-list condition-rules">{rules.filter((rule) => rule.enabled || !["recommended-ip-velocity", "recommended-email-velocity", "recommended-phone-hourly-velocity", "recommended-email-daily-velocity", "recommended-ip-daily-velocity", "recommended-phone-daily-velocity", "recommended-gift-card-ip-velocity"].includes(rule.id)).map((rule) => <article key={rule.id} className={!rule.enabled ? "rule-disabled" : ""}>
+    <div className="rule-groups">{ruleGroups.map((group, index) => <details className="rule-group" key={group.id} ref={(element) => { if (element && !element.dataset.initialized) { element.open = index === 0; element.dataset.initialized = "true"; } }}><summary><span><strong>{group.title}</strong><small>{group.hint}</small></span><span>{group.rules.filter((rule) => rule.enabled).length} פעילים · {group.rules.length} כללים <ChevronDown size={17} /></span></summary><div className="rules-list condition-rules">{group.rules.map((rule) => <article key={rule.id} className={!rule.enabled ? "rule-disabled" : ""}>
       <button role="switch" aria-checked={rule.enabled} className={`switch ${rule.enabled ? "switch-on" : ""}`} onClick={() => void onToggle(rule).then((result) => setNotice(`החוק ${rule.enabled ? "כובה" : "הופעל"} ונבדקו ${result.reviewed} תיקים · ${result.resolved} נסגרו · ${result.reopened} נפתחו מחדש · ${result.active} פעילות`)).catch(() => setError("החוק לא עודכן. נסה שוב."))} aria-label={`${rule.enabled ? "כיבוי" : "הפעלת"} ${rule.label}`}><span /></button>
-      <div className="rule-main"><div><h3>{rule.label}</h3>{rule.locked ? <span className="locked-chip"><LockKeyhole size={12} /> חוק מערכת</span> : null}{rule.recommended ? <span className="recommended-chip">מומלץ</span> : null}</div><p>{rule.description}</p><div className="condition-preview"><span className="logic-word">אם {rule.logic === "all" ? "כל" : "לפחות אחד"}</span>{rule.conditions.map((condition) => <span key={condition.id}>{conditionSentence(condition)}</span>)}</div></div>
+      <div className="rule-main"><div><h3>{["recommended-order-high", "recommended-order-critical"].includes(rule.id) ? `סכום הזמנה · ${rule.conditions[0] ? conditionSentence(rule.conditions[0]) : rule.label}` : rule.label}</h3>{rule.locked ? <span className="locked-chip"><LockKeyhole size={12} /> חוק מערכת</span> : null}</div><div className="condition-preview"><span className="logic-word">{rule.logic === "all" ? "כל התנאים" : "אחד מהתנאים"}</span>{rule.conditions.map((condition) => <span key={condition.id}>{conditionSentence(condition)}</span>)}</div></div>
       <div className="rule-action"><span>אז</span><strong>{rule.action.openCase ? `פתח תיק · ${rule.action.severity === "critical" ? "קריטי" : rule.action.severity === "high" ? "גבוה" : rule.action.severity === "medium" ? "בינוני" : "נמוך"}` : `הוסף ${rule.action.scoreBonus ?? 0} נקודות סיכון`}</strong><small>{rule.action.openCase ? rule.action.emailOwner ? "ושלח אימייל לבעלים" : "ללא אימייל" : "אות משלים · לא פותח תיק לבדו"}</small></div>
       <div className="rule-matches"><span>הופעל</span><strong className="mono">{rule.matches}</strong><small>פעמים</small></div>
       <button className="secondary-button" onClick={() => setEditing(structuredClone(rule))} disabled={rule.locked}>עריכת תנאים</button>
-    </article>)}</div>
+    </article>)}</div></details>)}</div>
 
     {editing ? <CenteredDialog className="rule-editor" label={`עריכת החוק ${editing.label}`} onClose={() => setEditing(null)}><header><div><span className="eyebrow">עריכת חוק</span><h2>{editing.label}</h2></div><button className="icon-button" onClick={() => setEditing(null)} aria-label="סגירת עורך החוק"><X size={19} /></button></header><div className="rule-editor-body">
       <label className="field-label">שם החוק<input value={editing.label} onChange={(event) => setEditing({ ...editing, label: event.target.value })} /></label>
@@ -905,21 +936,35 @@ function RulesScreen({ rules, onToggle, onSave, onCreate }: { rules: RiskRule[];
 
 function NotificationsScreen({ settings, deliveries, onSave }: { settings: NotificationSettings; deliveries: NotificationDelivery[]; onSave: (settings: NotificationSettings) => Promise<void> }) {
   const [draft, setDraft] = useState(settings);
-  const [recipients, setRecipients] = useState(settings.recipients.join("\n"));
+  const [recipientInput, setRecipientInput] = useState("");
+  const [recipientError, setRecipientError] = useState("");
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
-  useEffect(() => { setDraft(settings); setRecipients(settings.recipients.join("\n")); }, [settings]);
+  useEffect(() => { setDraft(settings); }, [settings]);
   const toggleSeverity = (severity: Severity) => setDraft((current) => ({ ...current, severities: current.severities.includes(severity) ? current.severities.filter((item) => item !== severity) : [...current.severities, severity] }));
+  const addRecipient = () => {
+    const email = recipientInput.trim().toLowerCase();
+    if (!email) return true;
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { setRecipientError("יש להזין כתובת אימייל תקינה."); return false; }
+    setDraft((current) => ({ ...current, recipients: [...new Set([...current.recipients, email])] }));
+    setRecipientInput(""); setRecipientError(""); setSaved(false);
+    return true;
+  };
   const submit = async (event: React.FormEvent) => {
-    event.preventDefault(); setSaving(true); setSaved(false);
-    const normalized = recipients.split(/[\n,;]/).map((value) => value.trim()).filter(Boolean);
-    await onSave({ ...draft, recipients: normalized });
-    setSaving(false); setSaved(true);
+    event.preventDefault();
+    const pendingEmail = recipientInput.trim().toLowerCase();
+    if (!addRecipient()) return;
+    const recipients = [...new Set([...draft.recipients, ...(pendingEmail ? [pendingEmail] : [])])];
+    if (draft.enabled && recipients.length === 0) { setRecipientError("כדי להפעיל התראות צריך להוסיף לפחות כתובת אחת."); return; }
+    setSaving(true); setSaved(false); setRecipientError("");
+    try { await onSave({ ...draft, recipients }); setSaved(true); }
+    catch { setRecipientError("לא ניתן לשמור את הגדרות האימייל כרגע."); }
+    finally { setSaving(false); }
   };
   return <div className="page-content product-page notifications-page"><PageHeading eyebrow="התראות לבעלי החנות" title="מי מקבל אימייל ומתי?" description="כשנפתח תיק בסיכון שבחרת, כל נמען מקבל אימייל עם הסיבה וקישור ישיר לקבלת החלטה." />
     <div className="notification-layout"><form className="notification-settings" onSubmit={submit}>
-      <div className="notification-master"><div><Mail size={20} /><div><strong>שליחת התראות באימייל</strong><span>עובד גם עם כתובות Gmail וכל ספק אימייל אחר</span></div></div><button type="button" role="switch" aria-checked={draft.enabled} className={`switch ${draft.enabled ? "switch-on" : ""}`} onClick={() => setDraft({ ...draft, enabled: !draft.enabled })} aria-label="הפעלת התראות"><span /></button></div>
-      <label className="field-label">כתובות בעלי החנות<span>כתובת אחת בכל שורה. ההתראה נשלחת לכל הכתובות.</span><textarea value={recipients} onChange={(event) => setRecipients(event.target.value)} dir="ltr" rows={4} placeholder="owner@gmail.com" /></label>
+      <div className="notification-master"><div><Mail size={20} /><div><strong>שליחת התראות באימייל</strong><span>התראות על הזמנות הדורשות בדיקה</span></div></div><button type="button" role="switch" aria-checked={draft.enabled} className={`notification-toggle ${draft.enabled ? "is-on" : ""}`} onClick={() => { setDraft({ ...draft, enabled: !draft.enabled }); setSaved(false); }} aria-label="הפעלת התראות"><span className="notification-toggle-track"><i /></span><strong>{draft.enabled ? "פעיל" : "כבוי"}</strong></button></div>
+      <div className="recipient-field"><label htmlFor="recipient-email">כתובות בעלי החנות <small>הוסף כתובת אחת בכל פעם</small></label><div className="recipient-entry"><input id="recipient-email" type="email" dir="ltr" value={recipientInput} onChange={(event) => { setRecipientInput(event.target.value); setRecipientError(""); }} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); addRecipient(); } }} placeholder="owner@gmail.com" /><button type="button" className="secondary-button" onClick={addRecipient}>הוסף כתובת</button></div>{draft.recipients.length ? <ul className="recipient-list" aria-label="נמעני התראות">{draft.recipients.map((email) => <li key={email}><Mail size={15} /><bdi>{email}</bdi><button type="button" onClick={() => { setDraft((current) => ({ ...current, recipients: current.recipients.filter((value) => value !== email) })); setSaved(false); }} aria-label={`הסרת ${email}`}><X size={15} /></button></li>)}</ul> : <p className="context-note">עוד לא נוספו נמענים.</p>}{recipientError ? <p role="alert" className="inline-error">{recipientError}</p> : null}</div>
       <fieldset><legend>על אילו תיקים לשלוח אימייל?</legend><div className="severity-options">{(["critical", "high", "medium"] as Severity[]).map((severity) => <label key={severity} className={`severity-option ${draft.severities.includes(severity) ? "selected" : ""}`}><input type="checkbox" checked={draft.severities.includes(severity)} onChange={() => toggleSeverity(severity)} /><SeverityBadge severity={severity} /><span>{severity === "critical" ? "דורש טיפול מיידי" : severity === "high" ? "חשד משמעותי" : "כדאי לבדוק"}</span></label>)}</div></fieldset>
       <label className="field-label reminder-field">שלח תזכורת אם התיק עדיין לא טופל אחרי<div><input type="number" min="5" max="1440" value={draft.reminderMinutes} onChange={(event) => setDraft({ ...draft, reminderMinutes: Number(event.target.value) })} /><span>דקות</span></div></label>
       <div className="notification-example"><strong>מה קורה בפועל?</strong><ol><li>המערכת מזהה הזמנה חשודה ופותחת תיק.</li><li>בעלי החנות מקבלים אימייל עם הסיבה והסכום.</li><li>הבעלים מסמנים: בבדיקה, טופל, תקין או הונאה.</li></ol></div>

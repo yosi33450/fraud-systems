@@ -342,16 +342,10 @@ const baselineRules = (): RiskRule[] => [
     action: { severity: "medium", openCase: true, emailOwner: false },
   },
   {
-    id: "recommended-order-high", label: "סכום הזמנה חריג מאוד", description: "מעלה את ההתראה לגבוהה כאשר סכום ההזמנה גבוה מ־₪5,000.",
+    id: "recommended-order-high", label: "סכום הזמנה גבוה", description: "מעלה את ההתראה לגבוהה כאשר סכום ההזמנה גבוה מ־₪5,000.",
     category: "payment", enabled: true, logic: "all", recommended: true, matches: 0,
     conditions: [{ id: "order-high", field: "order_amount", operator: "gt", value: 5000 }],
     action: { severity: "high", openCase: true, emailOwner: true },
-  },
-  {
-    id: "recommended-order-critical", label: "סכום הזמנה קיצוני", description: "מעלה את ההתראה לקריטית כאשר סכום ההזמנה גבוה מ־₪15,000.",
-    category: "payment", enabled: true, logic: "all", recommended: true, matches: 0,
-    conditions: [{ id: "order-critical", field: "order_amount", operator: "gt", value: 15000 }],
-    action: { severity: "critical", openCase: true, emailOwner: true },
   },
   {
     id: "recommended-gift-card", label: "גיפט קארד עם כשלי תשלום", description: "פותח התראה קריטית על רכישת גיפט קארד בסכום גבוה לאחר כמה כשלי תשלום.",
@@ -372,6 +366,12 @@ const baselineRules = (): RiskRule[] => [
 
 const migrateLegacyRules = () => {
   for (const rules of state.rulesByTenant.values()) {
+    const oldCriticalIndex = rules.findIndex((rule) => rule.id === "recommended-order-critical" && rule.recommended && rule.label === "סכום הזמנה קיצוני" && rule.conditions.length === 1
+      && rule.conditions[0].field === "order_amount" && rule.conditions[0].operator === "gt" && rule.conditions[0].value === 15000
+      && rule.action.severity === "critical" && rule.action.openCase && rule.action.emailOwner);
+    if (oldCriticalIndex !== -1) rules.splice(oldCriticalIndex, 1);
+    const defaultHigh = rules.find((rule) => rule.id === "recommended-order-high" && rule.recommended && rule.label === "סכום הזמנה חריג מאוד");
+    if (defaultHigh) defaultHigh.label = "סכום הזמנה גבוה";
     const legacy = rules.find((rule) => rule.id === "recommended-order-spike");
     const condition = legacy?.conditions[0];
     if (legacy && legacy.conditions.length === 1 && condition?.field === "order_amount_vs_average") {
@@ -382,7 +382,7 @@ const migrateLegacyRules = () => {
     }
 
     const introducingGroupedVelocity = !rules.some((rule) => rule.id === "recommended-orders-hour");
-    const requiredRules = baselineRules().filter((rule) => ["recommended-order-high", "recommended-order-critical", "recommended-linked-gift-card", "recommended-orders-hour", "recommended-orders-day", "recommended-night-orders", "recommended-gift-card-repeat-100", "recommended-gift-card-amount"].includes(rule.id));
+    const requiredRules = baselineRules().filter((rule) => ["recommended-order-high", "recommended-linked-gift-card", "recommended-orders-hour", "recommended-orders-day", "recommended-night-orders", "recommended-gift-card-repeat-100", "recommended-gift-card-amount"].includes(rule.id));
     for (const requiredRule of requiredRules) {
       if (!rules.some((rule) => rule.id === requiredRule.id)) rules.push(clone(requiredRule));
     }
@@ -470,6 +470,19 @@ export function decideCase(tenantId: string, caseId: string, status: CaseStatus)
     createdAt: new Date().toISOString(), metadata: { orderNumber: item.orderNumber, score: item.score },
   });
   return clone(item);
+}
+
+export function relatedOpenCases(tenantId: string, caseId: string): FraudCase[] {
+  const source = state.cases.find((item) => item.tenantId === tenantId && item.id === caseId);
+  if (!source) throw new Error("CASE_NOT_FOUND");
+  const email = source.email.trim().toLowerCase();
+  const realEmail = email.includes("@") && !/general-customer@payplus|לא זמין|עסקת payplus/i.test(email);
+  // A payment-provider placeholder can be reused across unrelated shoppers.
+  const customerId = !/general customer payplus/i.test(source.customer) && realEmail ? source.context?.customerId : undefined;
+  return clone(state.cases.filter((item) => item.tenantId === tenantId && item.storeId === source.storeId
+    && ["new", "review", "action"].includes(item.status)
+    && (item.id === caseId || (realEmail && item.email.trim().toLowerCase() === email)
+      || (customerId && !/general customer payplus/i.test(item.customer) && item.context?.customerId === customerId))));
 }
 
 export function releaseBlacklistCase(tenantId: string, caseId: string) {
