@@ -3,7 +3,10 @@ import { decryptPrivateData, encryptPrivateData, persistOperationalState } from 
 import { getDashboardSnapshot, recordGiftCardOrderEvidence, refreshOrderEvidenceLinks } from "@/lib/operational-store";
 import type { GiftCardOrderEvidence } from "@/lib/gift-card-evidence";
 
-const configured = () => Boolean(process.env.BLOB_READ_WRITE_TOKEN || process.env.BLOB_STORE_ID);
+// The Supabase pilot snapshot already contains gift-card evidence. Its writes must
+// never fall back to the suspended legacy Blob merely because that token remains set.
+const configured = () => process.env.PERSISTENCE_BACKEND !== "supabase"
+  && Boolean(process.env.BLOB_READ_WRITE_TOKEN || process.env.BLOB_STORE_ID);
 const pathFor = (tenantId: string, storeId: string) => `private/gift-ledger/${encodeURIComponent(tenantId)}/${encodeURIComponent(storeId)}.json`;
 
 async function read(tenantId: string, storeId: string) {
