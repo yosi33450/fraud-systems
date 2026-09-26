@@ -597,7 +597,7 @@ function Overview({ cases, ledger, query, setQuery, severity, setSeverity, store
         {displayCases.length === 0 ? <div className="empty-state"><Shield size={26} /><strong>{hasStores ? "אין כרגע התראות פעילות" : "אין נתונים להצגה"}</strong><span>{hasStores ? "שינויי החוקים חושבו מחדש. הזמנות חשודות חדשות יופיעו כאן." : "חבר חנות Shopify כדי להתחיל לקבל ולבדוק הזמנות."}</span></div> : null}
       </div>
     </section>
-    {selectedCluster ? <ClusterInvestigation cluster={selectedCluster} ledger={ledger} onClose={() => setSelectedClusterId(null)} onOpen={onOpen} /> : null}
+    {selectedCluster ? <ClusterInvestigation cluster={selectedCluster} ledger={ledger} onClose={() => setSelectedClusterId(null)} onOpen={(item) => { setSelectedClusterId(null); onOpen(item); }} /> : null}
   </div>;
 }
 
@@ -827,7 +827,7 @@ const conditionSentence = (condition: RiskCondition) => {
   if (!field) return "תנאי לא ידוע";
   if (condition.field === "order_local_hour") return `שעת הזמנה ${String(condition.startHour ?? 0).padStart(2, "0")}:00–${String(condition.endHour ?? 5).padStart(2, "0")}:00`;
   if (field.boolean) return field.label;
-  const window = condition.windowMinutes ? ` בתוך ${condition.windowMinutes % 10080 === 0 ? `${condition.windowMinutes / 10080} שבועות` : condition.windowMinutes % 1440 === 0 ? `${condition.windowMinutes / 1440} ימים` : condition.windowMinutes % 60 === 0 ? `${condition.windowMinutes / 60} שעות` : `${condition.windowMinutes} דקות`}` : "";
+  const window = condition.windowMinutes ? ` בתוך ${condition.windowMinutes % 10080 === 0 ? `${condition.windowMinutes / 10080} שבועות` : condition.windowMinutes % 1440 === 0 ? `${condition.windowMinutes / 1440} ${condition.windowMinutes === 1440 ? "יום" : "ימים"}` : condition.windowMinutes % 60 === 0 ? `${condition.windowMinutes / 60} ${condition.windowMinutes === 60 ? "שעה" : "שעות"}` : `${condition.windowMinutes} דקות`}` : "";
   const comparison = condition.operator === "gt" ? "יותר מ־" : condition.operator === "eq" ? "בדיוק " : "לפחות ";
   return `${field.label} ${comparison}${condition.value} ${field.suffix ?? ""}${condition.minGiftCardValue ? `, רק כאשר שווי הגיפטקארדים ברכישה מעל ₪${condition.minGiftCardValue}` : ""}${window}`;
 };

@@ -1447,6 +1447,7 @@ p { text-wrap: pretty; }
 .order-investigation .order-context[open] > summary svg { transform: rotate(180deg); }
 .order-investigation .order-context-details { max-height: none; overflow: visible; padding: 16px 18px; }
 .order-investigation .order-context { order: 0; }
+.order-investigation .identity-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 18px; }
 .order-investigation .evidence-section { order: 1; border: 1px solid #d6ded9; border-radius: 12px; background: #fff; }
 .order-investigation .evidence-section > summary { display: flex; align-items: center; gap: 9px; padding: 11px 16px; cursor: pointer; list-style: none; color: #40574b; font-size: 13px; font-weight: 700; }
 .order-investigation .evidence-section > summary::-webkit-details-marker { display: none; }
@@ -1518,4 +1519,4 @@ p { text-wrap: pretty; }
 .employee-rules-grid input:not([type="checkbox"]), .employee-rules-grid select { width: 150px; max-width: 55%; min-height: 38px; padding: 7px 9px; border: 1px solid var(--product-border); border-radius: 8px; }
 .employee-settings-actions { display: flex; gap: 9px; }
 .coupon-results { margin-top: 12px; overflow-wrap: anywhere; font-size: 13px; }
-@media (max-width: 700px) { .centered-dialog.order-investigation { width: calc(100vw - 16px); max-height: calc(100dvh - 16px); } .order-investigation .drawer-body { padding: 12px; } .employee-rules-grid { grid-template-columns: 1fr; } }
+@media (max-width: 700px) { .centered-dialog.order-investigation { width: calc(100vw - 16px); max-height: calc(100dvh - 16px); } .order-investigation .drawer-body { padding: 12px; } .order-investigation .identity-grid { grid-template-columns: 1fr; } .employee-rules-grid { grid-template-columns: 1fr; } }
