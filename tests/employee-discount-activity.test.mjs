@@ -17,19 +17,19 @@ function order(store, id, codes, extra = {}) {
   } });
 }
 
-test('Strongful uses OVED as the pilot discount prefix and counts orders once', () => {
+test('all used coupon codes appear by default, while OVED remains the employee prefix', () => {
   const store = setup('coupon-test', 'strongful.myshopify.com');
   assert.equal(api.getEmployeeSettings('coupon-test').couponPrefix, 'oved');
   order(store, 1, ['OVEDmika', 'ovedTX30', 'summer']);
   order(store, 2, ['SUMMER']);
   const activity = api.getDashboardSnapshot('coupon-test').employeeDiscountActivity;
-  assert.equal(activity.totalOrders, 1);
-  assert.equal(activity.totalAmount, 200);
+  assert.equal(activity.totalOrders, 2);
+  assert.equal(activity.totalAmount, 400);
   assert.equal(activity.ordersChecked, 2);
   assert.equal(activity.ordersWithAnyDiscountCode, 2);
-  assert.deepEqual(activity.codes.map((item) => item.code), ['ovedmika', 'ovedtx30']);
+  assert.deepEqual(activity.codes.map((item) => [item.code, item.orders]), [['summer', 2], ['ovedmika', 1], ['ovedtx30', 1]]);
   assert.deepEqual(api.getObservedEmployeeDiscountCodes('coupon-test', store.id, 'OVED'), ['ovedmika', 'ovedtx30']);
-  assert.ok(activity.recentUses.every((use) => use.orderNumber === '#1'));
+  assert.equal(activity.recentUses.filter((use) => use.code === 'summer').length, 2);
 });
 
 test('code ownership is distinct from buyer identity and unassigned codes remain visible', () => {
@@ -46,10 +46,11 @@ test('code ownership is distinct from buyer identity and unassigned codes remain
   assert.equal(unassigned.buyerMatchesEmployee, false);
 });
 
-test('non-pilot stores require their own saved prefix and other tenants stay isolated', () => {
+test('coupon usage is visible without an employee prefix and other tenants stay isolated', () => {
   const store = setup('coupon-test', 'another.myshopify.com');
   order(store, 1, ['oved30']);
-  assert.equal(api.getEmployeeDiscountActivity('coupon-test').totalOrders, 0);
+  assert.equal(api.getEmployeeDiscountActivity('coupon-test').totalOrders, 1);
+  assert.equal(api.getEmployeeDiscountActivity('coupon-test').codes[0].code, 'oved30');
   api.saveEmployeeSettings('coupon-test', { ...api.getEmployeeSettings('coupon-test'), couponPrefix: 'oved' });
   assert.equal(api.getEmployeeDiscountActivity('coupon-test').totalOrders, 1);
   assert.equal(api.getEmployeeDiscountActivity('other-tenant').totalOrders, 0);

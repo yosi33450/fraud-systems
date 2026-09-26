@@ -1527,6 +1527,14 @@ p { text-wrap: pretty; }
 .employee-discount-section .section-heading { align-items: center; gap: 18px; }
 .employee-discount-tools { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px 16px; margin-top: 16px; color: var(--product-secondary); font-size: 13px; }
 .employee-discount-tools button { display: inline-flex; align-items: center; gap: 7px; }
+.employee-coupon-filters { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-top: 18px; }
+.employee-coupon-search { display: inline-flex; align-items: center; gap: 8px; width: min(100%, 320px); min-height: 42px; padding: 0 12px; border: 1px solid var(--product-border); border-radius: 10px; color: var(--product-secondary); background: #fff; }
+.employee-coupon-search:focus-within { border-color: var(--trust); outline: 2px solid color-mix(in srgb, var(--trust) 20%, transparent); outline-offset: 2px; }
+.employee-coupon-search input { width: 100%; min-width: 0; border: 0; outline: 0; background: transparent; font: inherit; color: var(--ink); }
+.employee-coupon-only { display: inline-flex; align-items: center; gap: 7px; color: var(--ink); font-size: 14px; cursor: pointer; }
+.employee-coupon-only input { accent-color: var(--trust); }
+.employee-coupon-count { margin-inline-start: auto; color: var(--product-secondary); font-size: 13px; }
+.employee-coupon-more { margin-top: 16px; }
 .employee-discount-total { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; font-variant-numeric: tabular-nums; font-size: 20px; white-space: nowrap; }
 .employee-discount-total small { color: var(--product-secondary); font-size: 12px; font-weight: 500; }
 .employee-code-list { margin-top: 16px; border-top: 1px solid var(--product-border); }
@@ -1534,10 +1542,12 @@ p { text-wrap: pretty; }
 .employee-code-row strong { justify-self: start; font-size: 15px; }
 .employee-code-row span { color: var(--product-secondary); }
 .employee-code-row bdi { font-variant-numeric: tabular-nums; font-weight: 650; }
+.employee-code-row time { color: var(--product-secondary); font-variant-numeric: tabular-nums; }
+.employee-code-head { min-height: 38px; color: var(--product-secondary); font-size: 12px; font-weight: 650; }
 .employee-discount-orders { margin-top: 16px; }
 .employee-discount-orders summary { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; color: var(--trust); font-size: 14px; font-weight: 650; }
 .employee-discount-orders .table-wrap { margin-top: 14px; }
 .employee-discount-empty { display: flex; flex-direction: column; gap: 6px; padding: 24px 0 4px; color: var(--product-secondary); font-size: 14px; }
 .employee-discount-empty strong { color: var(--ink); }
-@media (max-width: 700px) { .employee-discount-section { padding: 18px; } .employee-discount-section .section-heading { align-items: flex-start; flex-direction: column; } .employee-discount-total { align-items: flex-start; } .employee-code-row { grid-template-columns: 1fr auto; gap: 4px 10px; padding: 10px 0; } .employee-code-row span { grid-column: 1; } .employee-code-row bdi { grid-column: 2; grid-row: 1 / 3; } }
+@media (max-width: 700px) { .employee-discount-section { padding: 18px; } .employee-discount-section .section-heading { align-items: flex-start; flex-direction: column; } .employee-discount-total { align-items: flex-start; } .employee-coupon-search { width: 100%; } .employee-coupon-count { margin-inline-start: 0; } .employee-code-head { display: none; } .employee-code-row { grid-template-columns: 1fr auto; gap: 4px 10px; padding: 10px 0; } .employee-code-row span { grid-column: 1; } .employee-code-row bdi { grid-column: 2; grid-row: 1 / 3; } .employee-code-row time { grid-column: 1 / -1; } }
 @media (max-width: 700px) { .centered-dialog.order-investigation { width: calc(100vw - 16px); max-height: calc(100dvh - 16px); } .order-investigation .drawer-body { padding: 12px; } .order-investigation .identity-grid { grid-template-columns: 1fr; } .employee-rules-grid { grid-template-columns: 1fr; } }
