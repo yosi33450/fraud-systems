@@ -25,7 +25,10 @@ test('Strongful uses OVED as the pilot discount prefix and counts orders once', 
   const activity = api.getDashboardSnapshot('coupon-test').employeeDiscountActivity;
   assert.equal(activity.totalOrders, 1);
   assert.equal(activity.totalAmount, 200);
+  assert.equal(activity.ordersChecked, 2);
+  assert.equal(activity.ordersWithAnyDiscountCode, 2);
   assert.deepEqual(activity.codes.map((item) => item.code), ['ovedmika', 'ovedtx30']);
+  assert.deepEqual(api.getObservedEmployeeDiscountCodes('coupon-test', store.id, 'OVED'), ['ovedmika', 'ovedtx30']);
   assert.ok(activity.recentUses.every((use) => use.orderNumber === '#1'));
 });
 

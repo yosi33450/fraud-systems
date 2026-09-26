@@ -195,6 +195,8 @@ export interface EmployeeDiscountUse {
 
 export interface EmployeeDiscountActivity {
   prefix: string;
+  ordersChecked: number;
+  ordersWithAnyDiscountCode: number;
   totalOrders: number;
   totalAmount: number;
   codes: Array<{ code: string; orders: number; amount: number; assignedEmployeeId?: string; assignmentConflict: boolean; lastUsedAt: string }>;

@@ -733,9 +733,12 @@ export function getEmployeeSettings(tenantId: string): EmployeeMonitoringSetting
 
 export function getEmployeeDiscountActivity(tenantId: string): EmployeeDiscountActivity {
   const prefix = getEmployeeSettings(tenantId).couponPrefix.trim().toLowerCase();
-  const empty: EmployeeDiscountActivity = { prefix, totalOrders: 0, totalAmount: 0, codes: [], recentUses: [] };
-  if (!prefix) return empty;
+  const empty: EmployeeDiscountActivity = { prefix, ordersChecked: 0, ordersWithAnyDiscountCode: 0, totalOrders: 0, totalAmount: 0, codes: [], recentUses: [] };
   const cutoff = Date.now() - 30 * 86_400_000;
+  if (!prefix) {
+    const recent = state.orders.filter((order) => order.tenantId === tenantId && Date.parse(order.createdAt) >= cutoff);
+    return { ...empty, ordersChecked: recent.length, ordersWithAnyDiscountCode: recent.filter((order) => order.couponCodes?.length).length };
+  }
   const owners = new Map<string, Employee[]>();
   for (const employee of state.employees.filter((item) => item.tenantId === tenantId)) {
     for (const code of new Set(employee.couponCodes ?? [])) {
@@ -745,8 +748,12 @@ export function getEmployeeDiscountActivity(tenantId: string): EmployeeDiscountA
   }
   const uses: EmployeeDiscountActivity["recentUses"] = [];
   const uniqueOrders = new Map<string, number>();
+  let ordersChecked = 0;
+  let ordersWithAnyDiscountCode = 0;
   for (const order of state.orders) {
     if (order.tenantId !== tenantId || Date.parse(order.createdAt) < cutoff) continue;
+    ordersChecked += 1;
+    if (order.couponCodes?.length) ordersWithAnyDiscountCode += 1;
     const codes = [...new Set((order.couponCodes ?? []).map((code) => code.trim().toLowerCase()).filter((code) => code.startsWith(prefix)))];
     if (!codes.length) continue;
     uniqueOrders.set(`${order.storeId}:${order.shopifyOrderId}`, order.amount);
@@ -774,10 +781,18 @@ export function getEmployeeDiscountActivity(tenantId: string): EmployeeDiscountA
     byCode.set(use.code, item);
   }
   return {
-    prefix, totalOrders: uniqueOrders.size, totalAmount: [...uniqueOrders.values()].reduce((sum, amount) => sum + amount, 0),
+    prefix, ordersChecked, ordersWithAnyDiscountCode, totalOrders: uniqueOrders.size, totalAmount: [...uniqueOrders.values()].reduce((sum, amount) => sum + amount, 0),
     codes: [...byCode.values()].sort((a, b) => b.orders - a.orders || a.code.localeCompare(b.code)),
     recentUses: uses.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt)).slice(0, 100),
   };
+}
+
+export function getObservedEmployeeDiscountCodes(tenantId: string, storeId: string, prefix: string): string[] {
+  tenantStore(tenantId, storeId);
+  const normalized = prefix.trim().toLowerCase();
+  const cutoff = Date.now() - 30 * 86_400_000;
+  return [...new Set(state.orders.filter((order) => order.tenantId === tenantId && order.storeId === storeId && Date.parse(order.createdAt) >= cutoff)
+    .flatMap((order) => order.couponCodes ?? []).filter((code) => code.startsWith(normalized)))].sort();
 }
 
 export function saveEmployeeSettings(tenantId: string, input: EmployeeMonitoringSettings) {
