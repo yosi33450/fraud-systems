@@ -772,11 +772,12 @@ export function getEmployeeDiscountActivity(tenantId: string, period: "30d" | "a
   }
   const byCode = new Map<string, EmployeeDiscountActivity["codes"][number]>();
   for (const use of uses) {
-    const item = byCode.get(use.code) ?? { code: use.code, orders: 0, amount: 0, assignedEmployeeId: use.assignedEmployeeId, assignmentConflict: use.assignmentConflict, lastUsedAt: use.createdAt };
+    const key = `${use.storeId}:${use.code}`;
+    const item = byCode.get(key) ?? { storeId: use.storeId, code: use.code, orders: 0, amount: 0, assignedEmployeeId: use.assignedEmployeeId, assignmentConflict: use.assignmentConflict, lastUsedAt: use.createdAt };
     item.orders += 1;
     item.amount += use.amount;
     if (Date.parse(use.createdAt) > Date.parse(item.lastUsedAt)) item.lastUsedAt = use.createdAt;
-    byCode.set(use.code, item);
+    byCode.set(key, item);
   }
   return {
     period, earliestOrderAt, prefix, ordersChecked, ordersWithAnyDiscountCode, totalOrders: uniqueOrders.size, totalAmount: [...uniqueOrders.values()].reduce((sum, amount) => sum + amount, 0),

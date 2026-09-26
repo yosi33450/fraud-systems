@@ -56,6 +56,17 @@ test('coupon usage is visible without an employee prefix and other tenants stay 
   assert.equal(api.getEmployeeDiscountActivity('other-tenant').totalOrders, 0);
 });
 
+test('the same coupon code in different stores keeps separate counts', () => {
+  const first = setup('coupon-test', 'first.myshopify.com');
+  const second = api.connectShopifyStore({ tenantId: 'coupon-test', name: 'Second store', domain: 'second.myshopify.com', accessToken: 'test', clientId: 'test', clientSecret: 'test', expiresIn: 10000 });
+  order(first, 1, ['OVED30']);
+  order(second, 2, ['OVED30']);
+  const codes = api.getEmployeeDiscountActivity('coupon-test').codes;
+  assert.equal(codes.length, 2);
+  assert.deepEqual(new Set(codes.map((item) => item.storeId)), new Set([first.id, second.id]));
+  assert.ok(codes.every((item) => item.orders === 1));
+});
+
 test('all-history usage includes older saved orders without changing the 30-day view', () => {
   const store = setup('coupon-test', 'strongful.myshopify.com');
   const oldDate = new Date(Date.now() - 75 * 86_400_000).toISOString();

@@ -201,7 +201,7 @@ export interface EmployeeDiscountActivity {
   ordersWithAnyDiscountCode: number;
   totalOrders: number;
   totalAmount: number;
-  codes: Array<{ code: string; orders: number; amount: number; assignedEmployeeId?: string; assignmentConflict: boolean; lastUsedAt: string }>;
+  codes: Array<{ storeId: string; code: string; orders: number; amount: number; assignedEmployeeId?: string; assignmentConflict: boolean; lastUsedAt: string }>;
   recentUses: EmployeeDiscountUse[];
 }
 

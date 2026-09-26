@@ -1524,6 +1524,9 @@ p { text-wrap: pretty; }
 .coupon-results { margin-top: 12px; overflow-wrap: anywhere; font-size: 13px; }
 .employee-discount-section { margin-bottom: 20px; padding: 22px 24px; border: 1px solid var(--product-border); border-radius: var(--radius-panel); background: #fff; }
 .employee-discount-section .section-heading { align-items: center; gap: 18px; }
+.employee-coupon-guide { margin-top: 18px; padding: 14px 18px; border-inline-start: 3px solid var(--trust); border-radius: 10px; background: #f3f7f5; color: var(--ink); font-size: 14px; line-height: 1.65; }
+.employee-coupon-guide strong { display: block; margin-bottom: 3px; font-size: 15px; }
+.employee-coupon-guide p { margin: 3px 0 0; color: var(--product-secondary); }
 .employee-discount-tools { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px 16px; margin-top: 16px; color: var(--product-secondary); font-size: 13px; }
 .employee-discount-tools button { display: inline-flex; align-items: center; gap: 7px; }
 .employee-coupon-filters { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-top: 18px; }
@@ -1541,6 +1544,21 @@ p { text-wrap: pretty; }
 .employee-coupon-table td { padding: 11px 16px; border-top: 1px solid var(--product-border); white-space: nowrap; }
 .employee-coupon-table tbody tr:hover { background: #f8faf9; }
 .employee-coupon-table td strong { font-weight: 650; }
+.employee-coupon-code-button { padding: 4px 0; border: 0; background: transparent; color: var(--trust); font: inherit; font-weight: 700; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.employee-coupon-code-button:hover { color: var(--ink); }
+.employee-coupon-code-button:focus-visible { outline: 2px solid var(--trust); outline-offset: 3px; border-radius: 3px; }
+.coupon-detail-dialog { width: min(620px, calc(100vw - 24px)); height: auto; max-height: min(740px, calc(100dvh - 30px)); border-radius: 18px; }
+.coupon-detail-body { overflow-y: auto; padding: 24px; }
+.coupon-detail-body h3 { margin: 24px 0 12px; font-size: 17px; }
+.coupon-detail-body > p { line-height: 1.6; }
+.coupon-detail-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; padding-bottom: 20px; border-bottom: 1px solid var(--product-border); }
+.coupon-detail-summary div, .coupon-detail-list div { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.coupon-detail-summary span, .coupon-detail-list dt { color: var(--product-secondary); font-size: 12px; }
+.coupon-detail-summary strong { font-size: 18px; overflow-wrap: anywhere; }
+.coupon-detail-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin: 0; }
+.coupon-detail-list dd { margin: 0; overflow-wrap: anywhere; font-size: 14px; font-weight: 650; }
+.coupon-detail-description { margin: 18px 0 0; padding: 12px 14px; background: #f7f9f8; border-radius: 10px; }
+.coupon-detail-footnote { margin: 16px 0 0; color: var(--product-secondary); font-size: 12px; }
 .employee-coupon-number { font-variant-numeric: tabular-nums; font-weight: 700; }
 .employee-coupon-table time, .employee-coupon-muted { color: var(--product-secondary); font-variant-numeric: tabular-nums; }
 .employee-coupon-pagination { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding-top: 14px; color: var(--product-secondary); font-size: 13px; font-variant-numeric: tabular-nums; }
@@ -1561,4 +1579,5 @@ p { text-wrap: pretty; }
 .employee-manual-store { display: inline-flex; align-items: center; gap: 10px; margin: 8px 0 14px; font-size: 14px; }
 .employee-manual-store select { min-height: 38px; padding: 6px 10px; border: 1px solid var(--product-border); border-radius: 9px; background: #fff; }
 @media (max-width: 700px) { .employee-discount-section { padding: 18px; } .employee-discount-section .section-heading { align-items: flex-start; flex-direction: column; } .employee-coupon-search { width: 100%; } .employee-coupon-count { margin-inline-start: 0; } .employee-coupon-pagination { align-items: flex-start; flex-direction: column; } .employee-coupon-table { min-width: 580px; } }
+@media (max-width: 700px) { .coupon-detail-body { padding: 18px; } .coupon-detail-summary, .coupon-detail-list { grid-template-columns: 1fr 1fr; } }
 @media (max-width: 700px) { .centered-dialog.order-investigation { width: calc(100vw - 16px); max-height: calc(100dvh - 16px); } .order-investigation .drawer-body { padding: 12px; } .order-investigation .identity-grid { grid-template-columns: 1fr; } .employee-rules-grid { grid-template-columns: 1fr; } }
