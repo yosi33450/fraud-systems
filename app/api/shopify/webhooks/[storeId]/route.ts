@@ -73,6 +73,7 @@ export async function POST(request: Request, context: { params: Promise<{ storeI
     return NextResponse.json({ accepted: true, storeId, webhookId, topic, duplicate: result.duplicate, caseId: result.case?.id ?? null, notificationsQueued: deliveries.length }, { status: 202 });
   } catch (error) {
     const message = error instanceof Error ? error.message : "WEBHOOK_PROCESSING_FAILED";
+    console.error("[shopify-webhook] processing failed", { storeId, topic, code: message });
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
