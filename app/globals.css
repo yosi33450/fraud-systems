@@ -702,9 +702,9 @@ h1, h2, h3, h4, .brand-block strong {
 .cluster-identity { min-width: 0; }
 .cluster-identity > strong { display: block; overflow: hidden; font-size: 16px; font-weight: 750; letter-spacing: -.02em; text-overflow: ellipsis; white-space: nowrap; }
 .cluster-identity > span { display: block; margin-top: 2px; color: var(--muted); font-size: 13px; }
-.cluster-order-date { display: flex; flex-wrap: wrap; align-items: baseline; gap: 5px 9px; margin-top: 9px; color: var(--slate); font-size: 13px; }
-.cluster-order-date span { color: var(--muted); font-size: 12px; }
-.cluster-order-date time { color: var(--ink); font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums; unicode-bidi: isolate; }
+.cluster-order-date { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px; margin-top: 10px; color: var(--slate); }
+.cluster-order-date span { color: var(--muted); font-size: 13px; font-weight: 600; }
+.cluster-order-date time { color: var(--ink); font-size: 18px; font-weight: 750; line-height: 1.2; letter-spacing: -.015em; font-variant-numeric: tabular-nums; unicode-bidi: isolate; }
 .cluster-signals { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
 .cluster-signals span { display: inline-flex; align-items: center; gap: 5px; min-height: 25px; padding: 2px 8px; border: 1px solid rgb(16 37 29 / .08); border-radius: 999px; color: var(--slate); background: rgb(244 248 246 / .82); font-size: 11px; font-weight: 650; }
 .cluster-signals svg { color: var(--trust); }
