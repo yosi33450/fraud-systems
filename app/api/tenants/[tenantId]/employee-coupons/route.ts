@@ -38,7 +38,7 @@ export async function GET(request: Request, context: { params: Promise<{ tenantI
   const prefix = (url.searchParams.get("prefix") ?? "").trim().toLowerCase();
   const store = resolveStore(storeId);
   if (!store || store.tenantId !== tenantId) return NextResponse.json({ error: "STORE_NOT_FOUND" }, { status: 404 });
-  if (!/^[a-z0-9_-]{2,24}$/.test(prefix)) return NextResponse.json({ error: "INVALID_PREFIX" }, { status: 400 });
+  if (prefix && !/^[a-z0-9_-]{2,24}$/.test(prefix)) return NextResponse.json({ error: "INVALID_PREFIX" }, { status: 400 });
   const observedCodes = getObservedEmployeeDiscountCodes(tenantId, storeId, prefix);
   try {
     const connection = await getFreshStoreConnection(tenantId, storeId);

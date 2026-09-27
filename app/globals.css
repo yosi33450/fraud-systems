@@ -1590,6 +1590,18 @@ p { text-wrap: pretty; }
 .shopify-employee-coupon-table td { padding: 11px 14px; border-top: 1px solid var(--product-border); color: var(--product-secondary); font-size: 13px; }
 .shopify-employee-coupon-table td strong { display: block; color: var(--ink); font-size: 14px; }
 .shopify-employee-coupon-table td small { display: block; margin-top: 2px; color: var(--product-muted); font-size: 11px; }
+.employee-management-page .employee-discount-section,
+.employee-management-page .shopify-employee-coupon-catalog { display: none; }
+.discounts-page .compact-overview,
+.discounts-page .employee-monitoring-settings > .section-heading,
+.discounts-page .employee-prefix-setting,
+.discounts-page .employee-monitoring-settings > [role="status"],
+.discounts-page .employee-secondary-rules,
+.discounts-page .employee-form,
+.discounts-page > .case-section { display: none; }
+.discounts-page { display: flex; flex-direction: column; }
+.discounts-page .employee-monitoring-settings { order: 1; margin-top: 0; }
+.discounts-page .employee-discount-section { order: 2; }
 .employee-manual-store { display: inline-flex; align-items: center; gap: 10px; margin: 8px 0 14px; font-size: 14px; }
 .employee-manual-store select { min-height: 38px; padding: 6px 10px; border: 1px solid var(--product-border); border-radius: 9px; background: #fff; }
 @media (max-width: 700px) { .employee-discount-section { padding: 18px; } .employee-discount-section .section-heading { align-items: flex-start; flex-direction: column; } .employee-coupon-search { width: 100%; } .employee-coupon-count { margin-inline-start: 0; } .employee-coupon-pagination { align-items: flex-start; flex-direction: column; } .employee-coupon-table { min-width: 580px; } }
