@@ -1160,6 +1160,21 @@ p { text-wrap: pretty; }
 .employees-page .employee-form { padding: 18px 20px; border-color: var(--product-border); border-radius: var(--radius-panel); box-shadow: none; }
 .employees-page .employee-form label { color: var(--product-secondary); font-size: 12px; }
 .employees-page .employee-form input { min-height: 42px; border-color: var(--product-border-strong); border-radius: var(--radius-control); font-size: 14px; }
+.employee-management-section .section-heading { justify-content: space-between; }
+.employee-add-button { flex: 0 0 auto; }
+.employee-create-form { grid-template-columns: 1fr 1.45fr 1fr auto; align-items: stretch; gap: 16px; margin: 0; padding: 20px; border: 0; border-bottom: 1px solid var(--product-border); border-radius: 0; background: #fbfcfb; }
+.employee-form-group { min-width: 0; }
+.employee-form-group > strong { display: block; margin-bottom: 12px; color: var(--ink); font-size: 13px; font-weight: 720; }
+.employee-form-group > div { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.employee-form-group label { min-width: 0; }
+.employee-form-group .employee-address-field { grid-column: 1 / -1; }
+.employee-coupon-field { padding-inline-start: 16px; border-inline-start: 1px solid var(--product-border); }
+.employee-coupon-field label > span { color: var(--product-secondary); font-size: 11px; font-weight: 500; line-height: 1.45; }
+.employee-form-actions { display: flex; flex-direction: column; justify-content: flex-end; gap: 8px; min-width: 134px; }
+.employee-form-actions .primary-button { width: 100%; }
+.employee-form-actions p { margin: 0; color: var(--critical); font-size: 11px; line-height: 1.45; }
+@media (max-width: 1120px) { .employee-create-form { grid-template-columns: 1fr 1fr; } .employee-coupon-field { padding-inline-start: 0; border-inline-start: 0; } .employee-form-actions { flex-direction: row; align-items: center; } .employee-form-actions .primary-button { width: auto; } }
+@media (max-width: 700px) { .employee-management-section .section-heading { align-items: flex-start; gap: 12px; } .employee-create-form { grid-template-columns: 1fr; padding: 16px; } .employee-form-group > div { grid-template-columns: 1fr; } .employee-form-group .employee-address-field { grid-column: auto; } .employee-form-actions { flex-direction: column; align-items: stretch; } .employee-form-actions .primary-button { width: 100%; } }
 
 /* Rules are shown as one configurable rulebook. */
 .rules-page .rule-summary { min-height: 76px; grid-template-columns: repeat(3, 1fr) auto; gap: 0; margin-bottom: 14px; padding: 0 18px; border-color: var(--product-border); border-radius: var(--radius-panel); box-shadow: none; }
