@@ -418,6 +418,7 @@ export function FraudCommandCenter() {
             casesOnly={view === "cases"}
             onRefresh={refreshSnapshot}
             refreshing={syncState === "loading"}
+            initializing={syncState === "loading" && storeData.length === 0}
             deliveries={deliveries}
             onShowAll={() => setView("cases")}
             onOpenNotifications={() => setView("notifications")}
@@ -459,9 +460,12 @@ type CaseCluster = {
 
 const severityOrder: Record<Severity, number> = { low: 0, medium: 1, high: 2, critical: 3 };
 const isRealEmail = (value: string) => value.includes("@") && !value.startsWith("לא זמין");
-const orderTime = (item: FraudCase) => item.occurredAt ?? item.createdAt;
+const hasOrderTime = (value: unknown): value is string => typeof value === "string" && value.trim().length > 0;
+const orderTime = (item: FraudCase) => [item.occurredAt, item.createdAt, ...item.evidence.map((evidence) => evidence.timestamp)].find(hasOrderTime);
 const orderDateFormatter = new Intl.DateTimeFormat("he-IL", { dateStyle: "short", timeStyle: "short", timeZone: "Asia/Jerusalem" });
-const displayOrderTime = (value: string) => Number.isFinite(Date.parse(value)) ? orderDateFormatter.format(new Date(value)) : "מועד לא זמין";
+const canFormatOrderTime = (value: string | undefined) => Boolean(value && Number.isFinite(Date.parse(value)));
+const isFormattableOrderTime = (value: string | undefined): value is string => canFormatOrderTime(value);
+const displayOrderTime = (value: string | undefined) => !value ? "מועד לא התקבל מ־Shopify" : canFormatOrderTime(value) ? orderDateFormatter.format(new Date(value)) : value;
 
 function relatedCaseCount(cases: FraudCase[], source: FraudCase): number {
   const email = source.email.trim().toLowerCase();
@@ -516,11 +520,11 @@ function clusterCases(items: FraudCase[]): CaseCluster[] {
   }).sort((left, right) => severityOrder[right.severity] - severityOrder[left.severity] || right.cases.length - left.cases.length);
 }
 
-function Overview({ cases, ledger, query, setQuery, severity, setSeverity, store, setStore, stores, onOpen, casesOnly, onRefresh, refreshing, deliveries, onShowAll, onOpenNotifications, onOpenStores }: {
+function Overview({ cases, ledger, query, setQuery, severity, setSeverity, store, setStore, stores, onOpen, casesOnly, onRefresh, refreshing, initializing, deliveries, onShowAll, onOpenNotifications, onOpenStores }: {
   ledger?: GiftLedger;
   cases: FraudCase[]; query: string; setQuery: (value: string) => void; severity: Severity | "all"; setSeverity: (value: Severity | "all") => void;
   store: string; setStore: (value: string) => void; stores: Store[]; onOpen: (item: FraudCase) => void; casesOnly: boolean;
-  onRefresh: () => Promise<void>; refreshing: boolean;
+  onRefresh: () => Promise<void>; refreshing: boolean; initializing: boolean;
   deliveries: NotificationDelivery[];
   onShowAll: () => void; onOpenNotifications: () => void; onOpenStores: () => void;
 }) {
@@ -534,9 +538,9 @@ function Overview({ cases, ledger, query, setQuery, severity, setSeverity, store
   const clusters = useMemo(() => clusterCases(displayCases), [displayCases]);
   const selectedCluster = clusters.find((cluster) => cluster.id === selectedClusterId);
   return <div className={`page-content product-page ${casesOnly ? "evidence-workspace" : "overview-workspace"}`}>
-    <PageHeading eyebrow="" title={casesOnly ? "התראות וחקירות" : hasStores ? "תמונת מצב" : "חיבור חנות Shopify"} description={hasStores ? undefined : "חבר חנות כדי להתחיל לנטר הזמנות."} action={hasStores ? <button className="secondary-button" onClick={() => void onRefresh()} disabled={refreshing}><RefreshCcw size={15} className={refreshing ? "spin" : ""} /> {refreshing ? "מסנכרן…" : "רענון נתונים"}</button> : <button className="primary-button" onClick={onOpenStores}><Plus size={16} /> חיבור חנות</button>} />
+    <PageHeading eyebrow="" title={casesOnly ? "התראות וחקירות" : initializing ? "טוען את מרכז הבקרה…" : hasStores ? "תמונת מצב" : "חיבור חנות Shopify"} description={initializing || hasStores ? undefined : "חבר חנות כדי להתחיל לנטר הזמנות."} action={hasStores ? <button className="secondary-button" onClick={() => void onRefresh()} disabled={refreshing}><RefreshCcw size={15} className={refreshing ? "spin" : ""} /> {refreshing ? "מסנכרן…" : "רענון נתונים"}</button> : initializing ? undefined : <button className="primary-button" onClick={onOpenStores}><Plus size={16} /> חיבור חנות</button>} />
 
-    {!casesOnly && !hasStores ? <section className="connection-empty"><div className="connection-empty-icon"><StoreIcon size={28} /></div><div><span className="eyebrow">מתחילים מנתונים אמיתיים</span><h2>סביבת העבודה נקייה ומוכנה לחיבור</h2><p>לא יופיעו עסקאות, עובדים, התראות או נתוני לקוחות עד שחנות Shopify אמיתית תחובר.</p></div><ol><li><strong>1</strong><span>מחברים חנות ומאשרים גישה להזמנות</span></li><li><strong>2</strong><span>בוחרים חוקי סיכון ונמעני אימייל</span></li><li><strong>3</strong><span>הזמנות חדשות נבדקות בזמן אמת</span></li></ol><button className="primary-button" onClick={onOpenStores}>עבור לחיבור חנות <ChevronLeft size={15} /></button></section> : null}
+    {!casesOnly && initializing ? <section className="connection-empty dashboard-initial-loading" aria-busy="true"><div className="connection-empty-icon"><RefreshCcw size={28} className="spin" /></div><div><span className="eyebrow">טוען נתונים שמורים</span><h2>מכינים את סביבת העבודה</h2><p>בודקים את החנויות, ההתראות וההזמנות האחרונות שלך.</p></div></section> : !casesOnly && !hasStores ? <section className="connection-empty"><div className="connection-empty-icon"><StoreIcon size={28} /></div><div><span className="eyebrow">מתחילים מנתונים אמיתיים</span><h2>סביבת העבודה נקייה ומוכנה לחיבור</h2><p>לא יופיעו עסקאות, עובדים, התראות או נתוני לקוחות עד שחנות Shopify אמיתית תחובר.</p></div><ol><li><strong>1</strong><span>מחברים חנות ומאשרים גישה להזמנות</span></li><li><strong>2</strong><span>בוחרים חוקי סיכון ונמעני אימייל</span></li><li><strong>3</strong><span>הזמנות חדשות נבדקות בזמן אמת</span></li></ol><button className="primary-button" onClick={onOpenStores}>עבור לחיבור חנות <ChevronLeft size={15} /></button></section> : null}
 
     {!casesOnly && hasStores ? <>
       <section className="overview-brief" aria-label="תמונת מצב">
@@ -569,7 +573,7 @@ function Overview({ cases, ledger, query, setQuery, severity, setSeverity, store
       <p>מקובצות לפי פרטי זיהוי משותפים</p>
     </section> : null}
 
-    <section className="case-section">
+    {!initializing ? <section className="case-section">
       <div className="section-heading"><div><h2>{casesOnly ? "התראות לפי זהות" : "תור החלטות"}</h2><span>{clusters.length} קבוצות · {displayCases.length} הזמנות</span></div>{casesOnly ? <button className="secondary-button" onClick={() => setShowClosed((value) => !value)}>{showClosed ? "הצג פעילות בלבד" : `הצג גם סגורות (${cases.length - activeCases.length})`}</button> : <button className="text-button" onClick={onShowAll}>הצג הכל <ChevronLeft size={14} /></button>}</div>
       <div className="filter-bar">
         <label className="search-box"><Search size={16} /><span className="sr-only">חיפוש</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="חיפוש הזמנה, לקוח או סיבה" /></label>
@@ -585,7 +589,8 @@ function Overview({ cases, ledger, query, setQuery, severity, setSeverity, store
           const closedByRules = activeClusterCases.length === 0 && cluster.cases.every(isAutomaticallyResolved);
           const activeSeverity = activeClusterCases.reduce<Severity>((highest, item) => severityOrder[item.severity] > severityOrder[highest] ? item.severity : highest, "low");
           const statusCase = activeClusterCases.find((item) => item.status === "action") ?? activeClusterCases.find((item) => item.status === "review") ?? activeClusterCases[0] ?? cluster.cases[0];
-          const latestOrderTime = cluster.cases.map(orderTime).filter((value) => Number.isFinite(Date.parse(value))).sort((a, b) => Date.parse(b) - Date.parse(a))[0];
+          const clusterTimes = cluster.cases.map(orderTime);
+          const latestOrderTime = clusterTimes.filter(isFormattableOrderTime).sort((a, b) => Date.parse(b) - Date.parse(a))[0] ?? clusterTimes.find(hasOrderTime);
           const repeatedBy = cluster.cases.length > 1
             ? cluster.giftCardLinks > 0 ? "רכישה ומימוש מקושרים דרך Gift Card"
               : cluster.emails.length === 1 ? `אותו אימייל · ${cluster.emails[0]}`
@@ -596,7 +601,7 @@ function Overview({ cases, ledger, query, setQuery, severity, setSeverity, store
           return <article className={`case-cluster ${cluster.cases.length > 1 ? "case-cluster-linked" : ""}`} key={cluster.id}>
             <button className="case-cluster-summary" onClick={() => cluster.cases.length === 1 ? onOpen(cluster.cases[0]) : setSelectedClusterId(cluster.id)} aria-haspopup="dialog">
               <div className="cluster-severity">{closedByRules ? <span className="closed-by-rules"><CheckCircle2 size={15} /> נסגר לפי החוקים</span> : <SeverityBadge severity={activeClusterCases.length ? activeSeverity : cluster.severity} score={Math.max(...(activeClusterCases.length ? activeClusterCases : cluster.cases).map((item) => item.score))} />}</div>
-              <div className="cluster-identity"><strong>{repeatedBy}</strong><span>{cluster.cases.length > 1 ? cluster.giftCardLinks > 0 ? `${cluster.cases.length} הזמנות מקושרות ברכישה ובמימוש` : `${cluster.cases.length} הזמנות עם פרטי זיהוי משותפים` : `${cluster.cases[0].orderNumber} · ${cluster.cases[0].reason}`}</span><div className="cluster-order-date"><span>{cluster.cases.length > 1 ? "הזמנה אחרונה" : "מועד ההזמנה"}</span><time dateTime={latestOrderTime ?? undefined} dir="ltr">{latestOrderTime ? displayOrderTime(latestOrderTime) : "מועד לא זמין"}</time></div><div className="cluster-signals">{cluster.emails.length > 1 ? <span><Mail size={13} /> {cluster.emails.length} אימיילים</span> : null}{cluster.ips.length === 1 && cluster.cases.length > 1 ? <span><Wifi size={13} /> IP משותף</span> : null}{cluster.phones.length === 1 && cluster.cases.length > 1 ? <span><Phone size={13} /> טלפון משותף</span> : null}{cluster.giftCardOrders > 0 ? <span><Gift size={13} /> {cluster.giftCardOrders} Gift Card</span> : null}{cluster.giftCardLinks > 0 ? <span className="gift-card-link-signal"><Fingerprint size={13} /> {cluster.giftCardLinks} מימושים מקושרים</span> : null}</div></div>
+              <div className="cluster-identity"><strong>{repeatedBy}</strong><span>{cluster.cases.length > 1 ? cluster.giftCardLinks > 0 ? `${cluster.cases.length} הזמנות מקושרות ברכישה ובמימוש` : `${cluster.cases.length} הזמנות עם פרטי זיהוי משותפים` : `${cluster.cases[0].orderNumber} · ${cluster.cases[0].reason}`}</span><div className="cluster-order-date"><span>{cluster.cases.length > 1 ? "הזמנה אחרונה" : "מועד ההזמנה"}</span><time dateTime={canFormatOrderTime(latestOrderTime) ? latestOrderTime : undefined} dir="ltr">{displayOrderTime(latestOrderTime)}</time></div><div className="cluster-signals">{cluster.emails.length > 1 ? <span><Mail size={13} /> {cluster.emails.length} אימיילים</span> : null}{cluster.ips.length === 1 && cluster.cases.length > 1 ? <span><Wifi size={13} /> IP משותף</span> : null}{cluster.phones.length === 1 && cluster.cases.length > 1 ? <span><Phone size={13} /> טלפון משותף</span> : null}{cluster.giftCardOrders > 0 ? <span><Gift size={13} /> {cluster.giftCardOrders} Gift Card</span> : null}{cluster.giftCardLinks > 0 ? <span className="gift-card-link-signal"><Fingerprint size={13} /> {cluster.giftCardLinks} מימושים מקושרים</span> : null}</div></div>
               <div className="cluster-stat"><span>הזמנות</span><strong>{cluster.cases.length}</strong></div>
               {isGiftJourney ? <div className="cluster-stat cluster-gift-amounts"><span>נרכש בגיפטקארדים</span><strong>{giftSummary.missingPurchaseAmounts ? "נדרשת השלמת סכום" : moneyTotals(giftSummary.purchased)}</strong><span>מומש מתוכם <bdi>{moneyTotals(giftSummary.linkedRedeemed)}</bdi></span></div> : <div className="cluster-stat"><span>סכום הזמנות</span><strong>{formatCurrency(cluster.totalAmount)}</strong></div>}
               <div className="cluster-status"><span className={`status status-${statusCase.status}`}>{closedByRules ? "נסגר אוטומטית" : caseStatusLabel(statusCase)}</span><ChevronLeft size={18} /></div>
@@ -605,7 +610,7 @@ function Overview({ cases, ledger, query, setQuery, severity, setSeverity, store
         })}
         {displayCases.length === 0 ? <div className="empty-state"><Shield size={26} /><strong>{hasStores ? "אין כרגע התראות פעילות" : "אין נתונים להצגה"}</strong><span>{hasStores ? "שינויי החוקים חושבו מחדש. הזמנות חשודות חדשות יופיעו כאן." : "חבר חנות Shopify כדי להתחיל לקבל ולבדוק הזמנות."}</span></div> : null}
       </div>
-    </section>
+    </section> : null}
     {selectedCluster ? <ClusterInvestigation cluster={selectedCluster} ledger={ledger} onClose={() => setSelectedClusterId(null)} onOpen={(item) => { setSelectedClusterId(null); onOpen(item); }} /> : null}
   </div>;
 }
@@ -625,7 +630,7 @@ function ClusterInvestigation({ cluster, ledger, onClose, onOpen }: { cluster: C
       {summary.missingPurchaseAmounts ? <p role="status" className="gift-ledger-message">חסר פירוט סכום ב־{summary.missingPurchaseAmounts} הזמנות רכישה. סריקת Shopify במעקב גיפטקארדים תשלים את הנתונים.</p> : null}
       {summary.refunded.length ? <p className="gift-money-note">החזרים מוצלחים לגיפטקארדים בהזמנות הקבוצה: <bdi>{moneyTotals(summary.refunded)}</bdi></p> : null}
       <div className="gift-ledger-tabs" role="group" aria-label="סוג הזמנות בקבוצה">{(["redemptions", "purchases", "other"] as const).map((key) => <button key={key} aria-pressed={section === key} onClick={() => setSection(key)}>{titles[key]} <span>{summary[key].length}</span></button>)}</div></> : <p className="gift-money-note">פתח הזמנה להצגת הראיות וקבלת החלטה. סטטוס כל הזמנה נשמר בנפרד.</p>}
-      <div className="cluster-dialog-orders">{rows.map((item) => <button key={item.id} className="cluster-dialog-order" onClick={() => onOpen(item)} aria-haspopup="dialog"><span className="order-number"><bdi>#{item.orderNumber.replace(/^#/, "")}</bdi><time dateTime={orderTime(item)} dir="ltr">{displayOrderTime(orderTime(item))}</time></span><span className="order-buyer"><strong>{customerDisplayName(item)}</strong><small><bdi>{isRealEmail(item.email) ? item.email : "פרטי קשר לא התקבלו"}</bdi></small><small>{item.reason}</small></span><span className="order-value"><strong><bdi>{formatCurrency(item.amount)}</bdi></strong><small>סכום ההזמנה</small></span><span className={`status status-${item.status}`}>{caseStatusLabel(item)}</span><ChevronLeft size={17} /></button>)}{!rows.length ? <p className="gift-ledger-empty">אין הזמנות מסוג זה בקבוצה.</p> : null}</div>
+      <div className="cluster-dialog-orders">{rows.map((item) => { const itemOrderTime = orderTime(item); return <button key={item.id} className="cluster-dialog-order" onClick={() => onOpen(item)} aria-haspopup="dialog"><span className="order-number"><bdi>#{item.orderNumber.replace(/^#/, "")}</bdi><time dateTime={canFormatOrderTime(itemOrderTime) ? itemOrderTime : undefined} dir="ltr">{displayOrderTime(itemOrderTime)}</time></span><span className="order-buyer"><strong>{customerDisplayName(item)}</strong><small><bdi>{isRealEmail(item.email) ? item.email : "פרטי קשר לא התקבלו"}</bdi></small><small>{item.reason}</small></span><span className="order-value"><strong><bdi>{formatCurrency(item.amount)}</bdi></strong><small>סכום ההזמנה</small></span><span className={`status status-${item.status}`}>{caseStatusLabel(item)}</span><ChevronLeft size={17} /></button>; })}{!rows.length ? <p className="gift-ledger-empty">אין הזמנות מסוג זה בקבוצה.</p> : null}</div>
     </div><footer className="cluster-dialog-footer">פתיחת הזמנה תציג חלון חקירה במרכז. סגירתו תחזיר אותך לקבוצה הזאת.</footer>
   </CenteredDialog>;
 }
