@@ -742,6 +742,7 @@ function StoresScreen({ stores, onConnect, onSync, syncing, syncProgress }: { st
 function EmployeesScreen({ employees, activity, settings, stores, onCreate, onUpdate, onSaveSettings }: { employees: Employee[]; activity: EmployeeDiscountActivity; settings: EmployeeMonitoringSettings; stores: Store[]; onCreate: (input: Pick<Employee, "name" | "email" | "department"> & Partial<Pick<Employee, "privateEmail" | "address" | "couponCodes">>) => Promise<void>; onUpdate: (id: string, input: Pick<Employee, "name" | "email" | "department"> & Partial<Pick<Employee, "privateEmail" | "address" | "couponCodes">>) => Promise<Employee>; onSaveSettings: (input: EmployeeMonitoringSettings) => Promise<void> }) {
   type CouponRow = EmployeeDiscountActivity["codes"][number];
   type CouponDetails = { type: string; title: string; summary: string; status: string; startsAt: string | null; endsAt: string | null; usageLimit: number | null; shopifyDiscountUses: number | null; shopifyCodeUses: number | null };
+  type ShopifyCoupon = { code: string; title: string; status: string; shopifyUses: number | null };
   const [adding, setAdding] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -760,9 +761,30 @@ function EmployeesScreen({ employees, activity, settings, stores, onCreate, onUp
   const [selectedCoupon, setSelectedCoupon] = useState<CouponRow | null>(null);
   const [couponDetails, setCouponDetails] = useState<CouponDetails | null>(null);
   const [couponDetailState, setCouponDetailState] = useState<"loading" | "ready" | "permission" | "not-found" | "error">("loading");
+  const [shopifyCoupons, setShopifyCoupons] = useState<ShopifyCoupon[]>([]);
+  const [shopifyCouponState, setShopifyCouponState] = useState<"idle" | "loading" | "ready" | "permission" | "error">("idle");
   const [employeeEditSaving, setEmployeeEditSaving] = useState(false);
   const [employeeEditError, setEmployeeEditError] = useState("");
   useEffect(() => setDraft(settings), [settings]);
+  useEffect(() => {
+    const prefix = settings.couponPrefix.trim();
+    const store = stores[0];
+    if (!prefix || !store) { setShopifyCoupons([]); setShopifyCouponState("idle"); return; }
+    const controller = new AbortController();
+    setShopifyCouponState("loading");
+    fetch(`/api/tenants/${tenantId}/employee-coupons?storeId=${encodeURIComponent(store.id)}&prefix=${encodeURIComponent(prefix)}`, { signal: controller.signal, cache: "no-store" })
+      .then(async (response) => {
+        if (!response.ok) throw new Error("COUPON_CATALOG_FAILED");
+        return response.json() as Promise<{ coupons?: ShopifyCoupon[]; warning?: "permission" | "connection" | "scan_failed" }>;
+      })
+      .then((result) => {
+        if (controller.signal.aborted) return;
+        setShopifyCoupons(result.coupons ?? []);
+        setShopifyCouponState(result.warning === "permission" ? "permission" : result.warning ? "error" : "ready");
+      })
+      .catch(() => { if (!controller.signal.aborted) setShopifyCouponState("error"); });
+    return () => controller.abort();
+  }, [settings.couponPrefix, stores]);
   useEffect(() => {
     if (!selectedCoupon) return;
     const controller = new AbortController();
@@ -832,7 +854,7 @@ function EmployeesScreen({ employees, activity, settings, stores, onCreate, onUp
         <details className="employee-discount-orders"><summary>הצג שימושים אחרונים ({shownActivity?.recentUses.length ?? 0}) <ChevronDown size={16} /></summary><p className="context-note">מוצגים עד 100 השימושים האחרונים. ספירת השימושים לכל קוד למעלה כוללת את כל התקופה שנבחרה.</p><div className="table-wrap"><table className="case-table"><thead><tr><th>תאריך</th><th>קוד הנחה</th><th>הזמנה</th><th>רוכש</th><th>קשר לעובד</th><th>סכום הזמנה</th></tr></thead><tbody>{shownActivity?.recentUses.map((use) => { const owner = employees.find((employee) => employee.id === use.assignedEmployeeId); return <tr key={`${use.storeId}:${use.orderId}:${use.code}`}><td>{new Intl.DateTimeFormat("he-IL", { dateStyle: "short", timeStyle: "short" }).format(new Date(use.createdAt))}</td><td dir="ltr">{use.code}</td><td>{use.orderNumber ?? `#${use.orderId.split("/").at(-1)}`}</td><td dir="ltr">{use.email || "לא התקבל"}</td><td>{use.assignmentConflict ? "קוד משויך לכמה עובדים" : owner ? use.buyerMatchesEmployee ? `תואם ל${owner.name}` : use.buyerIdentityAvailable ? `קוד של ${owner.name} · פרטי רוכש אחרים` : `קוד של ${owner.name} · אין פרטי רוכש לאימות` : "קוד לא משויך"}</td><td>{formatCurrency(use.amount)}</td></tr>; })}</tbody></table></div></details>
       </> : <div className="employee-discount-empty"><strong>{couponSearch || couponFilter !== "all" ? "אין קודים התואמים לחיפוש" : "לא נמצאו שימושים בקודי הנחה"}</strong><span>{couponSearch || couponFilter !== "all" ? "אפשר לשנות את החיפוש או להציג את כל הקודים." : shownActivity?.ordersChecked === 0 ? "עדיין לא נקלטו הזמנות בתקופה הזו." : "בהזמנות שנקלטו לא נמצאו קודי הנחה."}</span></div>}
     </section>
-    <section className="employee-monitoring-settings"><div className="section-heading"><div><h2>זיהוי קודי עובדים</h2><span>הגדרה חד־פעמית של התחילית המזהה קודי הנחה ששייכים לעובדים</span></div></div><div className="employee-prefix-setting"><label>תחילית הקודים<input dir="ltr" value={draft.couponPrefix} onChange={(event) => setDraft({ ...draft, couponPrefix: event.target.value })} placeholder="OVED" /></label><p>אם התחילית היא <bdi>OVED</bdi>, כל קוד כמו <bdi>OVED30</bdi> או <bdi>OVEDTX</bdi> יסומן כקוד עובד בטבלת השימושים ובהתראות. אין צורך לסרוק או לרענן מכאן.</p><button className="primary-button" onClick={() => void onSaveSettings(draft).then(() => setSettingsNotice("תחילית קודי העובדים נשמרה והוחלה על הניטור.")).catch(() => setSettingsNotice("שמירת התחילית נכשלה."))}>שמור והחל</button></div>{settingsNotice ? <p role="status">{settingsNotice}</p> : null}<details className="employee-secondary-rules"><summary>בדיקות נוספות לעובדים <ChevronDown size={16} /></summary><div className="employee-rules-grid">
+    <section className="employee-monitoring-settings"><div className="section-heading"><div><h2>זיהוי קודי עובדים</h2><span>הגדרה חד־פעמית של התחילית המזהה קודי הנחה ששייכים לעובדים</span></div></div><div className="employee-prefix-setting"><label>תחילית הקודים<input dir="ltr" value={draft.couponPrefix} onChange={(event) => setDraft({ ...draft, couponPrefix: event.target.value })} placeholder="OVED" /></label><p>אם התחילית היא <bdi>OVED</bdi>, כל קוד כמו <bdi>OVED30</bdi> או <bdi>OVEDTX</bdi> יסומן כקוד עובד בטבלת השימושים ובהתראות.</p><button className="primary-button" onClick={() => void onSaveSettings(draft).then(() => setSettingsNotice("תחילית קודי העובדים נשמרה והוחלה על הניטור.")).catch(() => setSettingsNotice("שמירת התחילית נכשלה."))}>שמור והחל</button></div>{settingsNotice ? <p role="status">{settingsNotice}</p> : null}<section className="shopify-employee-coupon-catalog" aria-live="polite"><div><h3>קודי עובדים שקיימים ב־Shopify</h3><p>נמשכים ישירות מהחנות לפי התחילית <bdi>{settings.couponPrefix || "—"}</bdi>, גם אם טרם נעשה בהם שימוש.</p></div>{shopifyCouponState === "loading" ? <p>טוען קודים מהחנות…</p> : shopifyCouponState === "permission" ? <p role="alert">לחיבור הזה חסרה הרשאת <bdi>read_discounts</bdi>, ולכן Shopify לא מאפשרת לאפליקציה לקרוא את רשימת הקודים. הקודים שנוצלו בהזמנות עדיין מופיעים בטבלה למעלה.</p> : shopifyCouponState === "error" ? <p role="alert">לא הצלחנו לקרוא כעת את קודי העובדים מ־Shopify. נסה לרענן את הדף; אם הבעיה נמשכת, יש לבדוק את חיבור החנות.</p> : shopifyCouponState === "ready" && shopifyCoupons.length ? <div className="shopify-employee-coupon-table"><table><thead><tr><th>קוד</th><th>סטטוס</th><th>שימושים לפי Shopify</th></tr></thead><tbody>{shopifyCoupons.map((coupon) => <tr key={coupon.code}><td><strong dir="ltr">{coupon.code}</strong>{coupon.title ? <small>{coupon.title}</small> : null}</td><td>{coupon.status === "ACTIVE" ? "פעיל" : coupon.status === "EXPIRED" ? "פג תוקף" : coupon.status === "SCHEDULED" ? "מתוזמן" : coupon.status === "OBSERVED" ? "נמצא בהזמנות" : coupon.status || "לא זמין"}</td><td className="employee-coupon-number">{coupon.shopifyUses === null ? "לא זמין" : coupon.shopifyUses.toLocaleString("he-IL")}</td></tr>)}</tbody></table></div> : shopifyCouponState === "ready" ? <p>לא נמצאו בחנות קודים שמתחילים ב־<bdi>{settings.couponPrefix}</bdi>.</p> : <p>הזן תחילית ושמור כדי לראות את קודי העובדים הקיימים בחנות.</p>}</section><details className="employee-secondary-rules"><summary>בדיקות נוספות לעובדים <ChevronDown size={16} /></summary><div className="employee-rules-grid">
       <label><input type="checkbox" checked={draft.zeroAmount} onChange={(event) => setDraft({ ...draft, zeroAmount: event.target.checked })} /> התראה על הזמנה בסכום ₪0 עם התאמה לעובד</label>
       <label><input type="checkbox" checked={draft.giftCardAddressChange} onChange={(event) => setDraft({ ...draft, giftCardAddressChange: event.target.checked })} /> התראה כשגיפטקארד הקשור לעובד ממומש בכתובת אחרת</label>
       <label><input type="checkbox" checked={draft.repeatGiftCardUses} onChange={(event) => setDraft({ ...draft, repeatGiftCardUses: event.target.checked })} /> התראה על מימושים חוזרים של גיפטקארדים הקשורים לעובד</label>

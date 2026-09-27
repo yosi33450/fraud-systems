@@ -1580,6 +1580,16 @@ p { text-wrap: pretty; }
 .employee-prefix-setting label { display: flex; flex-direction: column; gap: 7px; color: var(--ink); font-size: 14px; font-weight: 600; }
 .employee-prefix-setting input { width: 180px; min-height: 40px; padding: 7px 11px; border: 1px solid var(--product-border); border-radius: 10px; font: inherit; }
 .employee-prefix-setting p { margin: 0; flex: 1 1 250px; color: var(--product-secondary); font-size: 13px; line-height: 1.5; }
+.shopify-employee-coupon-catalog { margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--product-border); }
+.shopify-employee-coupon-catalog h3 { margin: 0; color: var(--ink); font-size: 15px; }
+.shopify-employee-coupon-catalog > div > p, .shopify-employee-coupon-catalog > p { margin: 5px 0 0; color: var(--product-secondary); font-size: 13px; line-height: 1.55; }
+.shopify-employee-coupon-catalog > p[role="alert"] { color: #9a5b0b; }
+.shopify-employee-coupon-table { margin-top: 14px; overflow: hidden; border: 1px solid var(--product-border); border-radius: 10px; }
+.shopify-employee-coupon-table table { width: 100%; border-collapse: collapse; text-align: right; }
+.shopify-employee-coupon-table th { padding: 10px 14px; color: var(--product-muted); background: #f8faf8; font-size: 11px; font-weight: 650; }
+.shopify-employee-coupon-table td { padding: 11px 14px; border-top: 1px solid var(--product-border); color: var(--product-secondary); font-size: 13px; }
+.shopify-employee-coupon-table td strong { display: block; color: var(--ink); font-size: 14px; }
+.shopify-employee-coupon-table td small { display: block; margin-top: 2px; color: var(--product-muted); font-size: 11px; }
 .employee-manual-store { display: inline-flex; align-items: center; gap: 10px; margin: 8px 0 14px; font-size: 14px; }
 .employee-manual-store select { min-height: 38px; padding: 6px 10px; border: 1px solid var(--product-border); border-radius: 9px; background: #fff; }
 @media (max-width: 700px) { .employee-discount-section { padding: 18px; } .employee-discount-section .section-heading { align-items: flex-start; flex-direction: column; } .employee-coupon-search { width: 100%; } .employee-coupon-count { margin-inline-start: 0; } .employee-coupon-pagination { align-items: flex-start; flex-direction: column; } .employee-coupon-table { min-width: 580px; } }
