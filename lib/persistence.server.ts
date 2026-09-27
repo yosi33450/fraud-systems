@@ -152,10 +152,18 @@ async function saveEncryptedState(payload: EncryptedState) {
 }
 
 export async function hydrateOperationalState() {
-  globalThis.__shieldLedgerHydration ??= (async () => {
+  if (!globalThis.__shieldLedgerHydration) {
+    const hydration = (async () => {
     const payload = await loadEncryptedState();
     if (payload) restoreOperationalState(decryptPrivateData(payload));
-  })();
+    })();
+    // A short database outage must not poison a warm serverless instance forever.
+    // Reset the cached promise on failure so the next request can recover normally.
+    globalThis.__shieldLedgerHydration = hydration.catch((error) => {
+      globalThis.__shieldLedgerHydration = undefined;
+      throw error;
+    });
+  }
   return globalThis.__shieldLedgerHydration;
 }
 
