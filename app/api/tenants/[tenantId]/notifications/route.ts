@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getNotificationSettings, updateNotificationSettings } from "@/lib/operational-store";
+import { sendTestNotification } from "@/lib/email-notifications.server";
 import type { NotificationSettings, Severity } from "@/lib/types";
 import { hydrateOperationalState, persistOperationalState } from "@/lib/persistence.server";
 
@@ -26,4 +27,13 @@ export async function PATCH(request: Request, context: { params: Promise<{ tenan
   const notifications = updateNotificationSettings(tenantId, patch);
   await persistOperationalState();
   return NextResponse.json({ notifications });
+}
+
+export async function POST(_request: Request, context: { params: Promise<{ tenantId: string }> }) {
+  await hydrateOperationalState();
+  const { tenantId } = await context.params;
+  if (getNotificationSettings(tenantId).recipients.length === 0) return NextResponse.json({ error: "NO_RECIPIENTS" }, { status: 400 });
+  const deliveries = await sendTestNotification(tenantId);
+  await persistOperationalState();
+  return NextResponse.json({ deliveries });
 }

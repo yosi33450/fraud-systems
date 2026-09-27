@@ -293,6 +293,14 @@ export function FraudCommandCenter() {
     }
   };
 
+  const sendTestNotification = async () => {
+    const response = await fetch(`/api/tenants/${tenantId}/notifications`, { method: "POST" });
+    if (!response.ok) throw new Error("TEST_EMAIL_FAILED");
+    const payload = await response.json() as { deliveries: NotificationDelivery[] };
+    setDeliveries((current) => [...payload.deliveries, ...current]);
+    return payload.deliveries;
+  };
+
   const saveRule = async (rule: RiskRule) => {
     const response = await fetch(`/api/tenants/${tenantId}/rules/${rule.id}`, {
       method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(rule),
@@ -432,7 +440,7 @@ export function FraudCommandCenter() {
         {view === "employees" ? <EmployeesScreen mode="employees" employees={employeeData} activity={employeeDiscountActivity} settings={employeeSettings} stores={storeData} onCreate={createEmployee} onUpdate={updateEmployeeProfile} onSaveSettings={saveEmployeeMonitoring} /> : null}
         {view === "discounts" ? <EmployeesScreen mode="discounts" employees={employeeData} activity={employeeDiscountActivity} settings={employeeSettings} stores={storeData} onCreate={createEmployee} onUpdate={updateEmployeeProfile} onSaveSettings={saveEmployeeMonitoring} /> : null}
         {view === "rules" ? <RulesScreen rules={ruleData} onToggle={toggleRule} onSave={saveRule} onCreate={createRule} /> : null}
-        {view === "notifications" ? <NotificationsScreen settings={notifications} deliveries={deliveries} onSave={saveNotifications} /> : null}
+        {view === "notifications" ? <NotificationsScreen settings={notifications} deliveries={deliveries} onSave={saveNotifications} onSendTest={sendTestNotification} /> : null}
         {view === "network" ? <NetworkScreen reports={reports} cases={caseData} onRelease={releaseBlock} /> : null}
         {view === "team" ? <TeamScreen /> : null}
         {view === "platform" ? <PlatformScreen /> : null}
@@ -1025,12 +1033,14 @@ function RulesScreen({ rules, onToggle, onSave, onCreate }: { rules: RiskRule[];
   </div>;
 }
 
-function NotificationsScreen({ settings, deliveries, onSave }: { settings: NotificationSettings; deliveries: NotificationDelivery[]; onSave: (settings: NotificationSettings) => Promise<void> }) {
+function NotificationsScreen({ settings, deliveries, onSave, onSendTest }: { settings: NotificationSettings; deliveries: NotificationDelivery[]; onSave: (settings: NotificationSettings) => Promise<void>; onSendTest: () => Promise<NotificationDelivery[]> }) {
   const [draft, setDraft] = useState(settings);
   const [recipientInput, setRecipientInput] = useState("");
   const [recipientError, setRecipientError] = useState("");
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testNotice, setTestNotice] = useState("");
   useEffect(() => { setDraft(settings); }, [settings]);
   const toggleSeverity = (severity: Severity) => setDraft((current) => ({ ...current, severities: current.severities.includes(severity) ? current.severities.filter((item) => item !== severity) : [...current.severities, severity] }));
   const addRecipient = () => {
@@ -1059,7 +1069,7 @@ function NotificationsScreen({ settings, deliveries, onSave }: { settings: Notif
       <fieldset><legend>על אילו תיקים לשלוח אימייל?</legend><div className="severity-options">{(["critical", "high", "medium"] as Severity[]).map((severity) => <label key={severity} className={`severity-option ${draft.severities.includes(severity) ? "selected" : ""}`}><input type="checkbox" checked={draft.severities.includes(severity)} onChange={() => toggleSeverity(severity)} /><SeverityBadge severity={severity} /><span>{severity === "critical" ? "דורש טיפול מיידי" : severity === "high" ? "חשד משמעותי" : "כדאי לבדוק"}</span></label>)}</div></fieldset>
       <label className="field-label reminder-field">שלח תזכורת אם התיק עדיין לא טופל אחרי<div><input type="number" min="5" max="1440" value={draft.reminderMinutes} onChange={(event) => setDraft({ ...draft, reminderMinutes: Number(event.target.value) })} /><span>דקות</span></div></label>
       <div className="notification-example"><strong>מה קורה בפועל?</strong><ol><li>המערכת מזהה הזמנה חשודה ופותחת תיק.</li><li>בעלי החנות מקבלים אימייל עם הסיבה והסכום.</li><li>הבעלים מסמנים: בבדיקה, טופל, תקין או הונאה.</li></ol></div>
-      <div className="form-actions"><button className="primary-button" disabled={saving}>{saving ? "שומר…" : "שמור הגדרות"}</button>{saved ? <span className="saved-message" role="status"><CheckCircle2 size={15} /> ההגדרות נשמרו</span> : null}</div>
+      <div className="form-actions"><button className="primary-button" disabled={saving}>{saving ? "שומר…" : "שמור הגדרות"}</button><button type="button" className="secondary-button" disabled={testing || draft.recipients.length === 0} onClick={() => { setTesting(true); setTestNotice(""); void onSendTest().then((result) => setTestNotice(result.some((delivery) => delivery.status === "sent") ? "מייל הבדיקה נשלח." : result.some((delivery) => delivery.status === "simulated") ? "לא נשלח: שירות המייל עדיין לא מוגדר." : "שליחת מייל הבדיקה נכשלה.")).catch(() => setTestNotice("שליחת מייל הבדיקה נכשלה.")).finally(() => setTesting(false)); }}>{testing ? "שולח בדיקה…" : "שלח מייל בדיקה"}</button>{saved ? <span className="saved-message" role="status"><CheckCircle2 size={15} /> ההגדרות נשמרו</span> : null}{testNotice ? <span className="saved-message" role="status"><Mail size={15} /> {testNotice}</span> : null}</div>
     </form><section className="delivery-panel"><div className="section-heading"><div><h2>התראות אחרונות</h2><span>סטטוס מסירה לכל נמען</span></div></div>{deliveries.length ? <div className="delivery-list">{deliveries.slice(0, 8).map((delivery) => <article key={delivery.id}><div className="delivery-icon"><Mail size={17} /></div><div><strong>{delivery.recipient}</strong><span>תיק {delivery.caseId}</span></div><span className={`delivery-status delivery-${delivery.status}`}>{delivery.status === "sent" ? "נשלח" : delivery.status === "simulated" ? "לא נשלח — שירות המייל לא הוגדר" : delivery.status === "failed" ? "נכשל" : "בתור"}</span></article>)}</div> : <div className="empty-state"><Mail size={25} /><strong>עדיין לא נשלחו התראות</strong><span>התראות חדשות יופיעו כאן.</span></div>}</section></div>
   </div>;
 }

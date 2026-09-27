@@ -17,9 +17,9 @@ const emailHtml = (item: FraudCase) => `
     </div>
   </div>`;
 
-export async function notifyStoreOwners(item: FraudCase) {
+export async function notifyStoreOwners(item: FraudCase, options: { force?: boolean; test?: boolean } = {}) {
   const settings = getNotificationSettings(item.tenantId);
-  if (!settings.enabled || !settings.severities.includes(item.severity) || settings.recipients.length === 0) return [];
+  if ((!options.force && (!settings.enabled || !settings.severities.includes(item.severity))) || settings.recipients.length === 0) return [];
   const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
   const deliveries: NotificationDelivery[] = [];
   const alertRevision = createHash("sha256").update(JSON.stringify([item.id, item.severity, item.score, item.evidence.map((entry) => entry.label)])).digest("hex").slice(0, 20);
@@ -34,7 +34,7 @@ export async function notifyStoreOwners(item: FraudCase) {
         const result = await resend.emails.send({
           from: process.env.EMAIL_FROM ?? "Shield Ledger <alerts@shieldledger.app>",
           to: recipient,
-          subject: `נדרשת בדיקה: ${item.orderNumber} · ${item.storeName}`,
+          subject: `${options.test ? "בדיקה — " : ""}נדרשת בדיקה: ${item.orderNumber} · ${item.storeName}`,
           html: emailHtml(item),
         }, { headers: { "Idempotency-Key": `risk-alert-${alertRevision}-${recipient}` } });
         delivery.status = result.error ? "failed" : "sent";
@@ -45,4 +45,16 @@ export async function notifyStoreOwners(item: FraudCase) {
     deliveries.push(delivery);
   }
   return deliveries;
+}
+
+export async function sendTestNotification(tenantId: string) {
+  const settings = getNotificationSettings(tenantId);
+  if (settings.recipients.length === 0) return [];
+  const now = new Date().toISOString();
+  return notifyStoreOwners({
+    id: `test-${randomUUID()}`, tenantId, storeId: "test-store", storeName: "בדיקת ShopShield",
+    orderNumber: "#TEST", customer: "זו הודעת בדיקה", email: "test@shopshield.local", amount: 0,
+    score: 0, severity: "high", status: "new", reason: "בדיקת קבלת התראות באימייל",
+    createdAt: now, occurredAt: now, evidence: [], items: [], context: { paymentGateways: [], riskFacts: [] },
+  }, { force: true, test: true });
 }
