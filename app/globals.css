@@ -702,9 +702,9 @@ h1, h2, h3, h4, .brand-block strong {
 .cluster-identity { min-width: 0; }
 .cluster-identity > strong { display: block; overflow: hidden; font-size: 16px; font-weight: 750; letter-spacing: -.02em; text-overflow: ellipsis; white-space: nowrap; }
 .cluster-identity > span { display: block; margin-top: 2px; color: var(--muted); font-size: 13px; }
-.cluster-order-date { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; margin-top: 8px; color: var(--slate); font-size: 12px; }
-.cluster-order-date span { color: var(--muted); }
-.cluster-order-date time { color: var(--ink); font-weight: 650; font-variant-numeric: tabular-nums; unicode-bidi: isolate; }
+.cluster-order-date { display: flex; flex-wrap: wrap; align-items: baseline; gap: 5px 9px; margin-top: 9px; color: var(--slate); font-size: 13px; }
+.cluster-order-date span { color: var(--muted); font-size: 12px; }
+.cluster-order-date time { color: var(--ink); font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums; unicode-bidi: isolate; }
 .cluster-signals { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
 .cluster-signals span { display: inline-flex; align-items: center; gap: 5px; min-height: 25px; padding: 2px 8px; border: 1px solid rgb(16 37 29 / .08); border-radius: 999px; color: var(--slate); background: rgb(244 248 246 / .82); font-size: 11px; font-weight: 650; }
 .cluster-signals svg { color: var(--trust); }
@@ -850,7 +850,7 @@ body { font-family: "Noto Sans Hebrew Variable", "Segoe UI", sans-serif; }
 .cluster-dialog-order strong, .cluster-dialog-order small { display: block; }
 .cluster-dialog-order strong { font-size: 15px; font-weight: 650; }
 .cluster-dialog-order small { font-size: 12px; color: #52675c; margin-top: 3px; overflow-wrap: anywhere; }
-.cluster-dialog-order .order-number time { display: block; margin-top: 5px; color: #52675c; font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.cluster-dialog-order .order-number time { display: block; margin-top: 5px; color: #52675c; font-size: 14px; font-weight: 650; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .order-number, .order-value { font-variant-numeric: tabular-nums; }
 .cluster-dialog-footer { flex: 0 0 auto; padding: 14px 28px; border-top: 1px solid #d6ded9; color: #52675c; font-size: 12px; background: #f8faf8; }
 .case-cluster-summary .cluster-gift-amounts { display: flex; }
