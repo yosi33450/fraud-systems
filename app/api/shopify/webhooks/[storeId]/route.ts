@@ -8,6 +8,9 @@ import { syncShopifyOrderGiftCards } from "@/lib/shopify-sync.server";
 
 export const runtime = "nodejs";
 
+const isTransientPersistenceFailure = (error: unknown): error is Error =>
+  error instanceof Error && /^PERSISTENCE_(?:READ|WRITE)_FAILED_(?:5\d\d|429)$/.test(error.message);
+
 function verifyShopifyHmac(rawBody: string, receivedHmac: string | null, secret: string) {
   if (!receivedHmac) return false;
   const expected = createHmac("sha256", secret).update(rawBody, "utf8").digest();
@@ -16,9 +19,20 @@ function verifyShopifyHmac(rawBody: string, receivedHmac: string | null, secret:
 }
 
 export async function POST(request: Request, context: { params: Promise<{ storeId: string }> }) {
-  await hydrateOperationalState();
   const { storeId } = await context.params;
   const rawBody = await request.text();
+  try {
+    await hydrateOperationalState();
+  } catch (error) {
+    // Shopify removes a subscription after repeated non-2xx responses. During a
+    // short persistence outage, keep the subscription alive; the normal recent
+    // orders reconciliation catches up any event that could not be analysed.
+    if (isTransientPersistenceFailure(error)) {
+      console.error("[shopify-webhook] persistence temporarily unavailable; recovery sync required", { storeId, code: error.message });
+      return NextResponse.json({ accepted: true, deferred: true, storeId }, { status: 202 });
+    }
+    throw error;
+  }
   const store = resolveStore(storeId);
   if (!store) return NextResponse.json({ error: "STORE_NOT_FOUND" }, { status: 404 });
   const secret = getStoreWebhookSecret(storeId) ?? process.env.SHOPIFY_WEBHOOK_SECRET;
@@ -73,6 +87,10 @@ export async function POST(request: Request, context: { params: Promise<{ storeI
     return NextResponse.json({ accepted: true, storeId, webhookId, topic, duplicate: result.duplicate, caseId: result.case?.id ?? null, notificationsQueued: deliveries.length }, { status: 202 });
   } catch (error) {
     const message = error instanceof Error ? error.message : "WEBHOOK_PROCESSING_FAILED";
+    if (isTransientPersistenceFailure(error)) {
+      console.error("[shopify-webhook] persistence temporarily unavailable after processing; recovery sync required", { storeId, topic, code: message });
+      return NextResponse.json({ accepted: true, deferred: true, storeId, topic }, { status: 202 });
+    }
     console.error("[shopify-webhook] processing failed", { storeId, topic, code: message });
     return NextResponse.json({ error: message }, { status: 500 });
   }
