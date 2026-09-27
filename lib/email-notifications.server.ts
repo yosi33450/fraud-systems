@@ -33,13 +33,28 @@ export async function notifyStoreOwners(item: FraudCase, options: { force?: bool
       try {
         const result = await resend.emails.send({
           from: process.env.EMAIL_FROM ?? "Shield Ledger <alerts@shieldledger.app>",
-          to: recipient,
+          to: [recipient],
           subject: `${options.test ? "בדיקה — " : ""}נדרשת בדיקה: ${item.orderNumber} · ${item.storeName}`,
           html: emailHtml(item),
         }, { headers: { "Idempotency-Key": `risk-alert-${alertRevision}-${recipient}` } });
-        delivery.status = result.error ? "failed" : "sent";
-        delivery.providerId = result.data?.id;
-      } catch { delivery.status = "failed"; }
+        if (result.error) {
+          console.error("[email-notification] Resend rejected email", {
+            recipient,
+            name: result.error.name,
+            message: result.error.message,
+          });
+          delivery.status = "failed";
+        } else {
+          delivery.status = "sent";
+          delivery.providerId = result.data?.id;
+        }
+      } catch (error) {
+        console.error("[email-notification] Resend request failed", {
+          recipient,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        delivery.status = "failed";
+      }
     }
     recordNotificationDelivery(delivery);
     deliveries.push(delivery);
