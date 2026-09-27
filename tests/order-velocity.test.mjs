@@ -81,6 +81,19 @@ test('evidence reports actual matching count and its time window',()=>{
 test('invalid timestamp never fabricates velocity',()=>{
   assert.equal(computeVelocitySignals(order(1,0,{createdAt:'invalid'}),[order(2)],[]).ordersByEmailLastHour,0);
 });
+test('high Shopify risk alone is supporting evidence, not a standalone alert',()=>{
+  const result=evaluateRisk({...signals(computeVelocitySignals(order(1),[],[])),shopifyRisk:'high',shopifyRiskFacts:['אימות הכרטיס נכשל']},new Date(end),[]);
+  assert.equal(result.score,0);
+  assert.equal(result.severity,'low');
+  assert.equal(result.evidence[0].source,'shopify');
+});
+test('high Shopify risk elevates a matching internal alert by one severity',()=>{
+  const current=order(4);
+  const rows=[order(1,30),order(2,20),order(3,10),current];
+  const result=evaluateRisk({...signals(computeVelocitySignals(current,rows,[condition()])),shopifyRisk:'high'},new Date(end),[rule(condition())]);
+  assert.equal(result.severity,'critical');
+  assert.ok(result.score >= 92);
+});
 test('batch lookup matches full history for every order and custom window',()=>{
   const rows=Array.from({length:70},(_,i)=>order(i,(i-10)*63,{storeId:i%4===0?'other':'s'}));
   const conditions=[condition(),condition('orders_by_email',5,1440),condition('orders_by_ip',3,3000)];

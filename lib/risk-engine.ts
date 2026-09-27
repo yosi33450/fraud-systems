@@ -105,8 +105,10 @@ export function evaluateRisk(signals: OrderSignals, now = new Date(), rules: Ris
     timestamp: now.toISOString(),
   }));
 
+  const hasInternalAlert = alertRules.length > 0;
+  const highShopifyRiskIsCorroborated = signals.shopifyRisk === "high" && hasInternalAlert;
   if (signals.shopifyRisk === "high") {
-    evidence.push({ id: `${evidence.length + 1}`, label: "Shopify סימנה סיכון גבוה", description: signals.shopifyRiskFacts?.length ? `סיבות מ־Shopify: ${signals.shopifyRiskFacts.join("; ")}` : "מנגנון הסיכון של Shopify המליץ לבדוק את ההזמנה.", source: "shopify", delta: 70, timestamp: now.toISOString() });
+    evidence.push({ id: `${evidence.length + 1}`, label: "Shopify סימנה סיכון גבוה", description: signals.shopifyRiskFacts?.length ? `סיבות מ־Shopify: ${signals.shopifyRiskFacts.join("; ")}` : "אות משלים מ־Shopify; הוא אינו פותח התראה ללא תנאי פנימי נוסף.", source: "shopify", delta: highShopifyRiskIsCorroborated ? 12 : 4, timestamp: now.toISOString() });
   }
   if (signals.shopifyRisk === "medium") {
     evidence.push({ id: `${evidence.length + 1}`, label: "Shopify סימנה סיכון בינוני", description: signals.shopifyRiskFacts?.length ? `סיבות מ־Shopify: ${signals.shopifyRiskFacts.join("; ")}` : "מנגנון הסיכון של Shopify המליץ לבדוק את ההזמנה.", source: "shopify", delta: 8, timestamp: now.toISOString() });
@@ -114,17 +116,18 @@ export function evaluateRisk(signals: OrderSignals, now = new Date(), rules: Ris
   if (signals.billingShippingMismatch) {
     evidence.push({ id: `${evidence.length + 1}`, label: "כתובות החיוב והמשלוח שונות", description: "זהו סימן משלים לבדיקה, לא הוכחה להונאה.", source: "behavior", delta: 18, timestamp: now.toISOString() });
   }
-  if (alertRules.length || signals.shopifyRisk === "high") for (const rule of matched.filter((candidate) => !candidate.action.openCase)) {
+  if (hasInternalAlert) for (const rule of matched.filter((candidate) => !candidate.action.openCase)) {
     evidence.push({ id: `${evidence.length + 1}`, label: rule.label, description: rule.conditions.map((condition) => condition.field === "order_local_hour" ? `שעת הרכישה ${String(signals.orderLocalHour).padStart(2, "0")}:00 בתוך החלון ${String(condition.startHour ?? 0).padStart(2, "0")}:00–${String(condition.endHour ?? 5).padStart(2, "0")}:00 (ישראל).` : rule.description).join(" "), source: "behavior", delta: rule.action.scoreBonus ?? 0, timestamp: now.toISOString() });
   }
 
   const ruleSeverity = alertRules.reduce<Severity>((highest, rule) => severityRank[rule.action.severity] > severityRank[highest] ? rule.action.severity : highest, "low");
-  const shopifySeverity: Severity = signals.shopifyRisk === "high" ? "high" : "low";
-  const severity = severityRank[shopifySeverity] > severityRank[ruleSeverity] ? shopifySeverity : ruleSeverity;
+  const severity: Severity = highShopifyRiskIsCorroborated
+    ? ruleSeverity === "critical" ? "critical" : ruleSeverity === "high" ? "critical" : ruleSeverity === "medium" ? "high" : "medium"
+    : ruleSeverity;
   const bonus = matched.filter((rule) => !rule.action.openCase).reduce((sum, rule) => sum + Math.max(0, Math.min(20, rule.action.scoreBonus ?? 0)), 0);
-  const hasPrimaryAlert = alertRules.length > 0 || signals.shopifyRisk === "high";
+  const hasPrimaryAlert = hasInternalAlert;
   const score = hasPrimaryAlert
-    ? Math.min(100, baseScore[severity] + Math.max(0, evidence.length - 1) * 2 + bonus + (signals.shopifyRisk === "medium" ? 8 : 0))
+    ? Math.min(100, baseScore[severity] + Math.max(0, evidence.length - 1) * 2 + bonus + (highShopifyRiskIsCorroborated ? 12 : 0) + (signals.shopifyRisk === "medium" ? 8 : 0))
     : Math.min(24, bonus + (signals.shopifyRisk === "medium" ? 8 : 0) + (signals.billingShippingMismatch ? 2 : 0));
 
   return { score, severity, evidence, matchedRuleIds: matched.map((rule) => rule.id), version: "2026.09-v3" };
