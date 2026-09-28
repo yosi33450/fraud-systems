@@ -781,7 +781,10 @@ function EmployeesScreen({ mode, employees, activity, settings, stores, onCreate
   const [employeeEditError, setEmployeeEditError] = useState("");
   useEffect(() => setDraft(settings), [settings]);
   useEffect(() => {
-    const prefix = mode === "discounts" ? "" : settings.couponPrefix.trim();
+    // Keep the employee-code catalog present in both views. The regular discounts view
+    // still shows every observed code, while this targeted Shopify lookup guarantees
+    // that active OVED codes appear even when they have not been captured in an order.
+    const prefix = settings.couponPrefix.trim();
     const store = stores[0];
     if (!store) { setShopifyCoupons([]); setShopifyCouponState("idle"); return; }
     const controller = new AbortController();

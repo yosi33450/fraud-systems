@@ -5,10 +5,10 @@ import { hydrateOperationalState } from "@/lib/persistence.server";
 import { shopifyAdminRequest } from "@/lib/shopify-admin.server";
 
 const QUERY = `#graphql
-  query EmployeeCouponCodes($after: String) {
-    discountNodes(first: 100, after: $after) {
+  query EmployeeCouponCodes($after: String, $query: String) {
+    codeDiscountNodes(first: 100, after: $after, query: $query) {
       nodes {
-        discount {
+        codeDiscount {
           ... on DiscountCodeBasic { title status asyncUsageCount codes(first: 250) { nodes { code asyncUsageCount } pageInfo { hasNextPage } } }
           ... on DiscountCodeBxgy { title status asyncUsageCount codes(first: 250) { nodes { code asyncUsageCount } pageInfo { hasNextPage } } }
           ... on DiscountCodeFreeShipping { title status asyncUsageCount codes(first: 250) { nodes { code asyncUsageCount } pageInfo { hasNextPage } } }
@@ -26,7 +26,7 @@ const ACCESS_QUERY = `#graphql
   }
 `;
 type ShopifyCoupon = { code: string; title: string; status: string; shopifyUses: number | null };
-type CouponResponse = { discountNodes: { nodes: Array<{ discount: { title?: string; status?: string; asyncUsageCount?: number; codes?: { nodes: Array<{ code: string; asyncUsageCount?: number }>; pageInfo: { hasNextPage: boolean } } } }>; pageInfo: { hasNextPage: boolean; endCursor: string | null } } };
+type CouponResponse = { codeDiscountNodes: { nodes: Array<{ codeDiscount: { title?: string; status?: string; asyncUsageCount?: number; codes?: { nodes: Array<{ code: string; asyncUsageCount?: number }>; pageInfo: { hasNextPage: boolean } } } }>; pageInfo: { hasNextPage: boolean; endCursor: string | null } } };
 type CouponWarning = "permission" | "connection" | "scan_failed";
 
 function failureReason(error: unknown): CouponWarning {
@@ -58,18 +58,18 @@ export async function GET(request: Request, context: { params: Promise<{ tenantI
     let after: string | null = null;
     let partial = false;
     for (let page = 0; page < 40; page++) {
-      const result: CouponResponse = await shopifyAdminRequest<CouponResponse>({ shopDomain: store.domain, accessToken: connection.accessToken, query: QUERY, variables: { after } });
-      for (const node of result.discountNodes.nodes) {
-        if (node.discount.codes?.pageInfo.hasNextPage) partial = true;
-        for (const entry of node.discount.codes?.nodes ?? []) {
+      const result: CouponResponse = await shopifyAdminRequest<CouponResponse>({ shopDomain: store.domain, accessToken: connection.accessToken, query: QUERY, variables: { after, query: prefix ? `title:${prefix}` : null } });
+      for (const node of result.codeDiscountNodes.nodes) {
+        if (node.codeDiscount.codes?.pageInfo.hasNextPage) partial = true;
+        for (const entry of node.codeDiscount.codes?.nodes ?? []) {
           if (entry.code.toLowerCase().startsWith(prefix)) coupons.set(entry.code.toLowerCase(), {
-            code: entry.code, title: node.discount.title ?? "", status: node.discount.status ?? "", shopifyUses: entry.asyncUsageCount ?? node.discount.asyncUsageCount ?? null,
+            code: entry.code, title: node.codeDiscount.title ?? "", status: node.codeDiscount.status ?? "", shopifyUses: entry.asyncUsageCount ?? node.codeDiscount.asyncUsageCount ?? null,
           });
         }
       }
-      if (!result.discountNodes.pageInfo.hasNextPage || !result.discountNodes.pageInfo.endCursor) break;
+      if (!result.codeDiscountNodes.pageInfo.hasNextPage || !result.codeDiscountNodes.pageInfo.endCursor) break;
       if (page === 39) partial = true;
-      after = result.discountNodes.pageInfo.endCursor;
+      after = result.codeDiscountNodes.pageInfo.endCursor;
     }
     for (const code of observedCodes) {
       if (!coupons.has(code.toLowerCase())) coupons.set(code.toLowerCase(), { code, title: "", status: "OBSERVED", shopifyUses: null });
