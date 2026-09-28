@@ -74,7 +74,8 @@ export async function GET(request: Request, context: { params: Promise<{ tenantI
     return NextResponse.json({ codes: catalog.map((coupon) => coupon.code), coupons: catalog, source: "shopify", partial });
   } catch (error) {
     const warning = failureReason(error);
-    console.warn("[employee-coupons] Shopify code scan unavailable", { tenantId, storeId, warning });
+    const message = error instanceof Error ? error.message.slice(0, 220) : String(error).slice(0, 220);
+    console.warn("[employee-coupons] Shopify code scan unavailable", { tenantId, storeId, warning, message });
     return NextResponse.json({ codes: observedCodes, coupons: observedCodes.map((code) => ({ code, title: "", status: "OBSERVED", shopifyUses: null })), source: "orders", warning });
   }
 }
