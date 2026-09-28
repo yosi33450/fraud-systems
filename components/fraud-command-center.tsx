@@ -362,9 +362,11 @@ export function FraudCommandCenter() {
     }
   };
 
-  const releaseBlock = async (caseId: string) => {
-    const response = await fetch(`/api/tenants/${tenantId}/cases/${caseId}/block`, { method: "DELETE" });
-    if (!response.ok) throw new Error("BLOCK_RELEASE_FAILED");
+  const releaseBlock = async (caseIds: string[]) => {
+    for (const caseId of caseIds) {
+      const response = await fetch(`/api/tenants/${tenantId}/cases/${caseId}/block`, { method: "DELETE" });
+      if (!response.ok) throw new Error("BLOCK_RELEASE_FAILED");
+    }
     await refreshSnapshot();
   };
 
@@ -1074,25 +1076,62 @@ function NotificationsScreen({ settings, deliveries, onSave, onSendTest }: { set
   </div>;
 }
 
-function NetworkScreen({ reports, cases, onRelease }: { reports: BlacklistReport[]; cases: FraudCase[]; onRelease: (caseId: string) => Promise<void> }) {
+function NetworkScreen({ reports, cases, onRelease }: { reports: BlacklistReport[]; cases: FraudCase[]; onRelease: (caseIds: string[]) => Promise<void> }) {
   const identityLabel: Record<BlacklistReport["keyType"], string> = { email: "אימייל", phone: "טלפון", address: "כתובת", ip: "כתובת IP", customer: "לקוח Shopify" };
   const [releasing, setReleasing] = useState<string | null>(null);
   const activeReports = reports.filter((report) => report.status === "active");
-  const groups = Object.values(activeReports.reduce<Record<string, BlacklistReport[]>>((result, report) => {
-    (result[report.caseId] ??= []).push(report);
-    return result;
-  }, {}));
-  const release = async (caseId: string) => {
-    setReleasing(caseId);
-    try { await onRelease(caseId); } finally { setReleasing(null); }
+  const sourceByCase = new Map(cases.map((item) => [item.id, item]));
+  const visible = (report: BlacklistReport) => {
+    const source = sourceByCase.get(report.caseId);
+    if (!source) return report.maskedValue;
+    const values = { email: isRealEmail(source.email) ? source.email : "", phone: source.context?.phone, address: source.context?.address, ip: source.context?.ip, customer: source.context?.customerId };
+    return values[report.keyType] || report.maskedValue;
+  };
+  // A person can be confirmed from several orders. Merge the cases whenever one
+  // of their concrete identifiers is identical, rather than showing a row per order.
+  const parent = new Map<string, string>();
+  const root = (id: string): string => {
+    const current = parent.get(id) ?? id;
+    if (current === id) return id;
+    const resolved = root(current);
+    parent.set(id, resolved);
+    return resolved;
+  };
+  const join = (a: string, b: string) => {
+    const left = root(a); const right = root(b);
+    if (left !== right) parent.set(right, left);
+  };
+  const caseReports = new Map<string, BlacklistReport[]>();
+  for (const report of activeReports) {
+    parent.set(report.caseId, report.caseId);
+    (caseReports.get(report.caseId) ?? caseReports.set(report.caseId, []).get(report.caseId)!).push(report);
+  }
+  const firstCaseByIdentity = new Map<string, string>();
+  for (const [caseId, caseReportsForPerson] of caseReports) for (const report of caseReportsForPerson) {
+    const value = visible(report).trim().toLowerCase();
+    if (!value) continue;
+    const identity = `${report.keyType}:${value}`;
+    const existing = firstCaseByIdentity.get(identity);
+    if (existing) join(caseId, existing); else firstCaseByIdentity.set(identity, caseId);
+  }
+  const groupedCases = new Map<string, { caseIds: string[]; reports: BlacklistReport[] }>();
+  for (const [caseId, caseReportsForPerson] of caseReports) {
+    const groupId = root(caseId);
+    const group = groupedCases.get(groupId) ?? { caseIds: [], reports: [] };
+    group.caseIds.push(caseId); group.reports.push(...caseReportsForPerson);
+    groupedCases.set(groupId, group);
+  }
+  const groups = [...groupedCases.entries()].map(([id, group]) => ({ id, ...group })).sort((a, b) => {
+    const newest = (group: typeof a) => Math.max(...group.caseIds.map((caseId) => Date.parse(sourceByCase.get(caseId)?.occurredAt ?? "") || 0));
+    return newest(b) - newest(a);
+  });
+  const release = async (groupId: string, caseIds: string[]) => {
+    setReleasing(groupId);
+    try { await onRelease(caseIds); } finally { setReleasing(null); }
   };
   return <div className="page-content product-page network-page"><PageHeading eyebrow="רשת הגנה משותפת" title="התאמות למאגר ההונאות" description="אם לקוח דווח כהונאה בחנות אחרת, החנות שלך מקבלת התראה — בלי לראות מי דיווח ובלי גישה למאגר עצמו." />
     <div className="network-hero"><div className="network-visual"><div className="network-center"><Shield size={30} /><span>בדיקה פרטית</span></div>{["מייל", "טלפון", "כתובת"].map((label, i) => <div key={label} className={`network-node node-${i + 1}`}><Fingerprint size={17} />{label}</div>)}</div><div><span className="eyebrow">הפרטים נשארים מוגנים</span><h2>מקבלים תשובה, לא את המאגר</h2><p>האימייל, הטלפון והכתובת מוצפנים לפני הבדיקה. בעלי חנויות יכולים לראות רק שנמצאה התאמה בהזמנה שלהם.</p><ul><li><Shield size={15} /> {reports.length} התאמות פעילות בחנויות שלך</li><li><LockKeyhole size={15} /> פרטי החנות המדווחת לא נחשפים</li><li><FileClock size={15} /> כל בדיקה נשמרת ביומן פעילות</li></ul></div></div>
-    <section className="case-section"><div className="section-heading"><div><h2>אנשים ברשימת החסימה</h2><span>{groups.length} אירועים · {activeReports.length} מזהים מוצפנים במאגר המשותף</span></div></div>{groups.map((group) => { const first = group[0]; const source = cases.find((item) => item.id === first.caseId); const visible = (report: BlacklistReport) => {
-      if (!source) return report.maskedValue;
-      const values = { email: isRealEmail(source.email) ? source.email : "", phone: source.context?.phone, address: source.context?.address, ip: source.context?.ip, customer: source.context?.customerId };
-      return values[report.keyType] || report.maskedValue;
-    }; return <div className="report-row block-group" key={first.caseId}><div className="report-icon"><Fingerprint /></div><div><strong>{source ? `${customerDisplayName(source)} · הזמנה ${source.orderNumber}` : first.reason}</strong><div className="identity-chips">{group.map((report) => <span key={report.id}>{identityLabel[report.keyType]} · {visible(report)}</span>)}</div></div><SeverityBadge severity="critical" /><span>ברשימת חסימה</span><button className="secondary-button" disabled={releasing === first.caseId} onClick={() => void release(first.caseId)}>{releasing === first.caseId ? "משחרר…" : "שחרר חסימה"}</button></div>; })}{groups.length === 0 ? <div className="empty-state"><Fingerprint size={25} /><strong>אין עדיין חסימות</strong><span>אימייל, טלפון, כתובת, IP ומזהה Shopify יתווספו רק לאחר אישור הונאה.</span></div> : null}</section>
+    <section className="case-section"><div className="section-heading"><div><h2>אנשים ברשימת החסימה</h2><span>{groups.length} אנשים · {caseReports.size} הזמנות מאומתות · {activeReports.length} מזהים מוצפנים</span></div></div>{groups.map((group) => { const source = sourceByCase.get(group.caseIds[0]); const uniqueReports = [...new Map(group.reports.map((report) => [`${report.keyType}:${visible(report).trim().toLowerCase()}`, report])).values()]; return <div className="report-row block-group" key={group.id}><div className="report-icon"><Fingerprint /></div><div><strong>{source ? `${customerDisplayName(source)} · ${group.caseIds.length} ${group.caseIds.length === 1 ? "הזמנה מאומתת" : "הזמנות מאומתות"}` : `${group.caseIds.length} הזמנות מאומתות`}</strong><div className="identity-chips">{uniqueReports.map((report) => <span key={`${report.keyType}:${report.id}`}>{identityLabel[report.keyType]} · {visible(report)}</span>)}</div></div><SeverityBadge severity="critical" /><span>ברשימת חסימה</span><button className="secondary-button" disabled={releasing === group.id} onClick={() => void release(group.id, group.caseIds)}>{releasing === group.id ? "משחרר…" : "שחרר חסימה"}</button></div>; })}{groups.length === 0 ? <div className="empty-state"><Fingerprint size={25} /><strong>אין עדיין חסימות</strong><span>אימייל, טלפון, כתובת, IP ומזהה Shopify יתווספו רק לאחר אישור הונאה.</span></div> : null}</section>
   </div>;
 }
 
