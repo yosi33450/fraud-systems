@@ -1168,7 +1168,7 @@ p { text-wrap: pretty; }
 .employee-form-group > div { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .employee-form-group label { min-width: 0; }
 .employee-form-group .employee-address-field { grid-column: 1 / -1; }
-.employee-coupon-field { padding-inline-start: 16px; border-inline-start: 1px solid var(--product-border); }
+.employee-coupon-field { display: none; padding-inline-start: 16px; border-inline-start: 1px solid var(--product-border); }
 .employee-coupon-field label > span { color: var(--product-secondary); font-size: 11px; font-weight: 500; line-height: 1.45; }
 .employee-form-actions { display: flex; flex-direction: column; justify-content: flex-end; gap: 8px; min-width: 134px; }
 .employee-form-actions .primary-button { width: 100%; }

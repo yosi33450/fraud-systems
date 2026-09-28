@@ -8,10 +8,12 @@ const sidebarPreferenceKey = "shield-ledger:sidebar-collapsed";
 
 /** Presentation preferences only; no tenant records or account settings are changed. */
 export function useWorkspaceNavigation(mobileOpen: boolean, setMobileOpen: Dispatch<SetStateAction<boolean>>) {
-  const [collapsed, setCollapsed] = useState(false);
+  // A compact sidebar is the product default. A deliberate previous choice to
+  // keep it open is still respected for returning users.
+  const [collapsed, setCollapsed] = useState(true);
 
   useEffect(() => {
-    try { setCollapsed(localStorage.getItem(sidebarPreferenceKey) === "true"); } catch { /* Storage may be disabled. */ }
+    try { setCollapsed(localStorage.getItem(sidebarPreferenceKey) !== "false"); } catch { /* Storage may be disabled. */ }
   }, []);
 
   const toggleCollapsed = () => {

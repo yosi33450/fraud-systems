@@ -158,7 +158,9 @@ const toPayload = (order: ShopifyOrderNode): ShopifyOrderPayload => ({
   risk_level: order.risk?.recommendation?.toLowerCase() === "high" ? "high"
     : order.risk?.recommendation?.toLowerCase() === "medium" ? "medium"
       : order.risk?.recommendation?.toLowerCase() === "low" ? "low" : "none",
-  shopify_risk_facts: order.risk?.assessments.flatMap((assessment) => assessment.facts.filter((fact) => fact.sentiment === "NEGATIVE").map((fact) => fact.description)) ?? [],
+  shopify_risk_facts: ["high", "medium"].includes(order.risk?.recommendation?.toLowerCase() ?? "")
+    ? order.risk?.assessments.flatMap((assessment) => assessment.facts.filter((fact) => fact.sentiment === "NEGATIVE").map((fact) => fact.description)) ?? []
+    : [],
   payment_failures: order.transactions.filter((transaction) => ["FAILURE", "ERROR"].includes(transaction.status?.toUpperCase())).length,
   transactions: order.transactions.map((transaction) => ({
     id: transaction.id,

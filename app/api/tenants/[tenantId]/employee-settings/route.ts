@@ -10,8 +10,8 @@ export async function PATCH(request: Request, context: { params: Promise<{ tenan
   if (!candidate || typeof candidate !== "object") return NextResponse.json({ error: "INVALID_SETTINGS" }, { status: 400 });
   const input = candidate as Partial<EmployeeMonitoringSettings>;
   if (typeof input.couponPrefix !== "string" || !/^[a-z0-9_-]{0,24}$/i.test(input.couponPrefix)
-    || typeof input.zeroAmount !== "boolean" || typeof input.giftCardAddressChange !== "boolean" || typeof input.repeatGiftCardUses !== "boolean"
-    || !Number.isFinite(input.repeatUsesThreshold) || !Number.isFinite(input.windowMinutes)) {
+    || typeof input.zeroAmount !== "boolean" || typeof input.giftCardAddressChange !== "boolean" || typeof input.repeatGiftCardUses !== "boolean" || typeof input.couponRepeatUses !== "boolean"
+    || !Number.isFinite(input.repeatUsesThreshold) || !Number.isFinite(input.windowMinutes) || !Number.isFinite(input.couponRepeatThreshold) || !Number.isFinite(input.couponRepeatWindowMinutes)) {
     return NextResponse.json({ error: "INVALID_SETTINGS" }, { status: 400 });
   }
   const settings = saveEmployeeSettings(tenantId, { ...getEmployeeSettings(tenantId), ...input });

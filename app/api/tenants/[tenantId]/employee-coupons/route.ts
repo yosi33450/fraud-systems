@@ -7,12 +7,14 @@ import { shopifyAdminRequest } from "@/lib/shopify-admin.server";
 const QUERY = `#graphql
   query EmployeeCouponCodes($after: String) {
     discountNodes(first: 100, after: $after, query: "method:code") {
-      nodes { discount {
-        ... on DiscountCodeBasic { title status asyncUsageCount codes(first: 250) { nodes { code asyncUsageCount } pageInfo { hasNextPage } } }
-        ... on DiscountCodeBxgy { title status asyncUsageCount codes(first: 250) { nodes { code asyncUsageCount } pageInfo { hasNextPage } } }
-        ... on DiscountCodeFreeShipping { title status asyncUsageCount codes(first: 250) { nodes { code asyncUsageCount } pageInfo { hasNextPage } } }
-        ... on DiscountCodeApp { title status asyncUsageCount codes(first: 250) { nodes { code asyncUsageCount } pageInfo { hasNextPage } } }
-      } }
+      nodes {
+        discount {
+          ... on DiscountCodeBasic { title status asyncUsageCount codes(first: 250) { nodes { code asyncUsageCount } pageInfo { hasNextPage } } }
+          ... on DiscountCodeBxgy { title status asyncUsageCount codes(first: 250) { nodes { code asyncUsageCount } pageInfo { hasNextPage } } }
+          ... on DiscountCodeFreeShipping { title status asyncUsageCount codes(first: 250) { nodes { code asyncUsageCount } pageInfo { hasNextPage } } }
+          ... on DiscountCodeApp { title status asyncUsageCount codes(first: 250) { nodes { code asyncUsageCount } pageInfo { hasNextPage } } }
+        }
+      }
       pageInfo { hasNextPage endCursor }
     }
   }

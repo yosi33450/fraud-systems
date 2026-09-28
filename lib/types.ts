@@ -177,6 +177,9 @@ export interface EmployeeMonitoringSettings {
   repeatGiftCardUses: boolean;
   repeatUsesThreshold: number;
   windowMinutes: number;
+  couponRepeatUses: boolean;
+  couponRepeatThreshold: number;
+  couponRepeatWindowMinutes: number;
 }
 
 export interface EmployeeDiscountUse {

@@ -20,6 +20,16 @@ test('external-order is excluded before storage and risk analysis', () => {
   assert.equal(api.exportOperationalState().cases.length, 0);
 });
 
+test('an order changed to external-order is removed from alerts and stored orders', () => {
+  const store = setup();
+  const first = order(store, 1, '2026-09-25T12:00:00Z', { total_price: 2000 });
+  assert.ok(first.case);
+  const excluded = order(store, 1, '2026-09-25T12:00:00Z', { total_price: 2000, tags: ['external-order'] });
+  assert.equal(excluded.case, null);
+  assert.equal(api.exportOperationalState().orders.length, 0);
+  assert.equal(api.exportOperationalState().cases.length, 0);
+});
+
 test('night hours add a small bonus but never create an alert alone', () => {
   const store = setup();
   const night = order(store, 1, '2026-09-24T22:00:00Z');
@@ -56,6 +66,15 @@ test('Shopify high risk requires an internal signal; medium augments an existing
   assert.deepEqual(medium.case.context.riskFacts, ['Multiple payment attempts']);
 });
 
+test('Shopify low risk and its facts do not add evidence or score', () => {
+  const store = setup();
+  const plain = order(store, 1, '2026-09-25T12:00:00Z', { email: 'plain@example.com', total_price: 2000 });
+  const low = order(store, 2, '2026-09-25T12:01:00Z', { email: 'low@example.com', total_price: 2000, risk_level: 'low', shopify_risk_facts: ['Low risk fact'] });
+  assert.equal(low.case?.score, plain.case?.score);
+  assert.ok(!low.case?.evidence.some((entry) => entry.source === 'shopify'));
+  assert.deepEqual(low.case?.context.riskFacts, []);
+});
+
 test('employee zero-value purchase is investigated separately from general velocity rules', () => {
   const store = setup();
   api.addEmployee('rules-test', { name: 'Worker', email: 'worker@example.com', privateEmail: 'private@example.com', address: 'Test street 1', couponCodes: ['oved30'], department: 'Sales' });
@@ -76,6 +95,21 @@ test('employee coupon matching and a fulfilled refund remain attached to the sam
   const state = api.exportOperationalState();
   assert.equal(state.orders.length, 1);
   assert.equal(state.employees.find((entry) => entry.id === employee.id).refunded, 1);
+});
+
+test('repeat employee coupon use is counted per employee, not across employees', () => {
+  const store = setup();
+  api.addEmployee('rules-test', { name: 'First', email: 'first@example.com', department: 'Sales' });
+  api.addEmployee('rules-test', { name: 'Second', email: 'second@example.com', department: 'Sales' });
+  api.saveEmployeeSettings('rules-test', {
+    ...api.getEmployeeSettings('rules-test'), zeroAmount: false, giftCardAddressChange: false, repeatGiftCardUses: false,
+    couponPrefix: 'oved', couponRepeatUses: true, couponRepeatThreshold: 3, couponRepeatWindowMinutes: 10080,
+  });
+  for (let index = 1; index <= 3; index++) order(store, index, `2026-09-25T12:0${index}:00Z`, { email: 'first@example.com', discount_codes: ['OVED30'] });
+  const fourth = order(store, 4, '2026-09-25T12:04:00Z', { email: 'first@example.com', discount_codes: ['OVED30'] });
+  assert.ok(fourth.case?.evidence.some((entry) => entry.description.includes('4 פעמים עבור First')));
+  const second = order(store, 5, '2026-09-25T12:05:00Z', { email: 'second@example.com', discount_codes: ['OVED30'] });
+  assert.ok(!second.case?.evidence.some((entry) => entry.description.includes('עבור Second')));
 });
 
 test('live Shopify discount-code objects are normalized like historical codes', () => {

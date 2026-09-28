@@ -728,7 +728,12 @@ export function recordNotificationDelivery(delivery: NotificationDelivery) {
 export function getEmployeeSettings(tenantId: string): EmployeeMonitoringSettings {
   const saved = state.employeeSettingsByTenant.get(tenantId);
   const pilotPrefix = state.stores.some((store) => store.tenantId === tenantId && /^strongful\.myshopify\.com$/i.test(store.domain)) ? "oved" : "";
-  return clone(saved ?? { tenantId, couponPrefix: pilotPrefix, zeroAmount: true, giftCardAddressChange: true, repeatGiftCardUses: true, repeatUsesThreshold: 3, windowMinutes: 1440 });
+  return clone({
+    tenantId, couponPrefix: pilotPrefix, zeroAmount: true, giftCardAddressChange: true,
+    repeatGiftCardUses: true, repeatUsesThreshold: 3, windowMinutes: 1440,
+    couponRepeatUses: true, couponRepeatThreshold: 3, couponRepeatWindowMinutes: 10_080,
+    ...saved,
+  });
 }
 
 export function getEmployeeDiscountActivity(tenantId: string, period: "30d" | "all" = "30d"): EmployeeDiscountActivity {
@@ -757,11 +762,18 @@ export function getEmployeeDiscountActivity(tenantId: string, period: "30d" | "a
     uniqueOrders.set(`${order.storeId}:${order.shopifyOrderId}`, order.amount);
     for (const code of codes) {
       const assigned = owners.get(code) ?? [];
-      const employee = assigned.length === 1 ? assigned[0] : undefined;
+      const identityMatches = prefix && code.startsWith(prefix)
+        ? state.employees.filter((employee) => employee.tenantId === tenantId && (
+          (order.email && [employee.email, employee.privateEmail].some((value) => value && normalizeEmail(value) === order.email))
+          || (order.address && employee.address && normalizeAddress(employee.address) === normalizeAddress(order.address))
+        ))
+        : [];
+      const candidates = assigned.length ? assigned : identityMatches;
+      const employee = candidates.length === 1 ? candidates[0] : undefined;
       uses.push({
         storeId: order.storeId, orderId: order.shopifyOrderId, orderNumber: order.orderNumber,
         code, amount: order.amount, email: order.email, createdAt: order.createdAt,
-        assignedEmployeeId: employee?.id, assignmentConflict: assigned.length > 1,
+        assignedEmployeeId: employee?.id, assignmentConflict: candidates.length > 1,
         buyerIdentityAvailable: Boolean(order.email || order.address),
         buyerMatchesEmployee: Boolean(employee && (
           (order.email && [employee.email, employee.privateEmail].some((value) => value && normalizeEmail(value) === order.email))
@@ -795,7 +807,11 @@ export function getObservedEmployeeDiscountCodes(tenantId: string, storeId: stri
 }
 
 export function saveEmployeeSettings(tenantId: string, input: EmployeeMonitoringSettings) {
-  const settings = { ...input, tenantId, couponPrefix: input.couponPrefix.trim().toLowerCase(), couponPrefixConfigured: true, repeatUsesThreshold: Math.max(2, Math.floor(input.repeatUsesThreshold)), windowMinutes: Math.max(1, Math.floor(input.windowMinutes)) };
+  const settings = {
+    ...input, tenantId, couponPrefix: input.couponPrefix.trim().toLowerCase(), couponPrefixConfigured: true,
+    repeatUsesThreshold: Math.max(2, Math.floor(input.repeatUsesThreshold)), windowMinutes: Math.max(1, Math.floor(input.windowMinutes)),
+    couponRepeatThreshold: Math.max(2, Math.floor(input.couponRepeatThreshold)), couponRepeatWindowMinutes: Math.max(1, Math.floor(input.couponRepeatWindowMinutes)),
+  };
   state.employeeSettingsByTenant.set(tenantId, settings);
   state.audit.unshift({ id: randomUUID(), tenantId, action: "employee.settings.updated", resourceType: "employee", resourceId: tenantId, createdAt: new Date().toISOString(), metadata: {} });
   return clone(settings);
@@ -1049,13 +1065,18 @@ export function ingestShopifyOrder(input: { storeId: string; webhookId: string; 
   const tags = Array.isArray(payload.tags) ? payload.tags : String(payload.tags ?? "").split(",");
   if (tags.some((tag) => tag.trim().toLowerCase() === "external-order")) {
     state.orders = state.orders.filter((order) => !(order.storeId === store.id && order.shopifyOrderId === shopifyOrderId));
-    const existingCase = state.cases.find((item) => item.storeId === store.id && item.context?.shopifyOrderId === shopifyOrderId);
-    if (existingCase && canReevaluate(existingCase)) {
-      existingCase.status = "resolved";
-      existingCase.reason = "הזמנה חיצונית — אינה נכללת בניתוח";
-      existingCase.resolution = { source: "automatic-rule-change", at: new Date().toISOString(), note: "להזמנה יש תג external-order והיא הוחרגה מהניתוח." };
-      existingCase.score = 0;
-      existingCase.evidence = [];
+    const removedCaseIds = new Set(state.cases.filter((item) => item.storeId === store.id && (
+      item.context?.shopifyOrderId === shopifyOrderId || Boolean(payload.name && item.orderNumber === payload.name)
+    )).map((item) => item.id));
+    if (removedCaseIds.size) {
+      state.cases = state.cases.filter((item) => !removedCaseIds.has(item.id));
+      const removedReports = state.reports.filter((report) => removedCaseIds.has(report.caseId));
+      state.reports = state.reports.filter((report) => !removedCaseIds.has(report.caseId));
+      for (const report of removedReports) {
+        const digest = state.reportDigests.get(report.id);
+        state.reportDigests.delete(report.id);
+        if (digest && !state.reports.some((candidate) => candidate.status === "active" && state.reportDigests.get(candidate.id) === digest)) state.globalDigests.delete(digest);
+      }
     }
     return { duplicate: false as const, case: null };
   }
@@ -1138,7 +1159,9 @@ export function ingestShopifyOrder(input: { storeId: string; webhookId: string; 
   if (existingCaseBeforeEvaluation?.context && !existingCaseBeforeEvaluation.context.shopifyOrderId) existingCaseBeforeEvaluation.context.shopifyOrderId = shopifyOrderId;
   if (existingCaseBeforeEvaluation?.context) {
     existingCaseBeforeEvaluation.context.shopifyRisk = payload.risk_level ?? existingCaseBeforeEvaluation.context.shopifyRisk;
-    if (payload.shopify_risk_facts?.length) existingCaseBeforeEvaluation.context.riskFacts = payload.shopify_risk_facts;
+    existingCaseBeforeEvaluation.context.riskFacts = payload.risk_level === "high" || payload.risk_level === "medium"
+      ? payload.shopify_risk_facts ?? []
+      : [];
   }
   const recentOrders = state.orders.filter((order) => order.storeId === store.id && order.shopifyOrderId !== shopifyOrderId);
   const velocity = computeVelocitySignals({ tenantId: store.tenantId, storeId: store.id, shopifyOrderId, email, ip, phone, amount, giftCardValue, createdAt },
@@ -1164,7 +1187,7 @@ export function ingestShopifyOrder(input: { storeId: string; webhookId: string; 
     paymentFailures: Number(payload.payment_failures ?? 0),
     billingShippingMismatch: Boolean(payload.billing_address && payload.shipping_address && !sameAddress(payload.billing_address, payload.shipping_address)),
     shopifyRisk: payload.risk_level ?? "none",
-    shopifyRiskFacts: payload.shopify_risk_facts ?? [],
+    shopifyRiskFacts: payload.risk_level === "high" || payload.risk_level === "medium" ? payload.shopify_risk_facts ?? [] : [],
     orderLocalHour: Number(new Intl.DateTimeFormat("en-US", { hour: "2-digit", hourCycle: "h23", timeZone: "Asia/Jerusalem" }).format(new Date(createdAt))),
     employeeMatch,
     refundAfterFulfillment: Boolean(payload.refund_after_fulfillment),
@@ -1226,6 +1249,20 @@ export function ingestShopifyOrder(input: { storeId: string; webhookId: string; 
     }).map((redemption) => redemption.transactionId ?? `${redemption.giftCardId}:${redemption.orderId}`))));
     if (uses.size >= employeeSettings.repeatUsesThreshold) employeeFindings.push(`${uses.size} מימושי Gift Card הקשורים לעובד בתוך ${employeeSettings.windowMinutes} דקות.`);
   }
+  if (matchedEmployee && employeeSettings.couponRepeatUses && employeeSettings.couponPrefix && couponCodes.some((code) => code.startsWith(employeeSettings.couponPrefix))) {
+    const end = Date.parse(createdAt);
+    const employeeCouponUses = state.orders.filter((candidate) => {
+      const time = Date.parse(candidate.createdAt);
+      const hasEmployeeCoupon = candidate.couponCodes?.some((code) => code.startsWith(employeeSettings.couponPrefix));
+      const matchesEmployee = Boolean(
+        (candidate.email && [matchedEmployee.email, matchedEmployee.privateEmail].some((value) => value && normalizeEmail(value) === candidate.email))
+        || (candidate.address && matchedEmployee.address && normalizeAddress(candidate.address) === normalizeAddress(matchedEmployee.address))
+        || candidate.couponCodes?.some((code) => matchedEmployee.couponCodes?.includes(code))
+      );
+      return Boolean(hasEmployeeCoupon && matchesEmployee && Number.isFinite(time) && time <= end && time > end - employeeSettings.couponRepeatWindowMinutes * 60_000);
+    }).length;
+    if (employeeCouponUses > employeeSettings.couponRepeatThreshold) employeeFindings.push(`קוד עובד נוצל ${employeeCouponUses} פעמים עבור ${matchedEmployee.name} בחלון הבדיקה.`);
+  }
   if (employeeFindings.length) {
     result.evidence.unshift({ id: `employee-${shopifyOrderId}`, label: "ניטור עובדים", description: employeeFindings.join(" "), source: "employee", delta: 72, timestamp: createdAt });
     result.score = Math.max(result.score, 72);
@@ -1268,7 +1305,7 @@ export function ingestShopifyOrder(input: { storeId: string; webhookId: string; 
       address: address || undefined,
       paymentGateways: payload.gateway_names ?? [],
       shopifyRisk: payload.risk_level && payload.risk_level !== "none" ? payload.risk_level : undefined,
-      riskFacts: payload.shopify_risk_facts ?? [],
+      riskFacts: payload.risk_level === "high" || payload.risk_level === "medium" ? payload.shopify_risk_facts ?? [] : [],
       ipOrderCountLastTwoHours: ip ? sameIp : undefined,
       ipGiftCardOrderCountLastTwoHours: ip ? giftCardOrdersByIp : undefined,
       ipDistinctEmailsLastTwoHours: ip ? emailsByIp : undefined,
