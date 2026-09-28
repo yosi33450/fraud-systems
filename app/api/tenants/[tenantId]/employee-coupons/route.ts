@@ -58,7 +58,7 @@ export async function GET(request: Request, context: { params: Promise<{ tenantI
     let after: string | null = null;
     let partial = false;
     for (let page = 0; page < 40; page++) {
-      const result: CouponResponse = await shopifyAdminRequest<CouponResponse>({ shopDomain: store.domain, accessToken: connection.accessToken, query: QUERY, variables: { after, query: prefix ? `title:${prefix}` : null } });
+      const result: CouponResponse = await shopifyAdminRequest<CouponResponse>({ shopDomain: store.domain, accessToken: connection.accessToken, query: QUERY, variables: { after, query: prefix || null } });
       for (const node of result.codeDiscountNodes.nodes) {
         if (node.codeDiscount.codes?.pageInfo.hasNextPage) partial = true;
         for (const entry of node.codeDiscount.codes?.nodes ?? []) {
