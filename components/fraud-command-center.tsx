@@ -892,7 +892,7 @@ function EmployeesScreen({ mode, employees, activity, settings, stores, onCreate
     {selectedCoupon ? <CenteredDialog className="coupon-detail-dialog" label={`פרטי קופון ${selectedCoupon.code}`} onClose={() => setSelectedCoupon(null)}><header className="drawer-header"><div><span className="eyebrow">קוד הנחה</span><h2 dir="ltr">{selectedCoupon.code}</h2></div><button className="icon-button" onClick={() => setSelectedCoupon(null)} aria-label="סגירה"><X size={19} /></button></header><div className="coupon-detail-body"><div className="coupon-detail-summary"><div><span>שימושים בהזמנות שנקלטו · {couponPeriod === "all" ? "כל ההיסטוריה השמורה" : "30 ימים"}</span><strong>{selectedCoupon.orders.toLocaleString("he-IL")}</strong></div><div><span>שימוש אחרון</span><strong>{new Intl.DateTimeFormat("he-IL", { dateStyle: "medium" }).format(new Date(selectedCoupon.lastUsedAt))}</strong></div><div><span>חנות</span><strong>{stores.find((store) => store.id === selectedCoupon.storeId)?.name ?? "חנות מחוברת"}</strong></div></div><h3>הגדרת ההנחה ב־Shopify</h3>{couponDetailState === "loading" ? <p role="status">טוען את פרטי הקוד מ־Shopify…</p> : couponDetailState === "permission" ? <p role="status">לחיבור החנות אין כרגע הרשאת <bdi>read_discounts</bdi>, לכן אפשר לראות שימושים מהזמנות אבל לא את הגדרת הקופון ב־Shopify.</p> : couponDetailState === "not-found" ? <p role="status">הקוד לא נמצא כעת בהנחות החנות. ייתכן שנמחק או שהגיע מהזמנה ישנה.</p> : couponDetailState === "error" ? <p role="alert">לא הצלחנו לקרוא כרגע את פרטי הקוד מ־Shopify. השימושים מההזמנות עדיין מוצגים למעלה.</p> : couponDetails ? <><dl className="coupon-detail-list"><div><dt>שם ההנחה</dt><dd>{couponDetails.title || "לא צוין"}</dd></div><div><dt>סוג</dt><dd>{couponDetails.type === "DiscountCodeBasic" ? "הנחה רגילה" : couponDetails.type === "DiscountCodeBxgy" ? "קנה וקבל" : couponDetails.type === "DiscountCodeFreeShipping" ? "משלוח חינם" : "הנחת אפליקציה"}</dd></div><div><dt>מצב ב־Shopify</dt><dd>{couponDetails.status === "ACTIVE" ? "פעיל" : couponDetails.status === "EXPIRED" ? "פג תוקף" : couponDetails.status === "SCHEDULED" ? "מתוזמן" : couponDetails.status || "לא זמין"}</dd></div><div><dt>תחילת תוקף</dt><dd>{couponDetails.startsAt ? new Intl.DateTimeFormat("he-IL", { dateStyle: "medium" }).format(new Date(couponDetails.startsAt)) : "לא צוין"}</dd></div><div><dt>סיום תוקף</dt><dd>{couponDetails.endsAt ? new Intl.DateTimeFormat("he-IL", { dateStyle: "medium" }).format(new Date(couponDetails.endsAt)) : "ללא תאריך סיום"}</dd></div><div><dt>מגבלת שימושים</dt><dd>{couponDetails.usageLimit === null ? "ללא מגבלה" : couponDetails.usageLimit.toLocaleString("he-IL")}</dd></div><div><dt>שימושים בקוד לפי Shopify</dt><dd>{couponDetails.shopifyCodeUses === null ? "לא זמין" : couponDetails.shopifyCodeUses.toLocaleString("he-IL")}</dd></div></dl>{couponDetails.summary ? <p className="coupon-detail-description">{couponDetails.summary}</p> : null}<p className="coupon-detail-footnote">מספר השימושים של Shopify עשוי להתעדכן באיחור. אם להנחה יש כמה קודים, הנתון כאן מתייחס לקוד הזה בלבד; הספירה למעלה מבוססת על ההזמנות שנקלטו אצלנו.</p></> : null}</div></CenteredDialog> : null}
     {selectedEmployee ? <CenteredDialog className="employee-detail-dialog" label={`פרטי ${selectedEmployee.name}`} onClose={() => setSelectedEmployee(null)}>
       <header className="drawer-header"><h2>עריכת {selectedEmployee.name}</h2><button className="icon-button" onClick={() => setSelectedEmployee(null)} aria-label="סגירה"><X size={19} /></button></header>
-      <form className="employee-detail-body employee-form" onSubmit={async (event) => {
+      <form className="employee-detail-body employee-form employee-edit-form" onSubmit={async (event) => {
         event.preventDefault();
         const form = new FormData(event.currentTarget);
         setEmployeeEditSaving(true); setEmployeeEditError("");
@@ -903,12 +903,16 @@ function EmployeesScreen({ mode, employees, activity, settings, stores, onCreate
         } catch { setEmployeeEditError("שמירת העובד נכשלה. בדוק אימייל כפול ונסה שוב."); }
         finally { setEmployeeEditSaving(false); }
       }}>
-        <label>שם מלא<input name="name" defaultValue={selectedEmployee.name} required /></label>
-        <label>אימייל עבודה<input name="email" type="email" dir="ltr" defaultValue={selectedEmployee.email} required /></label>
-        <label>אימייל פרטי<input name="privateEmail" type="email" dir="ltr" defaultValue={selectedEmployee.privateEmail ?? ""} /></label>
-        <label>כתובת<input name="address" defaultValue={selectedEmployee.address ?? ""} /></label>
-        <label>קופונים משויכים<input name="couponCodes" dir="ltr" defaultValue={selectedEmployee.couponCodes?.join(", ") ?? ""} /></label>
-        <label>מחלקה<input name="department" defaultValue={selectedEmployee.department} required /></label>
+        <fieldset className="employee-edit-group"><legend>פרטי העובד</legend><div className="employee-edit-grid">
+          <label>שם מלא<input name="name" defaultValue={selectedEmployee.name} required /></label>
+          <label>מחלקה<input name="department" defaultValue={selectedEmployee.department} required /></label>
+        </div></fieldset>
+        <fieldset className="employee-edit-group"><legend>פרטי זיהוי להשוואת הזמנות</legend><div className="employee-edit-grid">
+          <label>אימייל עבודה<input name="email" type="email" dir="ltr" defaultValue={selectedEmployee.email} required /></label>
+          <label>אימייל פרטי<input name="privateEmail" type="email" dir="ltr" defaultValue={selectedEmployee.privateEmail ?? ""} /></label>
+          <label className="employee-edit-wide">כתובת<input name="address" defaultValue={selectedEmployee.address ?? ""} /></label>
+        </div></fieldset>
+        <fieldset className="employee-edit-group employee-edit-coupons"><legend>שיוך קודים חריגים <small>אופציונלי</small></legend><label>קופונים משויכים<input name="couponCodes" dir="ltr" defaultValue={selectedEmployee.couponCodes?.join(", ") ?? ""} placeholder="למשל OVED30" /><small>קודי OVED מזוהים אוטומטית. מוסיפים כאן רק קוד שצריך לשייך לאדם מסוים.</small></label></fieldset>
         {employeeEditError ? <p role="alert">{employeeEditError}</p> : null}
         <button className="primary-button" disabled={employeeEditSaving}>{employeeEditSaving ? "שומר…" : "שמור שינויים"}</button>
       </form>

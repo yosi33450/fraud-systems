@@ -6,7 +6,11 @@ import { shopifyAdminRequest } from "@/lib/shopify-admin.server";
 
 export const dynamic = "force-dynamic";
 
-const ACCESS_QUERY = `#graphql query ShopShieldDiscountAccess { currentAppInstallation { accessScopes { handle } } }`;
+const ACCESS_QUERY = `#graphql
+  query ShopShieldDiscountAccess {
+    currentAppInstallation { accessScopes { handle } }
+  }
+`;
 const DETAILS_QUERY = `#graphql
   query ShopShieldCouponDetails($code: String!) {
     codeDiscountNodeByCode(code: $code) {
