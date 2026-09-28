@@ -1532,17 +1532,24 @@ p { text-wrap: pretty; }
 .employee-detail-body dt { color: var(--muted); }
 .employee-detail-body dd { margin: 0; font-weight: 650; overflow-wrap: anywhere; }
 .employee-monitoring-settings { padding: 24px; margin-bottom: 20px; border: 1px solid var(--product-border); border-radius: 16px; background: #fff; }
-.employee-secondary-rules { margin-top: 20px; padding: 0; border: 1px solid var(--product-border); border-radius: 12px; background: #fbfcfb; overflow: clip; }
-.employee-secondary-rules summary { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 15px 17px; cursor: pointer; font-size: 14px; font-weight: 700; list-style: none; }
+.employee-secondary-rules { margin-top: 20px; padding: 0; border: 1px solid var(--product-border); border-radius: 14px; background: #fbfcfb; overflow: clip; }
+.employee-secondary-rules summary { display: flex; align-items: center; gap: 9px; padding: 15px 17px; cursor: pointer; font-size: 14px; font-weight: 750; list-style: none; }
 .employee-secondary-rules summary::-webkit-details-marker { display: none; }
+.employee-secondary-rules summary > small { margin-inline-start: auto; color: var(--product-secondary); font-size: 12px; font-weight: 500; }
 .employee-secondary-rules[open] summary { border-bottom: 1px solid var(--product-border); background: #fff; }
 .employee-secondary-rules .context-note { margin: 14px 17px 0; color: var(--product-secondary); font-size: 13px; }
-.employee-rules-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 14px 17px; }
-.employee-rules-grid label { display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 11px 12px; border: 1px solid var(--product-border); border-radius: 10px; background: #fff; font-size: 13px; font-weight: 600; }
-.employee-rules-grid label:has(input[type="checkbox"]) { grid-column: 1 / -1; border-color: #cbdcd1; }
-.employee-rules-grid label:has(input[type="checkbox"]:checked) { border-color: #78ab8a; background: #f4faf5; color: #164a31; }
-.employee-rules-grid label:has(input[type="number"]), .employee-rules-grid label:has(input[dir="ltr"]), .employee-rules-grid label:has(select) { justify-content: space-between; color: var(--product-secondary); font-weight: 550; }
-.employee-rules-grid input:not([type="checkbox"]), .employee-rules-grid select { width: 126px; max-width: 52%; min-height: 36px; padding: 6px 8px; border: 1px solid var(--product-border); border-radius: 7px; background: #fff; color: var(--ink); font: inherit; font-weight: 650; }
+.employee-rule-list { display: grid; gap: 9px; margin: 14px 17px; }
+.employee-rule-row { overflow: clip; border: 1px solid #d7e2da; border-radius: 11px; background: #fff; transition: border-color .18s ease, box-shadow .18s ease; }
+.employee-rule-row:has(input[type="checkbox"]:checked) { border-color: #79aa8a; box-shadow: inset 3px 0 0 #24704c; }
+.employee-rule-toggle { display: flex; align-items: flex-start; gap: 11px; padding: 13px 14px; cursor: pointer; }
+.employee-rule-toggle input { flex: 0 0 auto; width: 16px; height: 16px; margin: 2px 0 0; accent-color: #24704c; }
+.employee-rule-toggle span { display: grid; gap: 3px; }
+.employee-rule-toggle strong { color: var(--ink); font-size: 13px; font-weight: 750; }
+.employee-rule-toggle small { color: var(--product-secondary); font-size: 12px; line-height: 1.45; }
+.employee-rule-controls { display: flex; flex-wrap: wrap; gap: 9px; padding: 10px 14px 13px; border-top: 1px solid #e8eee9; background: #f7faf8; }
+.employee-rule-controls label { display: inline-flex; align-items: center; gap: 7px; color: var(--product-secondary); font-size: 12px; font-weight: 650; }
+.employee-rule-controls input, .employee-rule-controls select { width: 68px; min-height: 34px; padding: 5px 7px; border: 1px solid var(--product-border); border-radius: 7px; background: #fff; color: var(--ink); font: inherit; font-weight: 700; text-align: center; }
+.employee-rule-controls select { width: 90px; }
 .employee-secondary-rules .primary-button { margin: 0 17px 17px; }
 .employee-settings-actions { display: flex; gap: 9px; }
 .coupon-results { margin-top: 12px; overflow-wrap: anywhere; font-size: 13px; }
