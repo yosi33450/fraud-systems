@@ -1,4 +1,4 @@
-import { completeHistoricalSync, failHistoricalSync, ingestShopifyOrder, replaceGiftCardRegistry, upsertGiftCardRegistry, type GiftCardRegistryInput, type ShopifyOrderPayload } from "@/lib/operational-store";
+import { completeHistoricalSync, failHistoricalSync, ingestShopifyOrder, openCaseOrderReferences, replaceGiftCardRegistry, upsertGiftCardRegistry, type GiftCardRegistryInput, type ShopifyOrderPayload } from "@/lib/operational-store";
 import type { Store } from "@/lib/types";
 import { shopifyAdminRequest } from "@/lib/shopify-admin.server";
 import { selectCustomerEmail } from "@/lib/customer-identity";
@@ -89,6 +89,14 @@ export const ORDER_GIFT_CARD_DETAILS_QUERY = `#graphql
   }
 `;
 
+const OPEN_CASE_TAGS_QUERY = `#graphql
+  query ShopShieldOpenCaseOrderTags($ids: [ID!]!) {
+    nodes(ids: $ids) {
+      ... on Order { id name tags }
+    }
+  }
+`;
+
 type ShopifyOrderNode = {
   id: string;
   name: string;
@@ -158,7 +166,7 @@ const toPayload = (order: ShopifyOrderNode): ShopifyOrderPayload => ({
   risk_level: order.risk?.recommendation?.toLowerCase() === "high" ? "high"
     : order.risk?.recommendation?.toLowerCase() === "medium" ? "medium"
       : order.risk?.recommendation?.toLowerCase() === "low" ? "low" : "none",
-  shopify_risk_facts: ["high", "medium"].includes(order.risk?.recommendation?.toLowerCase() ?? "")
+  shopify_risk_facts: order.risk?.recommendation?.toLowerCase() === "high"
     ? order.risk?.assessments.flatMap((assessment) => assessment.facts.filter((fact) => fact.sentiment === "NEGATIVE").map((fact) => fact.description)) ?? []
     : [],
   payment_failures: order.transactions.filter((transaction) => ["FAILURE", "ERROR"].includes(transaction.status?.toUpperCase())).length,
@@ -190,6 +198,26 @@ const toPayload = (order: ShopifyOrderNode): ShopifyOrderPayload => ({
     price: item.originalUnitPriceSet.shopMoney.amount,
   })),
 });
+
+/** Removes physical-store cases immediately, instead of waiting for a full historical replay. */
+export async function reconcileOpenCaseExternalOrders(input: { tenantId: string; storeId: string; shopDomain: string; accessToken: string }) {
+  const references = openCaseOrderReferences(input.tenantId, input.storeId);
+  if (!references.length) return 0;
+  const data = await shopifyAdminRequest<{ nodes: Array<{ id?: string; name?: string; tags?: string[] } | null> }>({
+    shopDomain: input.shopDomain, accessToken: input.accessToken, query: OPEN_CASE_TAGS_QUERY,
+    variables: { ids: references.map((reference) => reference.id) },
+  });
+  let excluded = 0;
+  for (const order of data.nodes) {
+    if (!order?.id || !order.tags?.some((tag) => tag.trim().toLowerCase() === "external-order")) continue;
+    ingestShopifyOrder({
+      storeId: input.storeId, webhookId: `external-reconcile:${order.id}`, topic: "HISTORICAL_SYNC",
+      payload: { id: order.id, admin_graphql_api_id: order.id, name: order.name, tags: order.tags },
+    });
+    excluded += 1;
+  }
+  return excluded;
+}
 
 const giftCardTrackingStatus = (error: unknown): NonNullable<Store["giftCardTrackingStatus"]> => {
   const message = error instanceof Error ? error.message : String(error);

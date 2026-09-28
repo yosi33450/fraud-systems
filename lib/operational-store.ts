@@ -1049,6 +1049,14 @@ export function giftCardAlertOrderIds(tenantId: string, storeId: string) {
   )).map((item) => item.context?.shopifyOrderId).filter((id): id is string => Boolean(id)))];
 }
 
+/** Small, current reconciliation set for cases that are still visible to the merchant. */
+export function openCaseOrderReferences(tenantId: string, storeId: string) {
+  tenantStore(tenantId, storeId);
+  return state.cases
+    .filter((item) => item.tenantId === tenantId && item.storeId === storeId && ["new", "review", "action"].includes(item.status) && item.context?.shopifyOrderId)
+    .map((item) => ({ id: item.context!.shopifyOrderId!, name: item.orderNumber }));
+}
+
 export function ingestShopifyOrder(input: { storeId: string; webhookId: string; topic: string; payload: ShopifyOrderPayload }) {
   const store = state.stores.find((item) => item.id === input.storeId);
   if (!store) throw new Error("STORE_NOT_FOUND");
@@ -1159,7 +1167,7 @@ export function ingestShopifyOrder(input: { storeId: string; webhookId: string; 
   if (existingCaseBeforeEvaluation?.context && !existingCaseBeforeEvaluation.context.shopifyOrderId) existingCaseBeforeEvaluation.context.shopifyOrderId = shopifyOrderId;
   if (existingCaseBeforeEvaluation?.context) {
     existingCaseBeforeEvaluation.context.shopifyRisk = payload.risk_level ?? existingCaseBeforeEvaluation.context.shopifyRisk;
-    existingCaseBeforeEvaluation.context.riskFacts = payload.risk_level === "high" || payload.risk_level === "medium"
+    existingCaseBeforeEvaluation.context.riskFacts = payload.risk_level === "high"
       ? payload.shopify_risk_facts ?? []
       : [];
   }
@@ -1187,7 +1195,7 @@ export function ingestShopifyOrder(input: { storeId: string; webhookId: string; 
     paymentFailures: Number(payload.payment_failures ?? 0),
     billingShippingMismatch: Boolean(payload.billing_address && payload.shipping_address && !sameAddress(payload.billing_address, payload.shipping_address)),
     shopifyRisk: payload.risk_level ?? "none",
-    shopifyRiskFacts: payload.risk_level === "high" || payload.risk_level === "medium" ? payload.shopify_risk_facts ?? [] : [],
+    shopifyRiskFacts: payload.risk_level === "high" ? payload.shopify_risk_facts ?? [] : [],
     orderLocalHour: Number(new Intl.DateTimeFormat("en-US", { hour: "2-digit", hourCycle: "h23", timeZone: "Asia/Jerusalem" }).format(new Date(createdAt))),
     employeeMatch,
     refundAfterFulfillment: Boolean(payload.refund_after_fulfillment),
@@ -1305,7 +1313,7 @@ export function ingestShopifyOrder(input: { storeId: string; webhookId: string; 
       address: address || undefined,
       paymentGateways: payload.gateway_names ?? [],
       shopifyRisk: payload.risk_level && payload.risk_level !== "none" ? payload.risk_level : undefined,
-      riskFacts: payload.risk_level === "high" || payload.risk_level === "medium" ? payload.shopify_risk_facts ?? [] : [],
+      riskFacts: payload.risk_level === "high" ? payload.shopify_risk_facts ?? [] : [],
       ipOrderCountLastTwoHours: ip ? sameIp : undefined,
       ipGiftCardOrderCountLastTwoHours: ip ? giftCardOrdersByIp : undefined,
       ipDistinctEmailsLastTwoHours: ip ? emailsByIp : undefined,

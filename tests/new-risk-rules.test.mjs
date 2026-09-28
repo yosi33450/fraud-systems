@@ -54,16 +54,17 @@ test('repeated gift-card purchases above 100 match IP despite changed emails', (
   assert.ok(third.case.evidence.some((entry) => entry.label.includes('מעל ₪100')));
 });
 
-test('Shopify high risk requires an internal signal; medium augments an existing rule', () => {
+test('Shopify high risk requires an internal signal, while medium has no effect', () => {
   const store = setup();
   assert.equal(order(store, 1, '2026-09-25T12:00:00Z', { risk_level: 'high' }).case, null);
   const highWithSignal = order(store, 2, '2026-09-25T12:01:00Z', { email: 'high@example.com', total_price: 2000, risk_level: 'high' });
   assert.ok(highWithSignal.case);
   assert.ok(['high', 'critical'].includes(highWithSignal.case.severity));
-  const medium = order(store, 3, '2026-09-25T12:02:00Z', { email: 'different@example.com', total_price: 2000, risk_level: 'medium', shopify_risk_facts: ['Multiple payment attempts'] });
-  assert.ok(medium.case.evidence.some((entry) => entry.label.includes('סיכון בינוני')));
-  assert.ok(medium.case.evidence.some((entry) => entry.description.includes('Multiple payment attempts')));
-  assert.deepEqual(medium.case.context.riskFacts, ['Multiple payment attempts']);
+  const plain = order(store, 3, '2026-09-25T12:02:00Z', { email: 'plain-medium@example.com', total_price: 2000 });
+  const medium = order(store, 4, '2026-09-25T12:03:00Z', { email: 'different@example.com', total_price: 2000, risk_level: 'medium', shopify_risk_facts: ['Multiple payment attempts'] });
+  assert.equal(medium.case?.score, plain.case?.score);
+  assert.ok(!medium.case?.evidence.some((entry) => entry.source === 'shopify'));
+  assert.deepEqual(medium.case?.context.riskFacts, []);
 });
 
 test('Shopify low risk and its facts do not add evidence or score', () => {

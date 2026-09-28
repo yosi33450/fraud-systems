@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getFreshStoreConnection } from "@/lib/shopify-connection.server";
 import { ensureOrderWebhooks } from "@/lib/shopify-admin.server";
-import { syncOrdersPage } from "@/lib/shopify-sync.server";
+import { reconcileOpenCaseExternalOrders, syncOrdersPage } from "@/lib/shopify-sync.server";
 import { hydrateOperationalState, persistOperationalState } from "@/lib/persistence.server";
 
 export const runtime = "nodejs";
@@ -16,6 +16,9 @@ export async function POST(request: Request, context: { params: Promise<{ tenant
     const since = body.since && Number.isFinite(Date.parse(body.since)) && Date.parse(body.since) >= lowerBound && Date.parse(body.since) <= Date.now()
       ? body.since
       : new Date(Date.now() - 30 * 86_400_000).toISOString();
+    const externalExcluded = !body.scanned ? await reconcileOpenCaseExternalOrders({
+      tenantId, storeId, shopDomain: connection.store.domain, accessToken: connection.accessToken,
+    }) : 0;
     const sync = await syncOrdersPage({
       tenantId,
       storeId,
@@ -30,7 +33,7 @@ export async function POST(request: Request, context: { params: Promise<{ tenant
       uri: new URL(`/api/shopify/webhooks/${storeId}`, request.url).toString(),
     }) : null;
     await persistOperationalState();
-    return NextResponse.json({ synced: true, ...sync, since, webhooks });
+    return NextResponse.json({ synced: true, ...sync, since, webhooks, externalExcluded });
   } catch (error) {
     const message = error instanceof Error ? error.message : "SHOPIFY_SYNC_FAILED";
     console.error("[shopify-sync] failed", { tenantId, storeId, code: message });

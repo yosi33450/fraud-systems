@@ -110,9 +110,6 @@ export function evaluateRisk(signals: OrderSignals, now = new Date(), rules: Ris
   if (signals.shopifyRisk === "high") {
     evidence.push({ id: `${evidence.length + 1}`, label: "Shopify סימנה סיכון גבוה", description: signals.shopifyRiskFacts?.length ? `סיבות מ־Shopify: ${signals.shopifyRiskFacts.join("; ")}` : "אות משלים מ־Shopify; הוא אינו פותח התראה ללא תנאי פנימי נוסף.", source: "shopify", delta: highShopifyRiskIsCorroborated ? 12 : 4, timestamp: now.toISOString() });
   }
-  if (signals.shopifyRisk === "medium") {
-    evidence.push({ id: `${evidence.length + 1}`, label: "Shopify סימנה סיכון בינוני", description: signals.shopifyRiskFacts?.length ? `סיבות מ־Shopify: ${signals.shopifyRiskFacts.join("; ")}` : "מנגנון הסיכון של Shopify המליץ לבדוק את ההזמנה.", source: "shopify", delta: 8, timestamp: now.toISOString() });
-  }
   if (signals.billingShippingMismatch) {
     evidence.push({ id: `${evidence.length + 1}`, label: "כתובות החיוב והמשלוח שונות", description: "זהו סימן משלים לבדיקה, לא הוכחה להונאה.", source: "behavior", delta: 18, timestamp: now.toISOString() });
   }
@@ -127,8 +124,8 @@ export function evaluateRisk(signals: OrderSignals, now = new Date(), rules: Ris
   const bonus = matched.filter((rule) => !rule.action.openCase).reduce((sum, rule) => sum + Math.max(0, Math.min(20, rule.action.scoreBonus ?? 0)), 0);
   const hasPrimaryAlert = hasInternalAlert;
   const score = hasPrimaryAlert
-    ? Math.min(100, baseScore[severity] + Math.max(0, evidence.length - 1) * 2 + bonus + (highShopifyRiskIsCorroborated ? 12 : 0) + (signals.shopifyRisk === "medium" ? 8 : 0))
-    : Math.min(24, bonus + (signals.shopifyRisk === "medium" ? 8 : 0) + (signals.billingShippingMismatch ? 2 : 0));
+    ? Math.min(100, baseScore[severity] + Math.max(0, evidence.length - 1) * 2 + bonus + (highShopifyRiskIsCorroborated ? 12 : 0))
+    : Math.min(24, bonus + (signals.billingShippingMismatch ? 2 : 0));
 
   return { score, severity, evidence, matchedRuleIds: matched.map((rule) => rule.id), version: "2026.09-v3" };
 }
