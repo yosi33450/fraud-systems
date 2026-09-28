@@ -20,7 +20,11 @@ const QUERY = `#graphql
   }
 `;
 
-const ACCESS_QUERY = `#graphql query EmployeeDiscountAccess { currentAppInstallation { accessScopes { handle } } }`;
+const ACCESS_QUERY = `#graphql
+  query EmployeeDiscountAccess {
+    currentAppInstallation { accessScopes { handle } }
+  }
+`;
 type ShopifyCoupon = { code: string; title: string; status: string; shopifyUses: number | null };
 type CouponResponse = { discountNodes: { nodes: Array<{ discount: { title?: string; status?: string; asyncUsageCount?: number; codes?: { nodes: Array<{ code: string; asyncUsageCount?: number }>; pageInfo: { hasNextPage: boolean } } } }>; pageInfo: { hasNextPage: boolean; endCursor: string | null } } };
 type CouponWarning = "permission" | "connection" | "scan_failed";
