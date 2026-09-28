@@ -11,7 +11,7 @@ export const ORDERS_BACKFILL_QUERY = `#graphql
       nodes {
         id
         name
-        tags
+        tags sourceName channelInformation { channelDefinition { channelName handle } }
         discountCodes
         createdAt
         displayFulfillmentStatus
@@ -73,7 +73,7 @@ export const GIFT_CARDS_QUERY = `#graphql
 export const ORDER_GIFT_CARD_DETAILS_QUERY = `#graphql
   query ShieldLedgerOrderGiftCardDetails($id: ID!) {
     order(id: $id) {
-      id name createdAt email phone clientIp paymentGatewayNames tags discountCodes displayFulfillmentStatus
+      id name createdAt email phone clientIp paymentGatewayNames tags sourceName channelInformation { channelDefinition { channelName handle } } discountCodes displayFulfillmentStatus
       risk { recommendation assessments { riskLevel facts { description sentiment } } }
       customAttributes { key value }
       transactions {
@@ -92,7 +92,7 @@ export const ORDER_GIFT_CARD_DETAILS_QUERY = `#graphql
 const OPEN_CASE_TAGS_QUERY = `#graphql
   query ShopShieldOpenCaseOrderTags($ids: [ID!]!) {
     nodes(ids: $ids) {
-      ... on Order { id name tags }
+      ... on Order { id name tags sourceName channelInformation { channelDefinition { channelName handle } } }
     }
   }
 `;
@@ -101,6 +101,8 @@ type ShopifyOrderNode = {
   id: string;
   name: string;
   tags?: string[];
+  sourceName?: string | null;
+  channelInformation?: { channelDefinition?: { channelName?: string | null; handle?: string | null } | null } | null;
   discountCodes?: string[];
   createdAt: string;
   displayFulfillmentStatus?: string;
@@ -151,6 +153,7 @@ const toPayload = (order: ShopifyOrderNode): ShopifyOrderPayload => ({
   admin_graphql_api_id: order.id,
   name: order.name,
   tags: order.tags,
+  source_name: [order.sourceName, order.channelInformation?.channelDefinition?.channelName, order.channelInformation?.channelDefinition?.handle].filter(Boolean).join(" "),
   discount_codes: order.discountCodes,
   created_at: order.createdAt,
   email: selectCustomerEmail({
@@ -203,16 +206,18 @@ const toPayload = (order: ShopifyOrderNode): ShopifyOrderPayload => ({
 export async function reconcileOpenCaseExternalOrders(input: { tenantId: string; storeId: string; shopDomain: string; accessToken: string }) {
   const references = openCaseOrderReferences(input.tenantId, input.storeId);
   if (!references.length) return 0;
-  const data = await shopifyAdminRequest<{ nodes: Array<{ id?: string; name?: string; tags?: string[] } | null> }>({
+  const data = await shopifyAdminRequest<{ nodes: Array<{ id?: string; name?: string; tags?: string[]; sourceName?: string | null; channelInformation?: { channelDefinition?: { channelName?: string | null; handle?: string | null } | null } | null } | null> }>({
     shopDomain: input.shopDomain, accessToken: input.accessToken, query: OPEN_CASE_TAGS_QUERY,
     variables: { ids: references.map((reference) => reference.id) },
   });
   let excluded = 0;
   for (const order of data.nodes) {
-    if (!order?.id || !order.tags?.some((tag) => tag.trim().toLowerCase() === "external-order")) continue;
+    const sourceName = [order?.sourceName, order?.channelInformation?.channelDefinition?.channelName, order?.channelInformation?.channelDefinition?.handle].filter(Boolean).join(" ").toLowerCase();
+    const isPhysicalStoreOrder = order?.tags?.some((tag) => tag.trim().toLowerCase() === "external-order") || /(?:^|[\s_-])pos(?:$|[\s_-])|point[\s_-]*of[\s_-]*sale/.test(sourceName);
+    if (!order?.id || !isPhysicalStoreOrder) continue;
     ingestShopifyOrder({
       storeId: input.storeId, webhookId: `external-reconcile:${order.id}`, topic: "HISTORICAL_SYNC",
-      payload: { id: order.id, admin_graphql_api_id: order.id, name: order.name, tags: order.tags },
+      payload: { id: order.id, admin_graphql_api_id: order.id, name: order.name, tags: order.tags, source_name: sourceName },
     });
     excluded += 1;
   }

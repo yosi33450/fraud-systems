@@ -20,6 +20,14 @@ test('external-order is excluded before storage and risk analysis', () => {
   assert.equal(api.exportOperationalState().cases.length, 0);
 });
 
+test('POS orders are excluded even when an upstream integration missed the external-order tag', () => {
+  const store = setup();
+  const result = order(store, 9, '2026-09-25T12:00:00Z', { total_price: 20000, source_name: 'PayPlus POS Strongful' });
+  assert.equal(result.case, null);
+  assert.equal(api.exportOperationalState().orders.length, 0);
+  assert.equal(api.exportOperationalState().cases.length, 0);
+});
+
 test('an order changed to external-order is removed from alerts and stored orders', () => {
   const store = setup();
   const first = order(store, 1, '2026-09-25T12:00:00Z', { total_price: 2000 });

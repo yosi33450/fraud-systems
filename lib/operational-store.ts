@@ -48,6 +48,7 @@ export type ShopifyOrderPayload = {
   gateway_names?: string[];
   shopify_risk_facts?: string[];
   tags?: string | string[];
+  source_name?: string;
   discount_codes?: Array<string | { code?: string | null }>;
   transactions?: ShopifyOrderTransaction[];
 };
@@ -1071,7 +1072,10 @@ export function ingestShopifyOrder(input: { storeId: string; webhookId: string; 
   const payload = input.payload;
   const shopifyOrderId = String(payload.admin_graphql_api_id ?? payload.id ?? randomUUID());
   const tags = Array.isArray(payload.tags) ? payload.tags : String(payload.tags ?? "").split(",");
-  if (tags.some((tag) => tag.trim().toLowerCase() === "external-order")) {
+  const sourceName = String(payload.source_name ?? "").trim().toLowerCase();
+  const isPhysicalStoreOrder = tags.some((tag) => tag.trim().toLowerCase() === "external-order")
+    || /(?:^|[\s_-])pos(?:$|[\s_-])|point[\s_-]*of[\s_-]*sale/.test(sourceName);
+  if (isPhysicalStoreOrder) {
     state.orders = state.orders.filter((order) => !(order.storeId === store.id && order.shopifyOrderId === shopifyOrderId));
     const removedCaseIds = new Set(state.cases.filter((item) => item.storeId === store.id && (
       item.context?.shopifyOrderId === shopifyOrderId || Boolean(payload.name && item.orderNumber === payload.name)
