@@ -6,6 +6,7 @@ type CrediMatchConfiguration = {
   username: string;
   password: string;
   reportId: string;
+  apiKey: string;
 };
 
 type TokenCache = {
@@ -49,16 +50,19 @@ export function getCrediMatchConfiguration(): CrediMatchConfiguration {
   const username = process.env.CREDIMATCH_USERNAME?.trim();
   const password = process.env.CREDIMATCH_PASSWORD;
   const reportId = process.env.CREDIMATCH_ID?.trim();
+  const apiKey = process.env.x_cm_api_key;
   const missing = [
     ["CREDIMATCH_USERNAME", username],
     ["CREDIMATCH_PASSWORD", password],
     ["CREDIMATCH_ID", reportId],
+    ["x_cm_api_key", apiKey],
   ].filter(([, value]) => !value).map(([name]) => name);
   if (missing.length) throw new CrediMatchConfigurationError(`CREDIMATCH_ENV_MISSING:${missing.join(",")}`);
   return {
     username: username!,
     password: password!,
     reportId: safePathSegment(reportId!, "CREDIMATCH_ID"),
+    apiKey: apiKey!,
   };
 }
 
@@ -94,7 +98,11 @@ async function authenticate(): Promise<TokenCache> {
   const configuration = getCrediMatchConfiguration();
   const response = await fetch(`${CREDIMATCH_API_BASE}/authentication/authenticate`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+      x_cm_api_key: configuration.apiKey,
+    },
     body: JSON.stringify({ userName: configuration.username, password: configuration.password }),
     cache: "no-store",
   });
@@ -139,7 +147,11 @@ async function reportRequest(action: "discrepancies" | "transactions", queryKey:
     const token = await accessToken(attempt === 1);
     const response = await fetch(url, {
       method: "GET",
-      headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/json",
+        x_cm_api_key: configuration.apiKey,
+      },
       cache: "no-store",
     });
     if (response.status === 401 && attempt === 0) continue;
