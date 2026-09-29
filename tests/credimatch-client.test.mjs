@@ -6,6 +6,7 @@ process.env.CREDIMATCH_USERNAME = 'user';
 process.env.CREDIMATCH_PASSWORD = 'password';
 process.env.CREDIMATCH_ID = 'report-1';
 process.env.x_cm_api_key = 'encrypted-api-key';
+globalThis.__crediMatchTransport = (...args) => globalThis.fetch(...args);
 const api = await import('../lib/credimatch.server.ts');
 
 test('authenticates with username and calls the fixed discrepancy endpoint', async (context) => {

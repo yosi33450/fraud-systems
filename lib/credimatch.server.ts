@@ -1,7 +1,10 @@
+import https from "node:https";
+
 const CREDIMATCH_API_BASE = "https://api.credimatch.co.il";
 const DEFAULT_TOKEN_TTL_MS = 5 * 60_000;
 const MAX_RESPONSE_BYTES = 512_000;
 const MAX_DIAGNOSTIC_BODY_CHARS = 4_000;
+const REQUEST_TIMEOUT_MS = 20_000;
 
 type CrediMatchConfiguration = {
   username: string;
@@ -15,11 +18,17 @@ type TokenCache = {
   expiresAt: number;
 };
 
+type CrediMatchTransport = (input: string | URL, init?: RequestInit) => Promise<Response>;
+
 declare global {
   // eslint-disable-next-line no-var
   var __crediMatchTokenCache: TokenCache | undefined;
   // eslint-disable-next-line no-var
   var __crediMatchAuthentication: Promise<TokenCache> | undefined;
+  // Test seam. Production deliberately uses node:https because CrediMatch returns
+  // an empty 500 response to Node's fetch/Undici request fingerprint.
+  // eslint-disable-next-line no-var
+  var __crediMatchTransport: CrediMatchTransport | undefined;
 }
 
 export class CrediMatchConfigurationError extends Error {
@@ -134,6 +143,57 @@ const diagnosticBody = (text: string, secrets: string[]) => {
   }
 };
 
+const nodeHttpsTransport: CrediMatchTransport = (input, init = {}) => new Promise((resolve, reject) => {
+  const url = input instanceof URL ? input : new URL(input);
+  const headers = new Headers(init.headers);
+  const body = typeof init.body === "string" ? init.body : undefined;
+  if (init.body && body === undefined) {
+    reject(new TypeError("CREDIMATCH_BODY_TYPE_UNSUPPORTED"));
+    return;
+  }
+  if (body !== undefined && !headers.has("Content-Length")) {
+    headers.set("Content-Length", String(Buffer.byteLength(body, "utf8")));
+  }
+  if (!headers.has("Accept")) headers.set("Accept", "*/*");
+  if (!headers.has("User-Agent")) headers.set("User-Agent", "fraud-systems/1.0");
+
+  const request = https.request(url, {
+    method: init.method ?? "GET",
+    headers: Object.fromEntries(headers.entries()),
+    timeout: REQUEST_TIMEOUT_MS,
+  }, (incoming) => {
+    const chunks: Buffer[] = [];
+    let totalBytes = 0;
+    incoming.on("data", (chunk: Buffer | string) => {
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      totalBytes += buffer.length;
+      if (totalBytes > MAX_RESPONSE_BYTES) {
+        request.destroy(new CrediMatchApiError("CREDIMATCH_RESPONSE_TOO_LARGE", incoming.statusCode));
+        return;
+      }
+      chunks.push(buffer);
+    });
+    incoming.on("end", () => {
+      const responseHeaders = new Headers();
+      for (const [name, value] of Object.entries(incoming.headers)) {
+        if (Array.isArray(value)) value.forEach((item) => responseHeaders.append(name, item));
+        else if (value !== undefined) responseHeaders.set(name, String(value));
+      }
+      resolve(new Response(Buffer.concat(chunks), {
+        status: incoming.statusCode ?? 500,
+        statusText: incoming.statusMessage,
+        headers: responseHeaders,
+      }));
+    });
+  });
+  request.on("timeout", () => request.destroy(new Error("CREDIMATCH_REQUEST_TIMEOUT")));
+  request.on("error", reject);
+  request.end(body);
+});
+
+const crediMatchTransport: CrediMatchTransport = (input, init) =>
+  globalThis.__crediMatchTransport?.(input, init) ?? nodeHttpsTransport(input, init);
+
 async function authenticate(): Promise<TokenCache> {
   const configuration = getCrediMatchConfiguration();
   const url = `${CREDIMATCH_API_BASE}/authentication/authenticate`;
@@ -158,7 +218,7 @@ async function authenticate(): Promise<TokenCache> {
 
   let response: Response;
   try {
-    response = await fetch(url, {
+    response = await crediMatchTransport(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -243,7 +303,7 @@ async function reportRequest(action: "discrepancies" | "transactions", queryKey:
 
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const token = await accessToken(attempt === 1);
-    const response = await fetch(url, {
+    const response = await crediMatchTransport(url, {
       method: "GET",
       headers: {
         Authorization: `Bearer ${token}`,
