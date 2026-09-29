@@ -92,6 +92,90 @@ export interface FraudCase {
   };
 }
 
+export interface OrderPaymentFingerprint {
+  transactionId?: string;
+  gateway?: string;
+  amount?: number;
+  currency?: string;
+  processedAt?: string;
+  last4?: string;
+  confirmationNumber?: string;
+  voucherNumber?: string;
+  terminalNumber?: string;
+  sessionNumber?: string;
+}
+
+export type ChargebackMatchConfidence = "exact" | "strong" | "possible" | "unmatched";
+
+export interface ChargebackMatchComparison {
+  key: "confirmation" | "voucher" | "last4" | "amount" | "currency" | "time" | "terminal" | "session";
+  label: string;
+  matched: boolean;
+  crediMatchValue?: string;
+  shopifyValue?: string;
+}
+
+export interface ChargebackOrderMatch {
+  confidence: ChargebackMatchConfidence;
+  score: number;
+  orderId?: string;
+  orderNumber?: string;
+  storeId?: string;
+  storeName?: string;
+  customer?: string;
+  email?: string;
+  amount?: number;
+  currency?: string;
+  createdAt?: string;
+  reasons: string[];
+  comparisons: ChargebackMatchComparison[];
+}
+
+export interface CrediMatchSettlement {
+  expectedPaymentTime?: string;
+  actualPaymentTime?: string;
+  grossAmount?: number;
+  expectedNetAmount?: number;
+  netAmount?: number;
+  regularCommissionAmount?: number;
+  vat?: number;
+  currentPaymentNumber?: number;
+  invoiceNumber?: number;
+  invoiceDate?: string;
+  receptionStatus?: string;
+}
+
+export interface CrediMatchChargeback {
+  id: string;
+  tenantId: string;
+  discrepancyId: string;
+  transactionId?: string;
+  receivedAt: string;
+  dealTime?: string;
+  creationTime?: string;
+  originalAmount?: number;
+  payments?: number;
+  status?: string;
+  type?: string;
+  creditCompany?: string;
+  last4Digits?: string;
+  terminalNumber?: string;
+  confirmationNumber?: string;
+  voucherNumber?: string;
+  sessionNumber?: string;
+  additionalDetails?: string;
+  inquiryReason?: string;
+  comment?: string;
+  currency?: string;
+  cardVendor?: string;
+  cardBrand?: string;
+  grossAmount?: number;
+  netAmount?: number;
+  transactionType?: string;
+  settlements: CrediMatchSettlement[];
+  match?: ChargebackOrderMatch;
+}
+
 export interface GiftCardRedemption {
   transactionId?: string;
   currency?: string;
@@ -222,6 +306,7 @@ export interface BlacklistReport {
 export interface DashboardSnapshot {
   giftCardLedger?: import("./gift-card-evidence").GiftLedger;
   tenantId: string;
+  chargebacks: CrediMatchChargeback[];
   cases: FraudCase[];
   stores: Store[];
   employees: Employee[];

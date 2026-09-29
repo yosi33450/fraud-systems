@@ -46,20 +46,22 @@ import {
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { SeverityBadge } from "@/components/severity-badge";
 import { GiftCardWorkspace } from "@/components/gift-card-workspace";
+import { ChargebacksWorkspace } from "@/components/chargebacks-workspace";
 import { CenteredDialog } from "@/components/centered-dialog";
 import { SidebarItem, useWorkspaceNavigation } from "@/components/workspace-navigation";
 import { createSnapshotRefresh } from "@/lib/snapshot-refresh";
 import { summarizeGiftCluster, type MoneyTotal } from "@/lib/gift-cluster-summary";
 import type { GiftLedger } from "@/lib/gift-card-evidence";
 import { cases as initialCases, employees, rules, stores } from "@/lib/initial-state";
-import type { BlacklistReport, CaseStatus, DashboardSnapshot, Employee, EmployeeDiscountActivity, EmployeeMonitoringSettings, FraudCase, NotificationDelivery, NotificationSettings, RiskCondition, RiskConditionField, RiskRule, Severity, Store } from "@/lib/types";
+import type { BlacklistReport, CaseStatus, CrediMatchChargeback, DashboardSnapshot, Employee, EmployeeDiscountActivity, EmployeeMonitoringSettings, FraudCase, NotificationDelivery, NotificationSettings, RiskCondition, RiskConditionField, RiskRule, Severity, Store } from "@/lib/types";
 
-type View = "overview" | "cases" | "gift-cards" | "discounts" | "stores" | "employees" | "rules" | "notifications" | "network" | "team" | "platform";
+type View = "overview" | "cases" | "chargebacks" | "gift-cards" | "discounts" | "stores" | "employees" | "rules" | "notifications" | "network" | "team" | "platform";
 type RuleReconciliation = { reviewed: number; updated: number; resolved: number; reopened: number; active: number };
 
 const nav = [
   { id: "overview", label: "מרכז בקרה", Icon: LayoutDashboard },
   { id: "cases", label: "התראות וחקירות", Icon: ClipboardList, count: 8 },
+  { id: "chargebacks", label: "הכחשות אשראי", Icon: CreditCard },
   { id: "gift-cards", label: "מעקב גיפטקארדים", Icon: Gift },
   { id: "discounts", label: "קודי הנחה", Icon: Tags },
   { id: "stores", label: "חנויות", Icon: StoreIcon },
@@ -102,6 +104,7 @@ export function FraudCommandCenter() {
   const [decisionNotice, setDecisionNotice] = useState("");
   const [decisionVersion, setDecisionVersion] = useState(0);
   const [caseData, setCaseData] = useState(initialCases);
+  const [chargebackData, setChargebackData] = useState<CrediMatchChargeback[]>([]);
   const [giftLedger, setGiftLedger] = useState<DashboardSnapshot["giftCardLedger"]>();
   const [query, setQuery] = useState("");
   const [severity, setSeverity] = useState<Severity | "all">("all");
@@ -133,6 +136,7 @@ export function FraudCommandCenter() {
 
   const applySnapshot = (snapshot: DashboardSnapshot) => {
     setCaseData(snapshot.cases);
+    setChargebackData(snapshot.chargebacks ?? []);
     setGiftLedger(snapshot.giftCardLedger);
     setStoreData(snapshot.stores);
     setEmployeeData(snapshot.employees);
@@ -164,7 +168,7 @@ export function FraudCommandCenter() {
       canRefresh: () => {
         const context = refreshContext.current;
         return document.visibilityState === "visible" && navigator.onLine
-          && ["overview", "cases", "gift-cards", "stores", "employees"].includes(context.view)
+          && ["overview", "cases", "chargebacks", "gift-cards", "stores", "employees"].includes(context.view)
           && !context.selectedCase && !context.connectOpen && !context.syncing
           && !document.querySelector('[role="dialog"], dialog[open]')
           && !document.activeElement?.matches('input, textarea, select, [contenteditable="true"]');
@@ -385,10 +389,10 @@ export function FraudCommandCenter() {
           <ChevronLeft size={15} aria-hidden="true" />
         </button>
         <nav className="nav-list">
-          {[{ title: "ניטור וחקירות", items: nav.slice(0, 3) }, { title: "ניהול החנות", items: nav.slice(3) }].map((group) => <div className="nav-group" key={group.title}>
+          {[{ title: "ניטור וחקירות", items: nav.slice(0, 4) }, { title: "ניהול החנות", items: nav.slice(4) }].map((group) => <div className="nav-group" key={group.title}>
             <h2 className="nav-group-title">{group.title}</h2>
             {group.items.map(({ id, label, Icon, count }) => <SidebarItem key={id} label={label} Icon={Icon} active={view === id} collapsed={collapsed}
-              count={count && (id !== "cases" || caseData.some((item) => !["resolved", "false-positive"].includes(item.status))) ? id === "cases" ? caseData.filter((item) => !["resolved", "false-positive"].includes(item.status)).length : count : undefined}
+              count={id === "chargebacks" ? chargebackData.length || undefined : count && (id !== "cases" || caseData.some((item) => !["resolved", "false-positive"].includes(item.status))) ? id === "cases" ? caseData.filter((item) => !["resolved", "false-positive"].includes(item.status)).length : count : undefined}
               onClick={() => { setView(id); setMobileNav(false); }} />)}
           </div>)}
         </nav>
@@ -438,6 +442,7 @@ export function FraudCommandCenter() {
           />
         ) : null}
         {view === "stores" ? <StoresScreen stores={storeData} onConnect={() => setConnectOpen(true)} onSync={syncShopifyStore} syncing={syncState === "loading"} syncProgress={syncProgress} /> : null}
+        {view === "chargebacks" ? <ChargebacksWorkspace chargebacks={chargebackData} stores={storeData} /> : null}
         {view === "gift-cards" ? <GiftCardWorkspace ledger={giftLedger} stores={storeData} cases={caseData} onOpenCase={openCase} onRefresh={refreshSnapshot} /> : null}
         {view === "employees" ? <EmployeesScreen mode="employees" employees={employeeData} activity={employeeDiscountActivity} settings={employeeSettings} stores={storeData} onCreate={createEmployee} onUpdate={updateEmployeeProfile} onSaveSettings={saveEmployeeMonitoring} /> : null}
         {view === "discounts" ? <EmployeesScreen mode="discounts" employees={employeeData} activity={employeeDiscountActivity} settings={employeeSettings} stores={storeData} onCreate={createEmployee} onUpdate={updateEmployeeProfile} onSaveSettings={saveEmployeeMonitoring} /> : null}

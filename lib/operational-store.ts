@@ -4,7 +4,8 @@ import { evaluateRisk, type OrderSignals } from "@/lib/risk-engine";
 import { computeVelocitySignals, createVelocityLookup } from "@/lib/order-velocity";
 import { isSharedServiceEmail } from "@/lib/customer-identity";
 import { buildGiftLedger, hasFlaggedGiftSource, receiptGiftCard, type GiftCardOrderEvidence } from "@/lib/gift-card-evidence";
-import type { BlacklistReport, CaseStatus, DashboardSnapshot, Employee, EmployeeDiscountActivity, EmployeeMonitoringSettings, FraudCase, GiftCardRedemption, GiftCardTrace, NotificationDelivery, NotificationSettings, RiskRule, Store } from "@/lib/types";
+import { matchCrediMatchChargeback, normalizeCrediMatchChargebacks, paymentFingerprintsFromShopify } from "@/lib/credimatch-matching";
+import type { BlacklistReport, CaseStatus, CrediMatchChargeback, DashboardSnapshot, Employee, EmployeeDiscountActivity, EmployeeMonitoringSettings, FraudCase, GiftCardRedemption, GiftCardTrace, NotificationDelivery, NotificationSettings, OrderPaymentFingerprint, RiskRule, Store } from "@/lib/types";
 
 type ShopifyLineItem = {
   title?: string;
@@ -58,10 +59,13 @@ type StoredOrder = {
   storeId: string;
   shopifyOrderId: string;
   orderNumber?: string;
+  customer?: string;
   email: string;
   phone: string;
   address: string;
   amount: number;
+  currency?: string;
+  payments?: OrderPaymentFingerprint[];
   giftCardValue: number;
   ip: string;
   customerId: string;
@@ -114,6 +118,7 @@ type OperationalState = {
   giftCards: StoredGiftCard[];
   giftCardOrders: GiftCardOrderEvidence[];
   audit: AuditEntry[];
+  chargebacks: CrediMatchChargeback[];
   storeConnections: Map<string, { accessToken: string; expiresAt: string; webhookSecret?: string; clientId?: string }>;
 };
 
@@ -134,6 +139,7 @@ export type PersistedOperationalState = {
   giftCards?: StoredGiftCard[];
   giftCardOrders?: GiftCardOrderEvidence[];
   audit: AuditEntry[];
+  chargebacks?: CrediMatchChargeback[];
   storeConnections: Array<[string, { accessToken: string; expiresAt: string; webhookSecret?: string; clientId?: string }]>;
 };
 
@@ -155,6 +161,7 @@ const createInitialState = (): OperationalState => ({
   giftCards: [],
   giftCardOrders: [],
   audit: [],
+  chargebacks: [],
   storeConnections: new Map(),
 });
 
@@ -184,6 +191,7 @@ export function exportOperationalState(): PersistedOperationalState {
     giftCards: state.giftCards,
     giftCardOrders: state.giftCardOrders ?? [],
     audit: state.audit,
+    chargebacks: state.chargebacks,
     storeConnections: [...state.storeConnections.entries()],
   });
 }
@@ -205,6 +213,17 @@ export function restoreOperationalState(snapshot: PersistedOperationalState) {
   state.giftCards = clone(snapshot.giftCards ?? []);
   state.giftCardOrders = clone(snapshot.giftCardOrders ?? []);
   state.audit = clone(snapshot.audit ?? []);
+  state.chargebacks = clone(snapshot.chargebacks ?? []);
+  for (const entry of state.audit.filter((item) => item.action === "credimatch.chargeback.received")) {
+    if (state.chargebacks.some((item) => item.discrepancyId === entry.resourceId)) continue;
+    const migrated = normalizeCrediMatchChargebacks({
+      tenantId: entry.tenantId,
+      discrepancyId: entry.resourceId,
+      discrepancyPayload: entry.metadata.payload,
+      receivedAt: entry.createdAt,
+    });
+    state.chargebacks.push(...migrated);
+  }
   state.storeConnections = new Map(clone(snapshot.storeConnections ?? []));
   state.stores = state.stores.map((store) => ({
     ...store,
@@ -421,6 +440,13 @@ export function getDashboardSnapshot(tenantId: string): DashboardSnapshot {
   });
   return {
     tenantId,
+    chargebacks: clone(state.chargebacks.filter((item) => item.tenantId === tenantId).map((chargeback) => ({
+      ...chargeback,
+      match: matchCrediMatchChargeback(chargeback, state.orders.filter((order) => order.tenantId === tenantId).map((order) => ({
+        ...order,
+        storeName: state.stores.find((store) => store.id === order.storeId)?.name,
+      }))),
+    })).sort((left, right) => Date.parse(right.creationTime ?? right.receivedAt) - Date.parse(left.creationTime ?? left.receivedAt))),
     giftCardLedger: buildGiftLedger(clone((state.giftCardOrders ?? []).filter((item) => item.tenantId === tenantId))),
     cases: clone(state.cases.filter((item) => item.tenantId === tenantId)),
     stores: clone(tenantStores),
@@ -1221,8 +1247,9 @@ export function ingestShopifyOrder(input: { storeId: string; webhookId: string; 
 
   const order: StoredOrder = {
     tenantId: store.tenantId, storeId: store.id,
-    shopifyOrderId, orderNumber: payload.name ?? existingOrder?.orderNumber,
-    email, phone, address, couponCodes, amount, giftCardValue, ip, customerId, createdAt,
+    shopifyOrderId, orderNumber: payload.name ?? existingOrder?.orderNumber, customer,
+    email, phone, address, couponCodes, amount, currency: payload.currency?.toUpperCase(),
+    payments: paymentFingerprintsFromShopify(payload.transactions ?? [], payload.currency), giftCardValue, ip, customerId, createdAt,
   };
   if (existingOrder) Object.assign(existingOrder, order);
   else state.orders.push(order);
@@ -1333,11 +1360,19 @@ export function ingestShopifyOrder(input: { storeId: string; webhookId: string; 
   return { duplicate: false as const, case: clone(fraudCase), risk: result };
 }
 
-export function recordCrediMatchDiscrepancy(discrepancyId: string, payload: unknown) {
+export function recordCrediMatchDiscrepancy(discrepancyId: string, payload: unknown, transactionPayloads: unknown[] = []) {
   const eventKey = `credimatch:discrepancy:${discrepancyId}`;
-  if (state.webhookIds.has(eventKey)) return { duplicate: true as const };
   const tenantIds = [...new Set(state.stores.map((store) => store.tenantId))];
   if (tenantIds.length !== 1) throw new Error(tenantIds.length ? "CREDIMATCH_TENANT_AMBIGUOUS" : "CREDIMATCH_TENANT_NOT_FOUND");
+  const duplicate = state.webhookIds.has(eventKey);
+  const receivedAt = state.audit.find((entry) => entry.action === "credimatch.chargeback.received" && entry.resourceId === discrepancyId)?.createdAt ?? new Date().toISOString();
+  const normalized = normalizeCrediMatchChargebacks({ tenantId: tenantIds[0], discrepancyId, discrepancyPayload: payload, transactionPayloads, receivedAt });
+  for (const chargeback of normalized) {
+    const index = state.chargebacks.findIndex((item) => item.tenantId === chargeback.tenantId && item.discrepancyId === chargeback.discrepancyId);
+    if (index < 0) state.chargebacks.unshift(chargeback);
+    else state.chargebacks[index] = { ...state.chargebacks[index], ...chargeback };
+  }
+  if (duplicate) return { duplicate: true as const };
   state.webhookIds.add(eventKey);
   state.audit.unshift({
     id: randomUUID(),

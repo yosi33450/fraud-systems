@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { CrediMatchApiError, CrediMatchConfigurationError, getCrediMatchDiscrepancy } from "@/lib/credimatch.server";
+import { CrediMatchApiError, CrediMatchConfigurationError, getCrediMatchDiscrepancy, getCrediMatchTransaction } from "@/lib/credimatch.server";
+import { crediMatchTransactionIds } from "@/lib/credimatch-matching";
 import { CrediMatchWebhookValidationError, parseCrediMatchWebhook } from "@/lib/credimatch-webhook";
 import { recordCrediMatchDiscrepancy } from "@/lib/operational-store";
 import { hydrateOperationalState, persistOperationalState } from "@/lib/persistence.server";
@@ -40,11 +41,12 @@ export async function POST(request: Request) {
     let duplicates = 0;
     for (const discrepancyId of discrepancyIds) {
       const discrepancy = await getCrediMatchDiscrepancy(discrepancyId);
-      const result = recordCrediMatchDiscrepancy(discrepancyId, discrepancy);
+      const transactions = await Promise.all(crediMatchTransactionIds(discrepancy).map((transactionId) => getCrediMatchTransaction(transactionId)));
+      const result = recordCrediMatchDiscrepancy(discrepancyId, discrepancy, transactions);
       if (result.duplicate) duplicates += 1;
-      console.info("[credimatch-webhook] discrepancy received", { discrepancyId, duplicate: result.duplicate, response: responseShape(discrepancy) });
+      console.info("[credimatch-webhook] discrepancy received", { discrepancyId, duplicate: result.duplicate, transactions: transactions.length, response: responseShape(discrepancy) });
     }
-    if (duplicates < discrepancyIds.length) await persistOperationalState();
+    await persistOperationalState();
     return NextResponse.json({ accepted: true, processed: discrepancyIds.length - duplicates, duplicates, ignoredEvents }, { status: 202 });
   } catch (error) {
     if (error instanceof CrediMatchWebhookValidationError) {
@@ -63,4 +65,3 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
-
