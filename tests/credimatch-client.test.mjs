@@ -40,3 +40,29 @@ test('refreshes the token once after an upstream 401', async (context) => {
   assert.deepEqual(await api.getCrediMatchTransaction('tx-1'), { id: 'tx-1' });
   assert.equal(calls, 3);
 });
+
+test('logs useful authentication failure diagnostics without leaking credentials', async (context) => {
+  globalThis.__crediMatchTokenCache = undefined;
+  globalThis.__crediMatchAuthentication = undefined;
+  const errorLogs = [];
+  context.mock.method(console, 'info', () => {});
+  context.mock.method(console, 'error', (message) => errorLogs.push(String(message)));
+  context.mock.method(globalThis, 'fetch', async () => new Response(JSON.stringify({
+    error: 'gateway rejected encrypted-api-key for user with password',
+    token: 'must-not-be-logged',
+    detail: 'blocked before API',
+  }), {
+    status: 500,
+    statusText: 'Internal Server Error',
+    headers: { 'Content-Type': 'application/json', 'x-request-id': 'cm-request-123' },
+  }));
+
+  await assert.rejects(() => api.getCrediMatchDiscrepancy('123456'), /CREDIMATCH_AUTH_FAILED_500/);
+  const combined = errorLogs.join('\n');
+  assert.match(combined, /CrediMatch authentication response/);
+  assert.match(combined, /cm-request-123/);
+  assert.match(combined, /blocked before API/);
+  assert.doesNotMatch(combined, /encrypted-api-key/);
+  assert.doesNotMatch(combined, /must-not-be-logged/);
+  assert.doesNotMatch(combined, /password/);
+});

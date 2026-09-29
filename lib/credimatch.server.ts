@@ -1,6 +1,7 @@
 const CREDIMATCH_API_BASE = "https://api.credimatch.co.il";
 const DEFAULT_TOKEN_TTL_MS = 5 * 60_000;
 const MAX_RESPONSE_BYTES = 512_000;
+const MAX_DIAGNOSTIC_BODY_CHARS = 4_000;
 
 type CrediMatchConfiguration = {
   username: string;
@@ -94,19 +95,118 @@ const readJsonResponse = async (response: Response) => {
   }
 };
 
+const diagnosticHeaders = (headers: Headers) => {
+  const names = ["content-type", "date", "server", "via", "cf-ray", "x-request-id", "x-correlation-id", "traceparent"];
+  return Object.fromEntries(names.flatMap((name) => {
+    const value = headers.get(name);
+    return value ? [[name, value]] : [];
+  }));
+};
+
+const redactDiagnosticValue = (value: unknown, secrets: string[], depth = 0): unknown => {
+  if (depth > 5) return "[MAX_DEPTH]";
+  if (typeof value === "string") {
+    let redacted = value;
+    for (const secret of secrets) {
+      if (secret) redacted = redacted.split(secret).join("[REDACTED]");
+    }
+    redacted = redacted.replace(/Bearer\s+[^\s"']+/gi, "Bearer [REDACTED]");
+    redacted = redacted.replace(/eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g, "[REDACTED_JWT]");
+    return redacted.slice(0, MAX_DIAGNOSTIC_BODY_CHARS);
+  }
+  if (Array.isArray(value)) return value.slice(0, 20).map((item) => redactDiagnosticValue(item, secrets, depth + 1));
+  if (value && typeof value === "object") {
+    const sensitiveKey = /password|pass|token|secret|api.?key|authorization|credential/i;
+    return Object.fromEntries(Object.entries(value as Record<string, unknown>).slice(0, 50).map(([key, item]) => [
+      key,
+      sensitiveKey.test(key) ? "[REDACTED]" : redactDiagnosticValue(item, secrets, depth + 1),
+    ]));
+  }
+  return value;
+};
+
+const diagnosticBody = (text: string, secrets: string[]) => {
+  if (!text) return null;
+  try {
+    return redactDiagnosticValue(JSON.parse(text), secrets);
+  } catch {
+    return redactDiagnosticValue(text, secrets);
+  }
+};
+
 async function authenticate(): Promise<TokenCache> {
   const configuration = getCrediMatchConfiguration();
-  const response = await fetch(`${CREDIMATCH_API_BASE}/authentication/authenticate`, {
+  const url = `${CREDIMATCH_API_BASE}/authentication/authenticate`;
+  const attemptId = crypto.randomUUID();
+  const startedAt = Date.now();
+  console.info(JSON.stringify({
+    level: "info",
+    message: "CrediMatch authentication request",
+    attemptId,
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Accept: "application/json",
-      "x-cm-api-key": configuration.apiKey,
+    url,
+    headerNames: ["Accept", "Content-Type", "x-cm-api-key"],
+    credentials: {
+      usernamePresent: Boolean(configuration.username),
+      usernameLength: configuration.username.length,
+      passwordPresent: Boolean(configuration.password),
+      passwordLength: configuration.password.length,
+      apiKeyPresent: Boolean(configuration.apiKey),
+      apiKeyLength: configuration.apiKey.length,
     },
-    body: JSON.stringify({ username: configuration.username, password: configuration.password }),
-    cache: "no-store",
-  });
-  const payload = await readJsonResponse(response);
+  }));
+
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        "x-cm-api-key": configuration.apiKey,
+      },
+      body: JSON.stringify({ username: configuration.username, password: configuration.password }),
+      cache: "no-store",
+    });
+  } catch (error) {
+    console.error(JSON.stringify({
+      level: "error",
+      message: "CrediMatch authentication network failure",
+      attemptId,
+      durationMs: Date.now() - startedAt,
+      errorName: error instanceof Error ? error.name : "UnknownError",
+      errorMessage: error instanceof Error ? error.message : String(error),
+    }));
+    throw new CrediMatchApiError("CREDIMATCH_AUTH_NETWORK_FAILED");
+  }
+
+  const responseText = await response.text();
+  if (Buffer.byteLength(responseText, "utf8") > MAX_RESPONSE_BYTES) {
+    throw new CrediMatchApiError("CREDIMATCH_RESPONSE_TOO_LARGE", response.status);
+  }
+  const secrets = [configuration.username, configuration.password, configuration.apiKey];
+  const responseLog = {
+    level: response.ok ? "info" : "error",
+    message: "CrediMatch authentication response",
+    attemptId,
+    durationMs: Date.now() - startedAt,
+    status: response.status,
+    statusText: response.statusText,
+    headers: diagnosticHeaders(response.headers),
+    bodyBytes: Buffer.byteLength(responseText, "utf8"),
+    body: response.ok ? undefined : diagnosticBody(responseText, secrets),
+  };
+  if (response.ok) console.info(JSON.stringify(responseLog));
+  else console.error(JSON.stringify(responseLog));
+
+  let payload: unknown = null;
+  if (responseText) {
+    try {
+      payload = JSON.parse(responseText) as unknown;
+    } catch {
+      throw new CrediMatchApiError("CREDIMATCH_INVALID_JSON", response.status);
+    }
+  }
   if (!response.ok) throw new CrediMatchApiError(`CREDIMATCH_AUTH_FAILED_${response.status}`, response.status);
   const token = payload && typeof payload === "object" && !Array.isArray(payload)
     ? (payload as Record<string, unknown>).token
