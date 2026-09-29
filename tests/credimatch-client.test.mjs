@@ -22,6 +22,8 @@ test('authenticates with username and calls the fixed discrepancy endpoint', asy
   assert.equal(requests.length, 2);
   assert.deepEqual(JSON.parse(requests[0].init.body), { username: 'user', password: 'password' });
   assert.equal(requests[0].init.headers['x-cm-api-key'], 'encrypted-api-key');
+  assert.equal(requests[0].init.headers.Accept, undefined);
+  assert.equal(requests[0].init.cache, undefined);
   assert.equal(requests[1].url, 'https://api.credimatch.co.il/reports/report-1/discrepancies?discrepancyId=123456');
   assert.equal(requests[1].init.headers.Authorization, 'Bearer token-1');
   assert.equal(requests[1].init.headers['x-cm-api-key'], 'encrypted-api-key');
