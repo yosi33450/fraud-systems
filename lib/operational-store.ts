@@ -1333,6 +1333,26 @@ export function ingestShopifyOrder(input: { storeId: string; webhookId: string; 
   return { duplicate: false as const, case: clone(fraudCase), risk: result };
 }
 
+export function recordCrediMatchDiscrepancy(discrepancyId: string, payload: unknown) {
+  const eventKey = `credimatch:discrepancy:${discrepancyId}`;
+  if (state.webhookIds.has(eventKey)) return { duplicate: true as const };
+  const tenantIds = [...new Set(state.stores.map((store) => store.tenantId))];
+  if (tenantIds.length !== 1) throw new Error(tenantIds.length ? "CREDIMATCH_TENANT_AMBIGUOUS" : "CREDIMATCH_TENANT_NOT_FOUND");
+  state.webhookIds.add(eventKey);
+  state.audit.unshift({
+    id: randomUUID(),
+    tenantId: tenantIds[0],
+    action: "credimatch.chargeback.received",
+    resourceType: "credimatch-discrepancy",
+    resourceId: discrepancyId,
+    createdAt: new Date().toISOString(),
+    // The operational snapshot is encrypted at rest. Keep the unmodelled API
+    // response here until a real response can be mapped to an existing order.
+    metadata: { provider: "credimatch", discrepancyId, payload },
+  });
+  return { duplicate: false as const };
+}
+
 export function assertStoreTenant(tenantId: string, storeId: string) {
   tenantStore(tenantId, storeId);
 }

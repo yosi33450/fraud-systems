@@ -31,10 +31,23 @@ Copy `.env.example` to `.env.local` and set:
 - `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`: preferred production persistence. The service-role key is server-only and must never use a `NEXT_PUBLIC_` prefix.
 - `SUPABASE_PUBLISHABLE_KEY` and `PERSISTENCE_API_KEY`: alternative server-only RLS credential used by the pilot deployment when a service-role key isn't provisioned.
 - `DASHBOARD_PASSWORD` and `AUTH_SECRET`: protect the owner dashboard when it is publicly deployed.
+- `CREDIMATCH_USERNAME`, `CREDIMATCH_PASSWORD`, and `CREDIMATCH_ID`: server-only CrediMatch API credentials and report/account ID. All three are required when the CrediMatch webhook is enabled.
 
 Local development stores the same encrypted snapshot under `.data/`. The directory is excluded from Git. Production deployments fail closed when neither private Vercel Blob nor Supabase persistence is configured, preventing accidental use of ephemeral serverless memory.
 
 For legacy Shopify organization connections, set server-only `SHOPIFY_CLIENT_ID`. Newly connected stores save their client ID in the encrypted state. Expiring Shopify access tokens are renewed automatically with the existing app credentials; no merchant reconnection is required while those credentials remain valid.
+
+## CrediMatch webhook
+
+Configure CrediMatch to send chargeback notifications to:
+
+```text
+https://fraud-systems.vercel.app/api/credimatch/webhook
+```
+
+The public endpoint accepts the supplied `events: [{ name: "chargeback", paths: [...] }]` payload. It validates that every chargeback path belongs to the fixed CrediMatch API origin, extracts only the `discrepancyId`, and then requests the discrepancy through the server-side client using `CREDIMATCH_ID`; it never follows a URL supplied by the webhook. Authentication tokens are cached in memory and refreshed after expiry or one `401` response. Retrieved, currently-unmodelled responses are saved in the existing encrypted operational audit log and deduplicated by discrepancy ID. They are not converted into a case until a real response establishes a reliable order/transaction mapping.
+
+The supplied CrediMatch material does not document a webhook signature, shared secret, or source IP range. Before production traffic is enabled, request a supported signature/authentication mechanism or an IP allowlist from CrediMatch.
 
 ## Database setup
 
