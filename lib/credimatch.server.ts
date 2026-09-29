@@ -145,6 +145,7 @@ async function authenticate(): Promise<TokenCache> {
     attemptId,
     method: "POST",
     url,
+    usernameField: "username",
     headerNames: ["Content-Type", "x-cm-api-key"],
     credentials: {
       usernamePresent: Boolean(configuration.username),
@@ -156,16 +157,35 @@ async function authenticate(): Promise<TokenCache> {
     },
   }));
 
-  let response: Response;
-  try {
-    response = await fetch(url, {
+  const requestAuthentication = async (usernameField: "username" | "userName") => {
+    const response = await fetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "x-cm-api-key": configuration.apiKey,
       },
-      body: JSON.stringify({ username: configuration.username, password: configuration.password }),
+      body: JSON.stringify({ [usernameField]: configuration.username, password: configuration.password }),
     });
+    const responseText = await response.text();
+    if (Buffer.byteLength(responseText, "utf8") > MAX_RESPONSE_BYTES) {
+      throw new CrediMatchApiError("CREDIMATCH_RESPONSE_TOO_LARGE", response.status);
+    }
+    return { response, responseText, usernameField };
+  };
+
+  let authenticationResult: Awaited<ReturnType<typeof requestAuthentication>>;
+  try {
+    authenticationResult = await requestAuthentication("username");
+    if (authenticationResult.response.status === 500) {
+      console.warn(JSON.stringify({
+        level: "warn",
+        message: "CrediMatch authentication retrying documented username casing",
+        attemptId,
+        from: "username",
+        to: "userName",
+      }));
+      authenticationResult = await requestAuthentication("userName");
+    }
   } catch (error) {
     console.error(JSON.stringify({
       level: "error",
@@ -178,15 +198,13 @@ async function authenticate(): Promise<TokenCache> {
     throw new CrediMatchApiError("CREDIMATCH_AUTH_NETWORK_FAILED");
   }
 
-  const responseText = await response.text();
-  if (Buffer.byteLength(responseText, "utf8") > MAX_RESPONSE_BYTES) {
-    throw new CrediMatchApiError("CREDIMATCH_RESPONSE_TOO_LARGE", response.status);
-  }
+  const { response, responseText, usernameField } = authenticationResult;
   const secrets = [configuration.username, configuration.password, configuration.apiKey];
   const responseLog = {
     level: response.ok ? "info" : "error",
     message: "CrediMatch authentication response",
     attemptId,
+    usernameField,
     durationMs: Date.now() - startedAt,
     status: response.status,
     statusText: response.statusText,

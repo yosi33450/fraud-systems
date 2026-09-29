@@ -43,6 +43,29 @@ test('refreshes the token once after an upstream 401', async (context) => {
   assert.equal(calls, 3);
 });
 
+test('retries the username casing documented by the original Postman collection after a 500', async (context) => {
+  globalThis.__crediMatchTokenCache = undefined;
+  globalThis.__crediMatchAuthentication = undefined;
+  const bodies = [];
+  context.mock.method(console, 'info', () => {});
+  context.mock.method(console, 'warn', () => {});
+  context.mock.method(globalThis, 'fetch', async (input, init) => {
+    if (String(input).endsWith('/authentication/authenticate')) {
+      const body = JSON.parse(init.body);
+      bodies.push(body);
+      if ('username' in body) return new Response('', { status: 500 });
+      return Response.json({ token: 'case-compatible-token', expiresIn: 3600 });
+    }
+    return Response.json({ id: '123456' });
+  });
+
+  assert.deepEqual(await api.getCrediMatchDiscrepancy('123456'), { id: '123456' });
+  assert.deepEqual(bodies, [
+    { username: 'user', password: 'password' },
+    { userName: 'user', password: 'password' },
+  ]);
+});
+
 test('logs useful authentication failure diagnostics without leaking credentials', async (context) => {
   globalThis.__crediMatchTokenCache = undefined;
   globalThis.__crediMatchAuthentication = undefined;
