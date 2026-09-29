@@ -1245,11 +1245,12 @@ export function ingestShopifyOrder(input: { storeId: string; webhookId: string; 
     signals.emailsByIpLastTwoHours = 0;
   }
 
+  const paymentFingerprints = paymentFingerprintsFromShopify(payload.transactions ?? [], payload.currency);
   const order: StoredOrder = {
     tenantId: store.tenantId, storeId: store.id,
-    shopifyOrderId, orderNumber: payload.name ?? existingOrder?.orderNumber, customer,
-    email, phone, address, couponCodes, amount, currency: payload.currency?.toUpperCase(),
-    payments: paymentFingerprintsFromShopify(payload.transactions ?? [], payload.currency), giftCardValue, ip, customerId, createdAt,
+    shopifyOrderId, orderNumber: payload.name ?? existingOrder?.orderNumber, customer: customer || existingOrder?.customer,
+    email, phone, address, couponCodes, amount, currency: payload.currency?.toUpperCase() ?? existingOrder?.currency,
+    payments: paymentFingerprints.length ? paymentFingerprints : existingOrder?.payments, giftCardValue, ip, customerId, createdAt,
   };
   if (existingOrder) Object.assign(existingOrder, order);
   else state.orders.push(order);
