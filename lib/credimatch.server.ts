@@ -145,7 +145,7 @@ async function authenticate(): Promise<TokenCache> {
     attemptId,
     method: "POST",
     url,
-    headerNames: ["Content-Type", "x-cm-api-key"],
+    headerNames: ["Content-Type", "User-Agent", "x-cm-api-key"],
     credentials: {
       usernamePresent: Boolean(configuration.username),
       usernameLength: configuration.username.length,
@@ -162,6 +162,7 @@ async function authenticate(): Promise<TokenCache> {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        "User-Agent": "PostmanRuntime/7.27.0",
         "x-cm-api-key": configuration.apiKey,
       },
       body: JSON.stringify({ username: configuration.username, password: configuration.password }),

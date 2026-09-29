@@ -21,6 +21,7 @@ test('authenticates with username and calls the fixed discrepancy endpoint', asy
   assert.deepEqual(await api.getCrediMatchDiscrepancy('123456'), { id: '123456' });
   assert.equal(requests.length, 2);
   assert.deepEqual(JSON.parse(requests[0].init.body), { username: 'user', password: 'password' });
+  assert.equal(requests[0].init.headers['User-Agent'], 'PostmanRuntime/7.27.0');
   assert.equal(requests[0].init.headers['x-cm-api-key'], 'encrypted-api-key');
   assert.equal(requests[0].init.headers.Accept, undefined);
   assert.equal(requests[0].init.cache, undefined);
