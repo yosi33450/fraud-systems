@@ -101,9 +101,9 @@ async function authenticate(): Promise<TokenCache> {
     headers: {
       "Content-Type": "application/json",
       Accept: "application/json",
-      x_cm_api_key: configuration.apiKey,
+      "x-cm-api-key": configuration.apiKey,
     },
-    body: JSON.stringify({ userName: configuration.username, password: configuration.password }),
+    body: JSON.stringify({ username: configuration.username, password: configuration.password }),
     cache: "no-store",
   });
   const payload = await readJsonResponse(response);
@@ -150,7 +150,7 @@ async function reportRequest(action: "discrepancies" | "transactions", queryKey:
       headers: {
         Authorization: `Bearer ${token}`,
         Accept: "application/json",
-        x_cm_api_key: configuration.apiKey,
+        "x-cm-api-key": configuration.apiKey,
       },
       cache: "no-store",
     });
