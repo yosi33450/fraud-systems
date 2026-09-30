@@ -5,7 +5,7 @@ import { computeVelocitySignals, createVelocityLookup } from "@/lib/order-veloci
 import { isSharedServiceEmail } from "@/lib/customer-identity";
 import { buildGiftLedger, hasFlaggedGiftSource, receiptGiftCard, type GiftCardOrderEvidence } from "@/lib/gift-card-evidence";
 import { matchCrediMatchChargeback, normalizeCrediMatchChargebacks, paymentFingerprintsFromShopify } from "@/lib/credimatch-matching";
-import type { BlacklistReport, CaseStatus, CrediMatchChargeback, DashboardSnapshot, Employee, EmployeeDiscountActivity, EmployeeMonitoringSettings, FraudCase, GiftCardRedemption, GiftCardTrace, NotificationDelivery, NotificationSettings, OrderPaymentFingerprint, RiskRule, Store } from "@/lib/types";
+import type { BlacklistReport, CaseStatus, CrediMatchChargeback, CrediMatchOrderCandidate, DashboardSnapshot, Employee, EmployeeDiscountActivity, EmployeeMonitoringSettings, FraudCase, GiftCardRedemption, GiftCardTrace, NotificationDelivery, NotificationSettings, OrderPaymentFingerprint, RiskRule, Store } from "@/lib/types";
 
 type ShopifyLineItem = {
   title?: string;
@@ -21,6 +21,7 @@ export type ShopifyOrderTransaction = {
   gateway?: string;
   formatted_gateway?: string;
   account_number?: string;
+  authorization_code?: string;
   amount?: string | number;
   status?: string;
   kind?: string;
@@ -119,6 +120,7 @@ type OperationalState = {
   giftCardOrders: GiftCardOrderEvidence[];
   audit: AuditEntry[];
   chargebacks: CrediMatchChargeback[];
+  crediMatchOrderCandidates: CrediMatchOrderCandidate[];
   storeConnections: Map<string, { accessToken: string; expiresAt: string; webhookSecret?: string; clientId?: string }>;
 };
 
@@ -162,6 +164,7 @@ const createInitialState = (): OperationalState => ({
   giftCardOrders: [],
   audit: [],
   chargebacks: [],
+  crediMatchOrderCandidates: [],
   storeConnections: new Map(),
 });
 
@@ -248,6 +251,22 @@ export function restoreCrediMatchChargebacks(chargebacks: CrediMatchChargeback[]
     if (index < 0) state.chargebacks.push(chargeback);
     else state.chargebacks[index] = { ...state.chargebacks[index], ...chargeback };
   }
+}
+
+export function exportCrediMatchOrderCandidates() {
+  return clone(state.crediMatchOrderCandidates);
+}
+
+export function restoreCrediMatchOrderCandidates(candidates: CrediMatchOrderCandidate[]) {
+  const merged = new Map(state.crediMatchOrderCandidates.map((item) => [
+    `${item.tenantId}:${item.storeId}:${item.shopifyOrderId}`,
+    item,
+  ]));
+  for (const candidate of clone(candidates)) {
+    const key = `${candidate.tenantId}:${candidate.storeId}:${candidate.shopifyOrderId}`;
+    merged.set(key, { ...merged.get(key), ...candidate });
+  }
+  state.crediMatchOrderCandidates = [...merged.values()];
 }
 
 const normalizeEmail = (value: string) => value.trim().toLowerCase();
@@ -450,11 +469,20 @@ export function getDashboardSnapshot(tenantId: string): DashboardSnapshot {
       realtimeStatus: store.realtimeStatus ?? "setup-required",
     };
   });
+  const chargebackMatchOrders = new Map<string, CrediMatchOrderCandidate>();
+  for (const order of state.crediMatchOrderCandidates.filter((item) => item.tenantId === tenantId)) {
+    chargebackMatchOrders.set(`${order.storeId}:${order.shopifyOrderId}`, order);
+  }
+  // Prefer the live operational copy when the same order is present in both
+  // stores, while keeping historical candidates invisible everywhere else.
+  for (const order of state.orders.filter((item) => item.tenantId === tenantId)) {
+    chargebackMatchOrders.set(`${order.storeId}:${order.shopifyOrderId}`, order);
+  }
   return {
     tenantId,
     chargebacks: clone(state.chargebacks.filter((item) => item.tenantId === tenantId).map((chargeback) => ({
       ...chargeback,
-      match: matchCrediMatchChargeback(chargeback, state.orders.filter((order) => order.tenantId === tenantId).map((order) => ({
+      match: matchCrediMatchChargeback(chargeback, [...chargebackMatchOrders.values()].map((order) => ({
         ...order,
         storeName: state.stores.find((store) => store.id === order.storeId)?.name,
       }))),

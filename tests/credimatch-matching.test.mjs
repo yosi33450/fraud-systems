@@ -26,6 +26,16 @@ test('extracts a safe Shopify payment fingerprint from receipt data', () => {
   }]);
 });
 
+test('prefers the Shopify authorization code without retaining the raw receipt', () => {
+  const [payment] = paymentFingerprintsFromShopify([{
+    id: 'gid://shopify/OrderTransaction/2', amount: '445', authorization_code: 'DIRECT-42',
+    receipt: { authorization_code: 'RECEIPT-99', sensitive_blob: 'not retained' },
+  }], 'ILS');
+  assert.equal(payment.confirmationNumber, 'DIRECT-42');
+  assert.equal('receipt' in payment, false);
+  assert.equal('sensitive_blob' in payment, false);
+});
+
 test('normalizes CrediMatch discrepancy and transaction responses without inventing fields', () => {
   const result = normalizeCrediMatchChargebacks({
     tenantId: 'tenant-primary', discrepancyId: '21893735', receivedAt: '2026-09-29T12:00:00Z',

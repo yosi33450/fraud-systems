@@ -64,7 +64,7 @@ const receiptValue = (receipt: unknown, keys: string[]) => {
 };
 
 export function paymentFingerprintsFromShopify(
-  transactions: Array<{ id?: string; gateway?: string; formatted_gateway?: string; account_number?: string; amount?: string | number; processed_at?: string; receipt?: unknown }>,
+  transactions: Array<{ id?: string; gateway?: string; formatted_gateway?: string; account_number?: string; authorization_code?: string; amount?: string | number; processed_at?: string; receipt?: unknown }>,
   fallbackCurrency?: string,
 ): OrderPaymentFingerprint[] {
   return transactions.map((transaction) => ({
@@ -74,7 +74,7 @@ export function paymentFingerprintsFromShopify(
     currency: normalizedCurrency(receiptValue(transaction.receipt, ["currency", "currencyCode"])) ?? normalizedCurrency(fallbackCurrency),
     processedAt: text(transaction.processed_at),
     last4: last4(transaction.account_number ?? receiptValue(transaction.receipt, ["last4", "lastFour", "last_four", "creditCardSuffix", "cardSuffix"])),
-    confirmationNumber: text(receiptValue(transaction.receipt, ["confirmationNumber", "authorization", "authorizationCode", "authCode", "approvalCode"])),
+    confirmationNumber: text(transaction.authorization_code ?? receiptValue(transaction.receipt, ["confirmationNumber", "authorization", "authorizationCode", "authCode", "approvalCode"])),
     voucherNumber: text(receiptValue(transaction.receipt, ["voucherNumber", "voucher", "shovar"])),
     terminalNumber: text(receiptValue(transaction.receipt, ["terminalNumber", "terminalId", "terminal"])),
     sessionNumber: text(receiptValue(transaction.receipt, ["sessionNumber", "sessionId", "session"])),

@@ -12,10 +12,10 @@ export async function POST(request: Request, context: { params: Promise<{ tenant
   try {
     const connection = await getFreshStoreConnection(tenantId, storeId);
     const body = await request.json().catch(() => ({})) as { since?: string; after?: string | null; scanned?: number };
-    const lowerBound = Date.now() - 31 * 86_400_000;
+    const lowerBound = Date.now() - 61 * 86_400_000;
     const since = body.since && Number.isFinite(Date.parse(body.since)) && Date.parse(body.since) >= lowerBound && Date.parse(body.since) <= Date.now()
       ? body.since
-      : new Date(Date.now() - 30 * 86_400_000).toISOString();
+      : new Date(Date.now() - 60 * 86_400_000).toISOString();
     const externalExcluded = !body.scanned ? await reconcileOpenCaseExternalOrders({
       tenantId, storeId, shopDomain: connection.store.domain, accessToken: connection.accessToken,
     }) : 0;

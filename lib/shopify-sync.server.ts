@@ -1,5 +1,6 @@
-import { completeHistoricalSync, failHistoricalSync, ingestShopifyOrder, openCaseOrderReferences, replaceGiftCardRegistry, upsertGiftCardRegistry, type GiftCardRegistryInput, type ShopifyOrderPayload } from "@/lib/operational-store";
-import type { Store } from "@/lib/types";
+import { completeHistoricalSync, failHistoricalSync, ingestShopifyOrder, openCaseOrderReferences, replaceGiftCardRegistry, restoreCrediMatchOrderCandidates, upsertGiftCardRegistry, type GiftCardRegistryInput, type ShopifyOrderPayload } from "@/lib/operational-store";
+import { paymentFingerprintsFromShopify } from "@/lib/credimatch-matching";
+import type { CrediMatchOrderCandidate, Store } from "@/lib/types";
 import { shopifyAdminRequest } from "@/lib/shopify-admin.server";
 import { selectCustomerEmail } from "@/lib/customer-identity";
 import { syncGiftEvidenceForOrder } from "@/lib/gift-card-sync.server";
@@ -28,7 +29,7 @@ export const ORDERS_BACKFILL_QUERY = `#graphql
       }
       customAttributes { key value }
       transactions {
-        id gateway formattedGateway accountNumber kind status processedAt receiptJson
+        id gateway formattedGateway accountNumber authorizationCode kind status processedAt receiptJson
         amountSet { shopMoney { amount currencyCode } }
       }
         totalPriceSet { shopMoney { amount currencyCode } }
@@ -56,6 +57,42 @@ export const ORDERS_BACKFILL_QUERY = `#graphql
   }
 `;
 
+export const CREDIMATCH_ORDER_CANDIDATES_QUERY = `#graphql
+  query CrediMatchOrderCandidates($first: Int!, $after: String, $query: String!) {
+    orders(first: $first, after: $after, query: $query, sortKey: CREATED_AT, reverse: false) {
+      nodes {
+        id
+        name
+        createdAt
+        email
+        totalPriceSet { shopMoney { amount currencyCode } }
+        customer {
+          firstName
+          lastName
+          defaultEmailAddress { emailAddress }
+        }
+        transactions {
+          id
+          gateway
+          formattedGateway
+          accountNumber
+          authorizationCode
+          processedAt
+          receiptJson
+          amountSet { shopMoney { amount currencyCode } }
+        }
+      }
+      pageInfo { hasNextPage endCursor }
+    }
+  }
+`;
+
+const CREDIMATCH_ORDER_ACCESS_QUERY = `#graphql
+  query CrediMatchOrderAccess {
+    currentAppInstallation { accessScopes { handle } }
+  }
+`;
+
 export const GIFT_CARDS_QUERY = `#graphql
   query ShieldLedgerGiftCards($first: Int!, $after: String, $query: String!) {
     giftCards(first: $first, after: $after, query: $query, sortKey: CREATED_AT, reverse: true) {
@@ -77,7 +114,7 @@ export const ORDER_GIFT_CARD_DETAILS_QUERY = `#graphql
       risk { recommendation assessments { riskLevel facts { description sentiment } } }
       customAttributes { key value }
       transactions {
-        id gateway formattedGateway accountNumber kind status processedAt receiptJson
+        id gateway formattedGateway accountNumber authorizationCode kind status processedAt receiptJson
         amountSet { shopMoney { amount currencyCode } }
       }
       totalPriceSet { shopMoney { amount currencyCode } }
@@ -117,6 +154,7 @@ type ShopifyOrderNode = {
   customAttributes: Array<{ key: string; value: string }>;
   transactions: Array<{
     id: string; gateway?: string | null; formattedGateway?: string | null; accountNumber?: string | null;
+    authorizationCode?: string | null;
     kind: string; status: string; processedAt?: string | null; receiptJson?: unknown;
     amountSet: { shopMoney: { amount: string; currencyCode: string } };
   }>;
@@ -178,6 +216,7 @@ const toPayload = (order: ShopifyOrderNode): ShopifyOrderPayload => ({
     gateway: transaction.gateway ?? undefined,
     formatted_gateway: transaction.formattedGateway ?? undefined,
     account_number: transaction.accountNumber ?? undefined,
+    authorization_code: transaction.authorizationCode ?? undefined,
     amount: transaction.amountSet.shopMoney.amount,
     status: transaction.status,
     kind: transaction.kind,
@@ -334,6 +373,100 @@ export async function syncOrdersPage(input: { tenantId: string; storeId: string;
   if (data.orders.pageInfo.hasNextPage && !nextCursor) throw new Error("SHOPIFY_SYNC_CURSOR_MISSING");
   const store = nextCursor ? null : completeHistoricalSync(input.tenantId, input.storeId, scanned, data.orders.nodes.at(-1)?.createdAt);
   return { scanned, casesCreated, nextCursor, complete: !nextCursor, store };
+}
+
+type CrediMatchOrderCandidateNode = {
+  id: string;
+  name: string;
+  createdAt: string;
+  email?: string | null;
+  totalPriceSet: { shopMoney: { amount: string; currencyCode: string } };
+  customer?: {
+    firstName?: string | null;
+    lastName?: string | null;
+    defaultEmailAddress?: { emailAddress: string } | null;
+  } | null;
+  transactions: Array<{
+    id: string;
+    gateway?: string | null;
+    formattedGateway?: string | null;
+    accountNumber?: string | null;
+    authorizationCode?: string | null;
+    processedAt?: string | null;
+    receiptJson?: unknown;
+    amountSet: { shopMoney: { amount: string; currencyCode: string } };
+  }>;
+};
+
+/**
+ * Fetches one small page for chargeback matching only. These projections do
+ * not pass through ingestShopifyOrder, so they never create cases or appear in
+ * operational order and employee activity views.
+ */
+export async function syncCrediMatchOrderCandidatesPage(input: {
+  tenantId: string;
+  storeId: string;
+  shopDomain: string;
+  accessToken: string;
+  since: string;
+  until: string;
+  after?: string | null;
+  scanned: number;
+}) {
+  if (!input.after && Date.parse(input.since) < Date.now() - 60 * 86_400_000) {
+    const access = await shopifyAdminRequest<{ currentAppInstallation: { accessScopes: Array<{ handle: string }> } }>({
+      shopDomain: input.shopDomain,
+      accessToken: input.accessToken,
+      query: CREDIMATCH_ORDER_ACCESS_QUERY,
+    });
+    if (!access.currentAppInstallation.accessScopes.some((scope) => scope.handle === "read_all_orders")) {
+      throw new Error("SHOPIFY_READ_ALL_ORDERS_REQUIRED");
+    }
+  }
+
+  const data = await shopifyAdminRequest<{
+    orders: { nodes: CrediMatchOrderCandidateNode[]; pageInfo: { hasNextPage: boolean; endCursor: string | null } };
+  }>({
+    shopDomain: input.shopDomain,
+    accessToken: input.accessToken,
+    query: CREDIMATCH_ORDER_CANDIDATES_QUERY,
+    variables: {
+      first: 50,
+      after: input.after ?? null,
+      query: `created_at:>=${input.since} created_at:<=${input.until}`,
+    },
+  });
+
+  const candidates: CrediMatchOrderCandidate[] = data.orders.nodes.map((order) => ({
+    tenantId: input.tenantId,
+    storeId: input.storeId,
+    shopifyOrderId: order.id,
+    orderNumber: order.name,
+    customer: [order.customer?.firstName, order.customer?.lastName].filter(Boolean).join(" ") || undefined,
+    email: selectCustomerEmail({
+      orderEmail: order.email,
+      customerEmail: order.customer?.defaultEmailAddress?.emailAddress,
+    }),
+    amount: Number(order.totalPriceSet.shopMoney.amount),
+    currency: order.totalPriceSet.shopMoney.currencyCode,
+    createdAt: order.createdAt,
+    payments: paymentFingerprintsFromShopify(order.transactions.map((transaction) => ({
+      id: transaction.id,
+      gateway: transaction.gateway ?? undefined,
+      formatted_gateway: transaction.formattedGateway ?? undefined,
+      account_number: transaction.accountNumber ?? undefined,
+      authorization_code: transaction.authorizationCode ?? undefined,
+      amount: transaction.amountSet.shopMoney.amount,
+      processed_at: transaction.processedAt ?? undefined,
+      receipt: transaction.receiptJson,
+    })), order.totalPriceSet.shopMoney.currencyCode),
+  }));
+  restoreCrediMatchOrderCandidates(candidates);
+
+  const scanned = input.scanned + candidates.length;
+  const nextCursor = data.orders.pageInfo.hasNextPage ? data.orders.pageInfo.endCursor : null;
+  if (data.orders.pageInfo.hasNextPage && !nextCursor) throw new Error("SHOPIFY_SYNC_CURSOR_MISSING");
+  return { scanned, nextCursor, complete: !nextCursor };
 }
 
 export async function syncShopifyOrderGiftCards(input: { tenantId: string; storeId: string; shopDomain: string; accessToken: string; orderId: string; webhookId: string; topic: string }) {

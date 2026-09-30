@@ -580,6 +580,8 @@ svg { flex-shrink: 0; }
 
 /* CrediMatch chargebacks: the matching trail is the primary visual artifact. */
 .chargebacks-page { display: grid; align-content: start; }
+.chargebacks-page .inline-notice { margin: -8px 0 18px; padding: 11px 14px; border: 1px solid #cfe0d6; border-radius: 10px; background: #eef6f1; color: #26513e; font-size: .875rem; }
+.chargebacks-page .inline-notice.notice-warning { border-color: #ead7a8; background: var(--warning-soft); color: #79550e; }
 .chargeback-summary { display: grid; grid-template-columns: 1.25fr repeat(3, 1fr); margin-bottom: 20px; overflow: hidden; background: var(--surface); border: 1px solid var(--hairline); border-radius: var(--radius-panel); box-shadow: var(--elevation-surface); }
 .chargeback-summary > div { min-width: 0; min-height: 142px; padding: 22px 24px; border-inline-start: 1px solid var(--hairline); display: flex; flex-direction: column; justify-content: center; }
 .chargeback-summary > div:last-child { border-inline-start: 0; }

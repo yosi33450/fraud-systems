@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ArrowLeftRight, CalendarClock, CheckCircle2, CircleDollarSign, CreditCard, ExternalLink, FileQuestion, Search, ShieldCheck, X } from "lucide-react";
+import { ArrowLeftRight, CalendarClock, CheckCircle2, CircleDollarSign, CreditCard, ExternalLink, FileQuestion, RefreshCw, Search, ShieldCheck, X } from "lucide-react";
 import { CenteredDialog } from "@/components/centered-dialog";
 import type { ChargebackMatchConfidence, CrediMatchChargeback, Store } from "@/lib/types";
 
@@ -21,10 +21,17 @@ const money = (value?: number, currency = "ILS") => {
 };
 const masked = (value?: string) => value ? `•••• ${value}` : "לא התקבל";
 
-export function ChargebacksWorkspace({ chargebacks, stores }: { chargebacks: CrediMatchChargeback[]; stores: Store[] }) {
+export function ChargebacksWorkspace({ tenantId, chargebacks, stores, onRefresh }: {
+  tenantId: string;
+  chargebacks: CrediMatchChargeback[];
+  stores: Store[];
+  onRefresh: () => Promise<void>;
+}) {
   const [selected, setSelected] = useState<CrediMatchChargeback | null>(null);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<ChargebackMatchConfidence | "all">("all");
+  const [backfillState, setBackfillState] = useState<"idle" | "loading" | "done" | "error" | "permission">("idle");
+  const [backfillProgress, setBackfillProgress] = useState<string>();
   const visible = useMemo(() => {
     const search = query.trim().toLowerCase();
     return chargebacks.filter((item) => {
@@ -37,8 +44,59 @@ export function ChargebacksWorkspace({ chargebacks, stores }: { chargebacks: Cre
   const unresolved = chargebacks.filter((item) => !["exact", "strong"].includes(item.match?.confidence ?? "")).length;
   const total = chargebacks.reduce((sum, item) => sum + (item.originalAmount ?? item.grossAmount ?? 0), 0);
 
+  const backfillMatches = async () => {
+    setBackfillState("loading");
+    setBackfillProgress("מתחיל חיפוש מאובטח בהיסטוריית Shopify…");
+    const now = Date.now();
+    const dates = chargebacks.flatMap((item) => {
+      const value = Date.parse(item.dealTime ?? item.creationTime ?? item.receivedAt);
+      return Number.isFinite(value) ? [value] : [];
+    });
+    const earliest = dates.length ? Math.min(...dates) - 7 * 86_400_000 : now - 365 * 86_400_000;
+    const since = new Date(Math.max(earliest, now - 365 * 86_400_000)).toISOString();
+    const until = new Date(now).toISOString();
+    let totalScanned = 0;
+    try {
+      for (const store of stores.filter((item) => item.status !== "disabled")) {
+        let after: string | null = null;
+        let scanned = 0;
+        const seenCursors = new Set<string>();
+        for (let page = 0; page < 2_000; page += 1) {
+          const response = await fetch(`/api/tenants/${tenantId}/credimatch/backfill`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ storeId: store.id, since, until, after, scanned }),
+          });
+          const result = await response.json() as { scanned?: number; nextCursor?: string | null; complete?: boolean; error?: string };
+          if (!response.ok || !Number.isSafeInteger(result.scanned)) {
+            if (response.status === 403 && result.error === "SHOPIFY_READ_ALL_ORDERS_REQUIRED") {
+              setBackfillState("permission");
+              setBackfillProgress("Shopify מאפשרת כרגע גישה ל־60 יום בלבד. נדרשת הרשאת read_all_orders למשיכה היסטורית.");
+              return;
+            }
+            throw new Error(result.error ?? "CREDIMATCH_BACKFILL_FAILED");
+          }
+          scanned = result.scanned!;
+          setBackfillProgress(`נבדקו ${Number(totalScanned + scanned).toLocaleString("he-IL")} הזמנות לצורך התאמה…`);
+          if (result.complete) break;
+          if (!result.nextCursor || seenCursors.has(result.nextCursor) || page === 1_999) throw new Error("CREDIMATCH_BACKFILL_CURSOR_FAILED");
+          seenCursors.add(result.nextCursor);
+          after = result.nextCursor;
+        }
+        totalScanned += scanned;
+      }
+      await onRefresh();
+      setBackfillState("done");
+      setBackfillProgress(`הבדיקה הושלמה מול ${totalScanned.toLocaleString("he-IL")} הזמנות. נשמרו רק פרטי התאמה מצומצמים.`);
+    } catch {
+      setBackfillState("error");
+      setBackfillProgress("הבדיקה נעצרה לפני השלמה. המידע שכבר נבדק נשמר ואפשר להמשיך בניסיון נוסף.");
+    }
+  };
+
   return <div className="page-content product-page chargebacks-page">
-    <div className="page-heading"><div><h1>הכחשות אשראי</h1><p>הכחשות מ־CrediMatch מוצלבות מול עסקאות Shopify לפי מספר אישור, כרטיס, סכום ומועד.</p></div></div>
+    <div className="page-heading"><div><h1>הכחשות אשראי</h1><p>הכחשות מ־CrediMatch מוצלבות מול עסקאות Shopify לפי מספר אישור, כרטיס, סכום ומועד.</p></div>{chargebacks.length && stores.length ? <button className="secondary-button" onClick={backfillMatches} disabled={backfillState === "loading"}><RefreshCw size={16} className={backfillState === "loading" ? "spin" : undefined} />{backfillState === "loading" ? "מחפש התאמות…" : "חיפוש היסטורי"}</button> : null}</div>
+    {backfillProgress ? <div className={`inline-notice ${backfillState === "error" || backfillState === "permission" ? "notice-warning" : ""}`} role="status">{backfillProgress}</div> : null}
 
     <section className="chargeback-summary" aria-label="סיכום הכחשות">
       <div className="chargeback-summary-primary"><span><FileQuestion size={18} /> הכחשות שנקלטו</span><strong>{chargebacks.length.toLocaleString("he-IL")}</strong><small>המידע מגיע ישירות מ־CrediMatch</small></div>

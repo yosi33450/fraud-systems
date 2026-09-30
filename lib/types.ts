@@ -176,6 +176,24 @@ export interface CrediMatchChargeback {
   match?: ChargebackOrderMatch;
 }
 
+/**
+ * A deliberately small Shopify order projection used only for matching
+ * CrediMatch chargebacks. It is not part of the operational order ledger and
+ * therefore cannot create cases or appear in order/activity views.
+ */
+export interface CrediMatchOrderCandidate {
+  tenantId: string;
+  storeId: string;
+  shopifyOrderId: string;
+  orderNumber?: string;
+  customer?: string;
+  email: string;
+  amount: number;
+  currency?: string;
+  createdAt: string;
+  payments?: OrderPaymentFingerprint[];
+}
+
 export interface GiftCardRedemption {
   transactionId?: string;
   currency?: string;

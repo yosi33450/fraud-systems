@@ -49,6 +49,8 @@ The public endpoint accepts the supplied `events: [{ name: "chargeback", paths: 
 
 The dashboard includes a **Credit chargebacks** workspace. For every incoming discrepancy the server retrieves the linked CrediMatch transaction, normalizes only the fields needed for investigation, and compares it with safe Shopify payment fingerprints (authorization/voucher number, masked last four digits, amount, currency and time). Exact and strong matches are linked automatically; amount-and-time-only candidates remain marked for manual verification. Raw card numbers and authentication secrets are never exposed to the browser.
 
+The workspace also provides an owner-only historical match scan. It reads Shopify orders in pages of 50 from the earliest chargeback (up to one year), stores only a compact encrypted payment fingerprint in the dedicated CrediMatch Blob document, and never passes those historical records through fraud ingestion. Historical candidates therefore do not create cases and are not shown in order, employee, or activity views; an order is exposed only inside a chargeback when the matching engine finds a candidate. Shopify requires the `read_all_orders` scope for orders older than 60 days. Normal manual store refreshes cover 60 days, while live webhooks continue recording new orders.
+
 The supplied CrediMatch material does not document a webhook signature, shared secret, or source IP range. Before production traffic is enabled, request a supported signature/authentication mechanism or an IP allowlist from CrediMatch.
 
 ## Database setup
