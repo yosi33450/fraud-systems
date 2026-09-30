@@ -14,8 +14,10 @@ type CrediMatchPersistedState = {
   chargebacks: CrediMatchChargeback[];
   orderCandidates: CrediMatchOrderCandidate[];
 };
-const configured = () => process.env.PERSISTENCE_BACKEND !== "supabase"
-  && Boolean(process.env.BLOB_READ_WRITE_TOKEN || process.env.BLOB_STORE_ID);
+// This document is intentionally independent from the operational backend.
+// Production may use Supabase for cases while still using the private Blob
+// document for the large, matching-only Shopify history.
+const configured = () => Boolean(process.env.BLOB_READ_WRITE_TOKEN || process.env.BLOB_STORE_ID);
 
 async function read() {
   const result = await get(blobPath, {
