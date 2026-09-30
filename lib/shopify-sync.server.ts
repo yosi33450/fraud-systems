@@ -532,12 +532,6 @@ export async function syncCrediMatchOrderCandidatesPage(input: {
     },
   });
 
-  const tenderPayments = await tenderFingerprintsForOrders({
-    shopDomain: input.shopDomain,
-    accessToken: input.accessToken,
-    orders: data.orders.nodes,
-  });
-
   const candidates: CrediMatchOrderCandidate[] = data.orders.nodes.map((order) => ({
     tenantId: input.tenantId,
     storeId: input.storeId,
@@ -551,7 +545,7 @@ export async function syncCrediMatchOrderCandidatesPage(input: {
     amount: Number(order.totalPriceSet.shopMoney.amount),
     currency: order.totalPriceSet.shopMoney.currencyCode,
     createdAt: order.createdAt,
-    payments: [...paymentFingerprintsFromShopify(order.transactions.map((transaction) => ({
+    payments: paymentFingerprintsFromShopify(order.transactions.map((transaction) => ({
       id: transaction.id,
       payment_id: transaction.paymentId ?? undefined,
       gateway: transaction.gateway ?? undefined,
@@ -562,7 +556,7 @@ export async function syncCrediMatchOrderCandidatesPage(input: {
       amount: transaction.amountSet.shopMoney.amount,
       processed_at: transaction.processedAt ?? undefined,
       receipt: transaction.receiptJson,
-    })), order.totalPriceSet.shopMoney.currencyCode), ...(tenderPayments.get(order.id) ?? [])],
+    })), order.totalPriceSet.shopMoney.currencyCode),
   }));
   if (!input.after) {
     const transactions = data.orders.nodes.flatMap((order) => order.transactions);
