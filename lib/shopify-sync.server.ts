@@ -1,4 +1,5 @@
-import { completeHistoricalSync, failHistoricalSync, ingestShopifyOrder, openCaseOrderReferences, replaceGiftCardRegistry, restoreCrediMatchOrderCandidates, upsertGiftCardRegistry, type GiftCardRegistryInput, type ShopifyOrderPayload } from "@/lib/operational-store";
+import { completeHistoricalSync, exportCrediMatchChargebacks, failHistoricalSync, ingestShopifyOrder, openCaseOrderReferences, replaceGiftCardRegistry, restoreCrediMatchOrderCandidates, upsertGiftCardRegistry, type GiftCardRegistryInput, type ShopifyOrderPayload } from "@/lib/operational-store";
+import { matchCrediMatchChargeback } from "@/lib/credimatch-matching";
 import { paymentFingerprintsFromShopify } from "@/lib/credimatch-matching";
 import type { CrediMatchOrderCandidate, Store } from "@/lib/types";
 import { shopifyAdminRequest } from "@/lib/shopify-admin.server";
@@ -461,7 +462,9 @@ export async function syncCrediMatchOrderCandidatesPage(input: {
       receipt: transaction.receiptJson,
     })), order.totalPriceSet.shopMoney.currencyCode),
   }));
-  restoreCrediMatchOrderCandidates(candidates);
+  const chargebacks = exportCrediMatchChargebacks();
+  restoreCrediMatchOrderCandidates(candidates.filter((candidate) =>
+    chargebacks.some((chargeback) => matchCrediMatchChargeback(chargeback, [candidate]).confidence !== "unmatched")));
 
   const scanned = input.scanned + candidates.length;
   const nextCursor = data.orders.pageInfo.hasNextPage ? data.orders.pageInfo.endCursor : null;

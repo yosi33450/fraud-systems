@@ -3,9 +3,10 @@ import { decryptPrivateData, encryptPrivateData, persistOperationalState } from 
 import {
   exportCrediMatchChargebacks,
   exportCrediMatchOrderCandidates,
+  replaceCrediMatchOrderCandidates,
   restoreCrediMatchChargebacks,
-  restoreCrediMatchOrderCandidates,
 } from "@/lib/operational-store";
+import { matchCrediMatchChargeback } from "@/lib/credimatch-matching";
 import type { CrediMatchChargeback, CrediMatchOrderCandidate } from "@/lib/types";
 
 const blobPath = "private/credimatch-chargebacks.enc.json";
@@ -126,11 +127,12 @@ export async function persistCrediMatchChargebacks() {
       const persisted: CrediMatchPersistedState = {
         version: 2,
         chargebacks: [...merged.values()],
-        orderCandidates: [...mergedOrders.values()],
+        orderCandidates: [...mergedOrders.values()].filter((order) =>
+          [...merged.values()].some((chargeback) => matchCrediMatchChargeback(chargeback, [order]).confidence !== "unmatched")),
       };
       await write(encryptPrivateData(persisted), current.revision);
       restoreCrediMatchChargebacks([...merged.values()]);
-      restoreCrediMatchOrderCandidates([...mergedOrders.values()]);
+      replaceCrediMatchOrderCandidates(persisted.orderCandidates);
       return;
     } catch (error) {
       if (attempt === 6 || !/precondition|already exists|etag|condition.*match|conflicting operation/i.test(error instanceof Error ? error.message : "")) throw error;
@@ -143,5 +145,5 @@ export async function hydrateCrediMatchChargebacks() {
   if (!configured()) return;
   const current = await read();
   restoreCrediMatchChargebacks(current.chargebacks);
-  restoreCrediMatchOrderCandidates(current.orderCandidates);
+  replaceCrediMatchOrderCandidates(current.orderCandidates);
 }

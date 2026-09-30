@@ -269,6 +269,10 @@ export function restoreCrediMatchOrderCandidates(candidates: CrediMatchOrderCand
   state.crediMatchOrderCandidates = [...merged.values()];
 }
 
+export function replaceCrediMatchOrderCandidates(candidates: CrediMatchOrderCandidate[]) {
+  state.crediMatchOrderCandidates = clone(candidates);
+}
+
 const normalizeEmail = (value: string) => value.trim().toLowerCase();
 const normalizePhone = (value: string) => value.replace(/\D/g, "");
 const normalizeAddress = (value: string) => value.trim().toLowerCase().replace(/\s+/g, " ");
