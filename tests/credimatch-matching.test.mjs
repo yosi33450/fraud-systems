@@ -22,7 +22,7 @@ test('extracts a safe Shopify payment fingerprint from receipt data', () => {
     receipt: JSON.stringify({ authorization_code: 'AUTH-77', voucher_number: 9988, terminal_id: '42' }),
   }], 'ILS'), [{
     transactionId: 'gid://shopify/OrderTransaction/1', gateway: 'PayPlus', amount: 349.9, currency: 'ILS', processedAt: '2026-09-28T10:00:30Z',
-    last4: '4242', confirmationNumber: 'AUTH-77', voucherNumber: '9988', terminalNumber: '42', sessionNumber: undefined,
+    gatewayReference: undefined, last4: '4242', confirmationNumber: 'AUTH-77', voucherNumber: '9988', terminalNumber: '42', sessionNumber: undefined,
   }]);
 });
 
@@ -42,6 +42,18 @@ test('extracts the last four digits from Shopify card payment details when accou
   }], 'ILS');
   assert.equal(payment.last4, '1944');
   assert.equal('payment_details' in payment, false);
+});
+
+test('uses a Shopify tender gateway reference as an exact confirmation match', () => {
+  const [payment] = paymentFingerprintsFromShopify([{
+    gateway_reference: '0084173', amount: '445', processed_at: '2026-09-28T10:00:30Z',
+    payment_details: { number: '•••• •••• •••• 1944' },
+  }], 'ILS');
+  const match = matchCrediMatchChargeback(chargeback({ originalAmount: 445, last4Digits: '1944', confirmationNumber: '84173' }), [
+    order({ amount: 445, payments: [payment] }),
+  ]);
+  assert.equal(match.confidence, 'exact');
+  assert.equal(match.orderNumber, '#123');
 });
 
 test('builds a targeted Shopify search for known chargeback amounts', () => {

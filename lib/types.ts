@@ -94,6 +94,7 @@ export interface FraudCase {
 
 export interface OrderPaymentFingerprint {
   transactionId?: string;
+  gatewayReference?: string;
   gateway?: string;
   amount?: number;
   currency?: string;

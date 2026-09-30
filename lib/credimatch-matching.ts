@@ -30,7 +30,10 @@ const number = (value: unknown) => {
   return Number.isFinite(parsed) ? parsed : undefined;
 };
 const description = (value: unknown) => text(record(value)?.description);
-const normalizedId = (value: unknown) => text(value)?.replace(/[^a-z0-9]/gi, "").toLowerCase();
+const normalizedId = (value: unknown) => {
+  const normalized = text(value)?.replace(/[^a-z0-9]/gi, "").toLowerCase();
+  return normalized && /^\d+$/.test(normalized) ? normalized.replace(/^0+(?=\d)/, "") : normalized;
+};
 const last4 = (value: unknown) => text(value)?.replace(/\D/g, "").slice(-4) || undefined;
 const normalizedCurrency = (value: unknown) => {
   const candidate = text(value)?.toUpperCase();
@@ -64,11 +67,12 @@ const receiptValue = (receipt: unknown, keys: string[]) => {
 };
 
 export function paymentFingerprintsFromShopify(
-  transactions: Array<{ id?: string; gateway?: string; formatted_gateway?: string; account_number?: string; payment_details?: { number?: string | null } | null; authorization_code?: string; amount?: string | number; processed_at?: string; receipt?: unknown }>,
+  transactions: Array<{ id?: string; gateway_reference?: string; gateway?: string; formatted_gateway?: string; account_number?: string; payment_details?: { number?: string | null } | null; authorization_code?: string; amount?: string | number; processed_at?: string; receipt?: unknown }>,
   fallbackCurrency?: string,
 ): OrderPaymentFingerprint[] {
   return transactions.map((transaction) => ({
     transactionId: text(transaction.id),
+    gatewayReference: text(transaction.gateway_reference),
     gateway: text(transaction.formatted_gateway ?? transaction.gateway),
     amount: number(transaction.amount),
     currency: normalizedCurrency(receiptValue(transaction.receipt, ["currency", "currencyCode"])) ?? normalizedCurrency(fallbackCurrency),
@@ -162,8 +166,10 @@ export function matchCrediMatchChargeback(chargeback: CrediMatchChargeback, orde
       let score = 0;
       const amount = chargeback.originalAmount ?? chargeback.grossAmount;
       const paymentAmount = payment.amount ?? order.amount;
-      const confirmation = sameNumber(chargeback.confirmationNumber, payment.confirmationNumber);
-      const voucher = sameNumber(chargeback.voucherNumber, payment.voucherNumber);
+      const confirmation = sameNumber(chargeback.confirmationNumber, payment.confirmationNumber)
+        || sameNumber(chargeback.confirmationNumber, payment.gatewayReference);
+      const voucher = sameNumber(chargeback.voucherNumber, payment.voucherNumber)
+        || sameNumber(chargeback.voucherNumber, payment.gatewayReference);
       const card = Boolean(chargeback.last4Digits && payment.last4 && chargeback.last4Digits === payment.last4);
       const amountMatch = sameMoney(amount, paymentAmount);
       const currency = Boolean(chargeback.currency && (payment.currency ?? order.currency) && chargeback.currency === (payment.currency ?? order.currency)?.toUpperCase());
@@ -182,8 +188,8 @@ export function matchCrediMatchChargeback(chargeback: CrediMatchChargeback, orde
       const add = (key: ChargebackMatchComparison["key"], label: string, matched: boolean, crediMatchValue?: string, shopifyValue?: string) => {
         if (crediMatchValue || shopifyValue) comparisons.push({ key, label, matched, crediMatchValue, shopifyValue });
       };
-      add("confirmation", "מספר אישור", confirmation, chargeback.confirmationNumber, payment.confirmationNumber);
-      add("voucher", "מספר שובר", voucher, chargeback.voucherNumber, payment.voucherNumber);
+      add("confirmation", "מספר אישור", confirmation, chargeback.confirmationNumber, payment.confirmationNumber ?? payment.gatewayReference);
+      add("voucher", "מספר שובר", voucher, chargeback.voucherNumber, payment.voucherNumber ?? payment.gatewayReference);
       add("last4", "4 ספרות אחרונות", card, chargeback.last4Digits ? `•••• ${chargeback.last4Digits}` : undefined, payment.last4 ? `•••• ${payment.last4}` : undefined);
       add("amount", "סכום", amountMatch, amount?.toFixed(2), paymentAmount?.toFixed(2));
       add("currency", "מטבע", currency, chargeback.currency, payment.currency ?? order.currency);

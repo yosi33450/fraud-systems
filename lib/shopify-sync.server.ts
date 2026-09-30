@@ -90,6 +90,23 @@ export const CREDIMATCH_ORDER_CANDIDATES_QUERY = `#graphql
   }
 `;
 
+export const CREDIMATCH_TENDER_CANDIDATES_QUERY = `#graphql
+  query CrediMatchTenderCandidates($first: Int!, $after: String, $query: String!) {
+    tenderTransactions(first: $first, after: $after, query: $query) {
+      nodes {
+        order { id }
+        amount { amount currencyCode }
+        processedAt
+        remoteReference
+        paymentDetails: transactionDetails {
+          ... on TenderTransactionCreditCardDetails { creditCardNumber }
+        }
+      }
+      pageInfo { hasNextPage endCursor }
+    }
+  }
+`;
+
 const CREDIMATCH_ORDER_ACCESS_QUERY = `#graphql
   query CrediMatchOrderAccess {
     currentAppInstallation { accessScopes { handle } }
@@ -405,6 +422,71 @@ type CrediMatchOrderCandidateNode = {
   }>;
 };
 
+type TenderTransactionNode = {
+  order?: { id: string } | null;
+  amount: { amount: string; currencyCode: string };
+  processedAt?: string | null;
+  remoteReference?: string | null;
+  paymentDetails?: { creditCardNumber?: string | null } | null;
+};
+
+async function tenderFingerprintsForOrders(input: {
+  shopDomain: string;
+  accessToken: string;
+  orders: CrediMatchOrderCandidateNode[];
+}) {
+  const byOrder = new Map<string, CrediMatchOrderCandidate["payments"]>();
+  if (!input.orders.length) return byOrder;
+  const times = input.orders.map((order) => Date.parse(order.createdAt)).filter(Number.isFinite);
+  if (!times.length) return byOrder;
+  const padding = 3 * 86_400_000;
+  const since = new Date(Math.min(...times) - padding).toISOString();
+  const until = new Date(Math.max(...times) + padding).toISOString();
+  const wantedOrders = new Set(input.orders.map((order) => order.id));
+  let after: string | null = null;
+  let scanned = 0;
+  let remoteReferences = 0;
+  let cardSuffixes = 0;
+
+  do {
+    const data: {
+      tenderTransactions: {
+        nodes: TenderTransactionNode[];
+        pageInfo: { hasNextPage: boolean; endCursor: string | null };
+      };
+    } = await shopifyAdminRequest({
+      shopDomain: input.shopDomain,
+      accessToken: input.accessToken,
+      query: CREDIMATCH_TENDER_CANDIDATES_QUERY,
+      variables: { first: 250, after, query: `processed_at:>=${since} processed_at:<=${until}` },
+    });
+    scanned += data.tenderTransactions.nodes.length;
+    for (const tender of data.tenderTransactions.nodes) {
+      const orderId = tender.order?.id;
+      if (!orderId || !wantedOrders.has(orderId)) continue;
+      if (tender.remoteReference) remoteReferences += 1;
+      if (tender.paymentDetails?.creditCardNumber) cardSuffixes += 1;
+      const [fingerprint] = paymentFingerprintsFromShopify([{
+        gateway_reference: tender.remoteReference ?? undefined,
+        payment_details: { number: tender.paymentDetails?.creditCardNumber },
+        amount: tender.amount.amount,
+        processed_at: tender.processedAt ?? undefined,
+      }], tender.amount.currencyCode);
+      byOrder.set(orderId, [...(byOrder.get(orderId) ?? []), fingerprint]);
+    }
+    after = data.tenderTransactions.pageInfo.hasNextPage ? data.tenderTransactions.pageInfo.endCursor : null;
+    if (data.tenderTransactions.pageInfo.hasNextPage && !after) throw new Error("SHOPIFY_TENDER_CURSOR_MISSING");
+  } while (after);
+
+  console.info("[credimatch-backfill] Shopify tender field coverage", {
+    tenderTransactions: scanned,
+    matchedOrders: byOrder.size,
+    remoteReferences,
+    cardSuffixes,
+  });
+  return byOrder;
+}
+
 /**
  * Fetches one small page for chargeback matching only. These projections do
  * not pass through ingestShopifyOrder, so they never create cases or appear in
@@ -448,6 +530,12 @@ export async function syncCrediMatchOrderCandidatesPage(input: {
     },
   });
 
+  const tenderPayments = await tenderFingerprintsForOrders({
+    shopDomain: input.shopDomain,
+    accessToken: input.accessToken,
+    orders: data.orders.nodes,
+  });
+
   const candidates: CrediMatchOrderCandidate[] = data.orders.nodes.map((order) => ({
     tenantId: input.tenantId,
     storeId: input.storeId,
@@ -461,7 +549,7 @@ export async function syncCrediMatchOrderCandidatesPage(input: {
     amount: Number(order.totalPriceSet.shopMoney.amount),
     currency: order.totalPriceSet.shopMoney.currencyCode,
     createdAt: order.createdAt,
-    payments: paymentFingerprintsFromShopify(order.transactions.map((transaction) => ({
+    payments: [...paymentFingerprintsFromShopify(order.transactions.map((transaction) => ({
       id: transaction.id,
       gateway: transaction.gateway ?? undefined,
       formatted_gateway: transaction.formattedGateway ?? undefined,
@@ -471,7 +559,7 @@ export async function syncCrediMatchOrderCandidatesPage(input: {
       amount: transaction.amountSet.shopMoney.amount,
       processed_at: transaction.processedAt ?? undefined,
       receipt: transaction.receiptJson,
-    })), order.totalPriceSet.shopMoney.currencyCode),
+    })), order.totalPriceSet.shopMoney.currencyCode), ...(tenderPayments.get(order.id) ?? [])],
   }));
   if (!input.after) {
     const transactions = data.orders.nodes.flatMap((order) => order.transactions);
