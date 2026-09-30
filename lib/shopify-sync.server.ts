@@ -431,7 +431,7 @@ export async function syncCrediMatchOrderCandidatesPage(input: {
     accessToken: input.accessToken,
     query: CREDIMATCH_ORDER_CANDIDATES_QUERY,
     variables: {
-      first: 50,
+      first: 100,
       after: input.after ?? null,
       query: `created_at:>=${input.since} created_at:<=${input.until}`,
     },
