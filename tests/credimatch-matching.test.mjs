@@ -131,6 +131,15 @@ test('does not treat a date-only midnight value as a precise transaction time', 
   assert.equal(match.confidence, 'unmatched');
 });
 
+test('marks a midnight transaction timestamp from CrediMatch as date-only', () => {
+  const [result] = normalizeCrediMatchChargebacks({
+    tenantId: 'tenant-primary', discrepancyId: '21893735',
+    discrepancyPayload: { discrepancies: [{ id: 21893735, transactionId: 55 }] },
+    transactionPayloads: [{ transactions: [{ id: 55, transactionDate: '2026-03-05T00:00:00Z' }] }],
+  });
+  assert.equal(result.dealTimePrecise, false);
+});
+
 test('rejects an amount-and-time-only candidate when the card suffix is unavailable', () => {
   const candidate = order({ payments: [], amount: 349.9, createdAt: '2026-09-28T10:20:00Z' });
   const match = matchCrediMatchChargeback(chargeback({ confirmationNumber: undefined }), [candidate]);

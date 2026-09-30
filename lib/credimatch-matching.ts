@@ -127,6 +127,12 @@ export function crediMatchTransactionTime(payload: unknown): string | undefined 
   return text(transaction?.transactionDate);
 }
 
+export function crediMatchTransactionTimeIsPrecise(value: unknown): boolean {
+  const candidate = text(value);
+  if (!candidate || !Number.isFinite(Date.parse(candidate))) return false;
+  return !/(?:T|\s)00:00(?::00(?:\.0+)?)?(?:Z|[+-]\d{2}:?\d{2})?$/.test(candidate);
+}
+
 export function normalizeCrediMatchChargebacks(input: {
   tenantId: string;
   discrepancyId: string;
@@ -149,7 +155,7 @@ export function normalizeCrediMatchChargebacks(input: {
       transactionId,
       providerUid: text(transaction?.uid),
       receivedAt: input.receivedAt ?? new Date().toISOString(),
-      dealTime: text(transaction?.transactionDate) ?? text(item.dealTime), dealTimePrecise: Boolean(text(transaction?.transactionDate)), creationTime: text(item.creationTime), originalAmount: number(item.originalAmount), payments: number(item.payments) ?? number(transaction?.numberOfPayments),
+      dealTime: text(transaction?.transactionDate) ?? text(item.dealTime), dealTimePrecise: crediMatchTransactionTimeIsPrecise(transaction?.transactionDate), creationTime: text(item.creationTime), originalAmount: number(item.originalAmount), payments: number(item.payments) ?? number(transaction?.numberOfPayments),
       status: description(item.discrepancyStatus), type: description(item.discrepancyType), creditCompany: description(item.creditCompany),
       last4Digits: last4(item.last4Digits ?? transaction?.creditCardSufix), terminalNumber: text(item.terminalNumber ?? transaction?.terminalNumber), confirmationNumber: text(item.confirmationNumber ?? transaction?.confirmationNumber),
       voucherNumber: text(item.voucherNumber), sessionNumber: text(item.sessionNumber), additionalDetails: text(item.additionalDetails),

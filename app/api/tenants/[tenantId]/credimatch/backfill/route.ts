@@ -4,7 +4,7 @@ import { hydrateOperationalState } from "@/lib/persistence.server";
 import { getFreshStoreConnection } from "@/lib/shopify-connection.server";
 import { syncCrediMatchOrderCandidatesPage } from "@/lib/shopify-sync.server";
 import { getCrediMatchTransaction } from "@/lib/credimatch.server";
-import { crediMatchTransactionTime, crediMatchTransactionUid } from "@/lib/credimatch-matching";
+import { crediMatchTransactionTime, crediMatchTransactionTimeIsPrecise, crediMatchTransactionUid } from "@/lib/credimatch-matching";
 import { exportCrediMatchChargebacks, restoreCrediMatchChargebacks } from "@/lib/operational-store";
 
 export const runtime = "nodejs";
@@ -51,7 +51,7 @@ export async function POST(request: Request, context: { params: Promise<{ tenant
               ...chargeback,
               providerUid: crediMatchTransactionUid(transaction) ?? chargeback.providerUid,
               dealTime: transactionTime ?? chargeback.dealTime,
-              dealTimePrecise: transactionTime ? true : chargeback.dealTimePrecise,
+              dealTimePrecise: transactionTime ? crediMatchTransactionTimeIsPrecise(transactionTime) : chargeback.dealTimePrecise,
             };
           } catch (error) {
             console.warn("[credimatch-backfill] transaction uid unavailable", {
