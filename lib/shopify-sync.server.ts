@@ -31,7 +31,7 @@ export const ORDERS_BACKFILL_QUERY = `#graphql
       customAttributes { key value }
       transactions {
         id gateway formattedGateway accountNumber authorizationCode kind status processedAt receiptJson
-        paymentDetails { ... on CardPaymentDetails { number company } }
+        paymentDetails { __typename ... on CardPaymentDetails { number company } }
         amountSet { shopMoney { amount currencyCode } }
       }
         totalPriceSet { shopMoney { amount currencyCode } }
@@ -81,7 +81,7 @@ export const CREDIMATCH_ORDER_CANDIDATES_QUERY = `#graphql
           authorizationCode
           processedAt
           receiptJson
-          paymentDetails { ... on CardPaymentDetails { number company } }
+          paymentDetails { __typename ... on CardPaymentDetails { number company } }
           amountSet { shopMoney { amount currencyCode } }
         }
       }
@@ -118,7 +118,7 @@ export const ORDER_GIFT_CARD_DETAILS_QUERY = `#graphql
       customAttributes { key value }
       transactions {
         id gateway formattedGateway accountNumber authorizationCode kind status processedAt receiptJson
-        paymentDetails { ... on CardPaymentDetails { number company } }
+        paymentDetails { __typename ... on CardPaymentDetails { number company } }
         amountSet { shopMoney { amount currencyCode } }
       }
       totalPriceSet { shopMoney { amount currencyCode } }
@@ -159,7 +159,7 @@ type ShopifyOrderNode = {
   transactions: Array<{
     id: string; gateway?: string | null; formattedGateway?: string | null; accountNumber?: string | null;
     authorizationCode?: string | null;
-    paymentDetails?: { number?: string | null; company?: string | null } | null;
+    paymentDetails?: { __typename?: string; number?: string | null; company?: string | null } | null;
     kind: string; status: string; processedAt?: string | null; receiptJson?: unknown;
     amountSet: { shopMoney: { amount: string; currencyCode: string } };
   }>;
@@ -398,7 +398,7 @@ type CrediMatchOrderCandidateNode = {
     formattedGateway?: string | null;
     accountNumber?: string | null;
     authorizationCode?: string | null;
-    paymentDetails?: { number?: string | null; company?: string | null } | null;
+    paymentDetails?: { __typename?: string; number?: string | null; company?: string | null } | null;
     processedAt?: string | null;
     receiptJson?: unknown;
     amountSet: { shopMoney: { amount: string; currencyCode: string } };
@@ -473,6 +473,28 @@ export async function syncCrediMatchOrderCandidatesPage(input: {
       receipt: transaction.receiptJson,
     })), order.totalPriceSet.shopMoney.currencyCode),
   }));
+  if (!input.after) {
+    const transactions = data.orders.nodes.flatMap((order) => order.transactions);
+    const receiptKeys = new Set<string>();
+    for (const transaction of transactions) {
+      let receipt: unknown = transaction.receiptJson;
+      if (typeof receipt === "string") {
+        try { receipt = JSON.parse(receipt); } catch { receipt = undefined; }
+      }
+      if (receipt && typeof receipt === "object" && !Array.isArray(receipt)) {
+        for (const key of Object.keys(receipt).slice(0, 40)) receiptKeys.add(key);
+      }
+    }
+    console.info("[credimatch-backfill] Shopify payment field coverage", {
+      orders: data.orders.nodes.length,
+      transactions: transactions.length,
+      accountNumber: transactions.filter((item) => Boolean(item.accountNumber)).length,
+      cardPaymentDetails: transactions.filter((item) => item.paymentDetails?.__typename === "CardPaymentDetails").length,
+      paymentDetailsNumber: transactions.filter((item) => Boolean(item.paymentDetails?.number)).length,
+      extractedLast4: candidates.filter((item) => item.payments?.some((payment) => Boolean(payment.last4))).length,
+      receiptKeys: [...receiptKeys].slice(0, 40),
+    });
+  }
   const chargebacks = exportCrediMatchChargebacks().filter((item) => item.tenantId === input.tenantId);
   restoreCrediMatchOrderCandidates(candidates.filter((candidate) =>
     chargebacks.some((chargeback) => matchCrediMatchChargeback(chargeback, [candidate]).confidence !== "unmatched")));
