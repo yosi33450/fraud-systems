@@ -6,10 +6,10 @@ import { CenteredDialog } from "@/components/centered-dialog";
 import type { ChargebackMatchConfidence, CrediMatchChargeback, Store } from "@/lib/types";
 
 const confidenceCopy: Record<ChargebackMatchConfidence, { label: string; detail: string }> = {
-  exact: { label: "התאמה ודאית", detail: "מספר אישור או שובר וסכום זהים" },
-  strong: { label: "התאמה חזקה", detail: "כמה פרטי תשלום תואמים" },
-  possible: { label: "דורש אימות", detail: "נמצאה הזמנה אפשרית, אך אין מספיק סימנים לאישור אוטומטי" },
-  unmatched: { label: "לא נמצאה הזמנה", detail: "נשמרה לבדיקה חוזרת לאחר סנכרון Shopify" },
+  exact: { label: "התאמה ודאית", detail: "הכרטיס, הסכום ומספר האישור או השובר זהים" },
+  strong: { label: "התאמה חזקה", detail: "הכרטיס והסכום זהים ונמצאו סימני תשלום נוספים" },
+  possible: { label: "דורש אימות", detail: "ארבע הספרות והסכום זהים, אך אין מספיק סימנים לאישור אוטומטי" },
+  unmatched: { label: "לא נמצאה הזמנה", detail: "לא נמצאה עסקה עם ארבע ספרות וסכום זהים" },
 };
 
 const dateFormatter = new Intl.DateTimeFormat("he-IL", { dateStyle: "short", timeStyle: "short", timeZone: "Asia/Jerusalem" });
@@ -145,7 +145,7 @@ function ChargebackDialog({ item, stores, onClose }: { item: CrediMatchChargebac
         {match?.score ? <strong>{match.score}<small>/100</small></strong> : null}
       </section>
 
-      {match?.comparisons.length ? <section className="match-comparison"><div className="chargeback-section-title"><h3>איך התקבלה ההחלטה?</h3><span>כל סימן נבדק מול העסקה שנמצאה</span></div><div className="comparison-grid">{match.comparisons.map((comparison) => <div key={comparison.key} className={comparison.matched ? "comparison-match" : "comparison-miss"}><span>{comparison.label}</span><strong>{comparison.matched ? "תואם" : "לא תואם"}</strong><small><bdi>{comparison.crediMatchValue ?? "—"}</bdi><ArrowLeftRight size={13} /><bdi>{comparison.shopifyValue ?? "—"}</bdi></small></div>)}</div></section> : null}
+      {match?.comparisons.length ? <section className="match-comparison"><div className="chargeback-section-title"><h3>איך התקבלה ההחלטה?</h3><span>כל סימן נבדק מול העסקה שנמצאה</span></div><div className="comparison-grid">{match.comparisons.map((comparison) => <div key={comparison.key} className={comparison.matched ? "comparison-match" : "comparison-miss"}><span>{comparison.label}</span><strong>{comparison.matched ? "תואם" : "לא תואם"}</strong><small className="comparison-values"><span className="comparison-side"><em>CrediMatch</em><bdi>{comparison.crediMatchValue ?? "לא התקבל"}</bdi></span><ArrowLeftRight size={13} aria-hidden="true" /><span className="comparison-side"><em>Shopify</em><bdi>{comparison.shopifyValue ?? "לא התקבל"}</bdi></span></small></div>)}</div></section> : null}
 
       <div className="chargeback-split">
         <section className="chargeback-facts"><div className="chargeback-section-title"><h3>ההכחשה מ־CrediMatch</h3><span>נתוני חברת האשראי</span></div><dl>
@@ -162,7 +162,7 @@ function ChargebackDialog({ item, stores, onClose }: { item: CrediMatchChargebac
           <div><dt>אימייל</dt><dd><bdi>{match.email || "לא התקבל"}</bdi></dd></div>
           <div><dt>מועד הזמנה</dt><dd>{safeDate(match.createdAt)}</dd></div>
           <div><dt>רמת התאמה</dt><dd>{confidenceCopy[confidence].label}</dd></div>
-        </dl>{shopifyUrl ? <a className="secondary-button shopify-order-link" href={shopifyUrl} target="_blank" rel="noreferrer">פתיחת ההזמנה ב־Shopify <ExternalLink size={15} /></a> : null}</> : <div className="unmatched-guidance"><CalendarClock size={24} /><strong>ההכחשה נשמרה</strong><p>לא נחבר אותה להזמנה על סמך סכום בלבד. לאחר סנכרון נוסף נבדוק אותה שוב אוטומטית.</p></div>}</section>
+        </dl>{shopifyUrl ? <a className="secondary-button shopify-order-link" href={shopifyUrl} target="_blank" rel="noreferrer">פתיחת ההזמנה ב־Shopify <ExternalLink size={15} /></a> : null}</> : <div className="unmatched-guidance"><CalendarClock size={24} /><strong>ההכחשה נשמרה</strong><p>נציג הזמנה רק כאשר ארבע הספרות האחרונות והסכום זהים. סכום או תאריך לבדם אינם מספיקים.</p></div>}</section>
       </div>
 
       {item.settlements.length ? <section className="settlement-section"><div className="chargeback-section-title"><h3>תנועות וזיכויים</h3><span>{item.settlements.length} רשומות כספיות</span></div><div className="settlement-list">{item.settlements.map((entry, index) => <article key={`${entry.invoiceNumber ?? "settlement"}-${index}`}><span>תשלום {entry.currentPaymentNumber ?? index + 1}</span><strong>{money(entry.netAmount ?? entry.expectedNetAmount, item.currency)}</strong><small>צפוי: {safeDate(entry.expectedPaymentTime)} · {entry.receptionStatus ?? "ללא סטטוס"}</small></article>)}</div></section> : null}

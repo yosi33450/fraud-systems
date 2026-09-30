@@ -57,9 +57,22 @@ test('links an exact chargeback using authorization and amount', () => {
   assert.ok(match.comparisons.find((item) => item.key === 'amount')?.matched);
 });
 
-test('marks an amount-and-time-only candidate for manual verification', () => {
+test('rejects an amount-and-time-only candidate when the card suffix is unavailable', () => {
   const candidate = order({ payments: [], amount: 349.9, createdAt: '2026-09-28T10:20:00Z' });
-  const match = matchCrediMatchChargeback(chargeback({ confirmationNumber: undefined, last4Digits: undefined }), [candidate]);
+  const match = matchCrediMatchChargeback(chargeback({ confirmationNumber: undefined }), [candidate]);
+  assert.equal(match.confidence, 'unmatched');
+  assert.equal(match.orderNumber, undefined);
+});
+
+test('rejects a candidate when amount and authorization match but last four digits differ', () => {
+  const candidate = order({ payments: [{ amount: 349.9, currency: 'ILS', processedAt: '2026-09-28T10:00:30Z', last4: '9999', confirmationNumber: 'AUTH77' }] });
+  const match = matchCrediMatchChargeback(chargeback(), [candidate]);
+  assert.equal(match.confidence, 'unmatched');
+});
+
+test('keeps a same-card same-amount candidate for manual verification', () => {
+  const candidate = order({ payments: [{ amount: 349.9, currency: 'ILS', processedAt: '2026-09-30T10:00:30Z', last4: '4242' }] });
+  const match = matchCrediMatchChargeback(chargeback({ confirmationNumber: undefined }), [candidate]);
   assert.equal(match.confidence, 'possible');
   assert.equal(match.orderNumber, '#123');
 });

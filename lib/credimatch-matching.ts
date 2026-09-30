@@ -177,9 +177,13 @@ export function matchCrediMatchChargeback(chargeback: CrediMatchChargeback, orde
       add("terminal", "מסוף", terminal, chargeback.terminalNumber, payment.terminalNumber);
       add("session", "סשן", session, chargeback.sessionNumber, payment.sessionNumber);
       const reasons = [confirmation && "מספר אישור זהה", voucher && "מספר שובר זהה", card && "4 ספרות אחרונות זהות", amountMatch && "סכום זהה", time && `מועד עסקה ${displayTime(distance)}`].filter((value): value is string => Boolean(value));
-      const exact = (confirmation || voucher) && amountMatch;
-      const strong = confirmation || voucher || (card && amountMatch && distance <= 86_400_000) || score >= 65;
-      const possible = amountMatch && time;
+      // A chargeback candidate must refer to the same card and the same
+      // charged amount. Amount and date alone create many false positives,
+      // while a missing Shopify card suffix is not evidence of a match.
+      const cardAndAmount = card && amountMatch;
+      const exact = cardAndAmount && (confirmation || voucher);
+      const strong = cardAndAmount && (confirmation || voucher || distance <= 86_400_000 || score >= 65);
+      const possible = cardAndAmount && time;
       return { order, score: Math.min(score, 100), comparisons, reasons, exact, strong, possible };
     }).sort((left, right) => right.score - left.score)[0];
   }).sort((left, right) => right.score - left.score);
