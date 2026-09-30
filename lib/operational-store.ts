@@ -21,6 +21,7 @@ export type ShopifyOrderTransaction = {
   gateway?: string;
   formatted_gateway?: string;
   account_number?: string;
+  payment_details?: { number?: string | null } | null;
   authorization_code?: string;
   amount?: string | number;
   status?: string;

@@ -31,6 +31,7 @@ export const ORDERS_BACKFILL_QUERY = `#graphql
       customAttributes { key value }
       transactions {
         id gateway formattedGateway accountNumber authorizationCode kind status processedAt receiptJson
+        paymentDetails { ... on CardPaymentDetails { number company } }
         amountSet { shopMoney { amount currencyCode } }
       }
         totalPriceSet { shopMoney { amount currencyCode } }
@@ -80,6 +81,7 @@ export const CREDIMATCH_ORDER_CANDIDATES_QUERY = `#graphql
           authorizationCode
           processedAt
           receiptJson
+          paymentDetails { ... on CardPaymentDetails { number company } }
           amountSet { shopMoney { amount currencyCode } }
         }
       }
@@ -116,6 +118,7 @@ export const ORDER_GIFT_CARD_DETAILS_QUERY = `#graphql
       customAttributes { key value }
       transactions {
         id gateway formattedGateway accountNumber authorizationCode kind status processedAt receiptJson
+        paymentDetails { ... on CardPaymentDetails { number company } }
         amountSet { shopMoney { amount currencyCode } }
       }
       totalPriceSet { shopMoney { amount currencyCode } }
@@ -156,6 +159,7 @@ type ShopifyOrderNode = {
   transactions: Array<{
     id: string; gateway?: string | null; formattedGateway?: string | null; accountNumber?: string | null;
     authorizationCode?: string | null;
+    paymentDetails?: { number?: string | null; company?: string | null } | null;
     kind: string; status: string; processedAt?: string | null; receiptJson?: unknown;
     amountSet: { shopMoney: { amount: string; currencyCode: string } };
   }>;
@@ -217,6 +221,7 @@ const toPayload = (order: ShopifyOrderNode): ShopifyOrderPayload => ({
     gateway: transaction.gateway ?? undefined,
     formatted_gateway: transaction.formattedGateway ?? undefined,
     account_number: transaction.accountNumber ?? undefined,
+    payment_details: transaction.paymentDetails,
     authorization_code: transaction.authorizationCode ?? undefined,
     amount: transaction.amountSet.shopMoney.amount,
     status: transaction.status,
@@ -393,6 +398,7 @@ type CrediMatchOrderCandidateNode = {
     formattedGateway?: string | null;
     accountNumber?: string | null;
     authorizationCode?: string | null;
+    paymentDetails?: { number?: string | null; company?: string | null } | null;
     processedAt?: string | null;
     receiptJson?: unknown;
     amountSet: { shopMoney: { amount: string; currencyCode: string } };
@@ -456,6 +462,7 @@ export async function syncCrediMatchOrderCandidatesPage(input: {
       gateway: transaction.gateway ?? undefined,
       formatted_gateway: transaction.formattedGateway ?? undefined,
       account_number: transaction.accountNumber ?? undefined,
+      payment_details: transaction.paymentDetails,
       authorization_code: transaction.authorizationCode ?? undefined,
       amount: transaction.amountSet.shopMoney.amount,
       processed_at: transaction.processedAt ?? undefined,

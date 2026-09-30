@@ -36,6 +36,14 @@ test('prefers the Shopify authorization code without retaining the raw receipt',
   assert.equal('sensitive_blob' in payment, false);
 });
 
+test('extracts the last four digits from Shopify card payment details when accountNumber is empty', () => {
+  const [payment] = paymentFingerprintsFromShopify([{
+    id: 'gid://shopify/OrderTransaction/3', amount: '445', payment_details: { number: '•••• •••• •••• 1944' },
+  }], 'ILS');
+  assert.equal(payment.last4, '1944');
+  assert.equal('payment_details' in payment, false);
+});
+
 test('normalizes CrediMatch discrepancy and transaction responses without inventing fields', () => {
   const result = normalizeCrediMatchChargebacks({
     tenantId: 'tenant-primary', discrepancyId: '21893735', receivedAt: '2026-09-29T12:00:00Z',
