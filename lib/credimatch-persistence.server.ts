@@ -9,34 +9,92 @@ import {
 import type { CrediMatchChargeback, CrediMatchOrderCandidate } from "@/lib/types";
 
 const blobPath = "private/credimatch-chargebacks.enc.json";
+const supabaseStateId = "credimatch";
 type CrediMatchPersistedState = {
   version: 2;
   chargebacks: CrediMatchChargeback[];
   orderCandidates: CrediMatchOrderCandidate[];
 };
-// This document is intentionally independent from the operational backend.
-// Production may use Supabase for cases while still using the private Blob
-// document for the large, matching-only Shopify history.
-const configured = () => Boolean(process.env.BLOB_READ_WRITE_TOKEN || process.env.BLOB_STORE_ID);
+type EncryptedState = ReturnType<typeof encryptPrivateData>;
+type PersistedRow = EncryptedState & { updated_at: string };
+
+const supabaseConfiguration = () => {
+  if (process.env.PERSISTENCE_BACKEND !== "supabase") return null;
+  const url = process.env.SUPABASE_URL?.replace(/\/$/, "");
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  return url && key ? { url, key } : null;
+};
+const useBlob = () => !supabaseConfiguration()
+  && process.env.PERSISTENCE_BACKEND !== "local"
+  && Boolean(process.env.BLOB_READ_WRITE_TOKEN || process.env.BLOB_STORE_ID);
+const configured = () => Boolean(supabaseConfiguration()) || useBlob();
+const emptyState = () => ({
+  chargebacks: [] as CrediMatchChargeback[],
+  orderCandidates: [] as CrediMatchOrderCandidate[],
+  revision: undefined as string | undefined,
+});
+
+const decode = (encrypted: EncryptedState) => {
+  const decrypted = decryptPrivateData<CrediMatchChargeback[] | CrediMatchPersistedState>(encrypted);
+  return Array.isArray(decrypted)
+    ? { chargebacks: decrypted, orderCandidates: [] as CrediMatchOrderCandidate[] }
+    : { chargebacks: decrypted.chargebacks ?? [], orderCandidates: decrypted.orderCandidates ?? [] };
+};
 
 async function read() {
+  const supabase = supabaseConfiguration();
+  if (supabase) {
+    const response = await fetch(`${supabase.url}/rest/v1/shield_ledger_state?id=eq.${supabaseStateId}&select=ciphertext,iv,auth_tag,updated_at&limit=1`, {
+      headers: { apikey: supabase.key, Authorization: `Bearer ${supabase.key}` },
+      cache: "no-store",
+    });
+    if (!response.ok) throw new Error(`CREDIMATCH_PERSISTENCE_READ_FAILED_${response.status}`);
+    const row = (await response.json() as PersistedRow[])[0];
+    return row ? { ...decode(row), revision: row.updated_at } : emptyState();
+  }
   const result = await get(blobPath, {
     access: "private",
     useCache: false,
     headers: { "Accept-Encoding": "identity" },
   });
   if (!result || result.statusCode !== 200) {
-    return { chargebacks: [] as CrediMatchChargeback[], orderCandidates: [] as CrediMatchOrderCandidate[], etag: undefined };
+    return emptyState();
   }
-  const encrypted = JSON.parse(await new Response(result.stream).text());
-  const decrypted = decryptPrivateData<CrediMatchChargeback[] | CrediMatchPersistedState>(encrypted);
-  const state = Array.isArray(decrypted)
-    ? { chargebacks: decrypted, orderCandidates: [] as CrediMatchOrderCandidate[] }
-    : { chargebacks: decrypted.chargebacks ?? [], orderCandidates: decrypted.orderCandidates ?? [] };
   return {
-    ...state,
-    etag: result.blob.etag,
+    ...decode(JSON.parse(await new Response(result.stream).text()) as EncryptedState),
+    revision: result.blob.etag,
   };
+}
+
+async function write(payload: EncryptedState, revision?: string) {
+  const supabase = supabaseConfiguration();
+  if (supabase) {
+    const updatedAt = new Date().toISOString();
+    const headers = {
+      apikey: supabase.key,
+      Authorization: `Bearer ${supabase.key}`,
+      "Content-Type": "application/json",
+      Prefer: revision ? "return=representation" : "resolution=ignore-duplicates,return=representation",
+    };
+    const response = await fetch(revision
+      ? `${supabase.url}/rest/v1/shield_ledger_state?id=eq.${supabaseStateId}&updated_at=eq.${encodeURIComponent(revision)}`
+      : `${supabase.url}/rest/v1/shield_ledger_state`, {
+      method: revision ? "PATCH" : "POST",
+      headers,
+      body: JSON.stringify(revision ? { ...payload, updated_at: updatedAt } : { id: supabaseStateId, ...payload, updated_at: updatedAt }),
+    });
+    if (!response.ok) throw new Error(`CREDIMATCH_PERSISTENCE_WRITE_FAILED_${response.status}`);
+    const rows = await response.json() as PersistedRow[];
+    if (rows.length !== 1) throw new Error("CREDIMATCH_PERSISTENCE_PRECONDITION_FAILED");
+    return;
+  }
+  await put(blobPath, JSON.stringify(payload), {
+    access: "private",
+    addRandomSuffix: false,
+    contentType: "application/json",
+    cacheControlMaxAge: 60,
+    ...(revision ? { ifMatch: revision } : { allowOverwrite: false }),
+  });
 }
 
 const keyFor = (item: CrediMatchChargeback) => `${item.tenantId}:${item.discrepancyId}`;
@@ -70,13 +128,7 @@ export async function persistCrediMatchChargebacks() {
         chargebacks: [...merged.values()],
         orderCandidates: [...mergedOrders.values()],
       };
-      await put(blobPath, JSON.stringify(encryptPrivateData(persisted)), {
-        access: "private",
-        addRandomSuffix: false,
-        contentType: "application/json",
-        cacheControlMaxAge: 60,
-        ...(current.etag ? { ifMatch: current.etag } : { allowOverwrite: false }),
-      });
+      await write(encryptPrivateData(persisted), current.revision);
       restoreCrediMatchChargebacks([...merged.values()]);
       restoreCrediMatchOrderCandidates([...mergedOrders.values()]);
       return;
