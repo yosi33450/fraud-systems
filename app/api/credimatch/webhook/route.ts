@@ -37,7 +37,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ accepted: true, processed: 0, duplicates: 0, ignoredEvents }, { status: 202 });
     }
 
-    await hydrateOperationalState();
+    await hydrateOperationalState({ refresh: true });
     let duplicates = 0;
     for (const discrepancyId of discrepancyIds) {
       const discrepancy = await getCrediMatchDiscrepancy(discrepancyId);

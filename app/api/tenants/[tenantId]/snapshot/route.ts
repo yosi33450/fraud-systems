@@ -6,7 +6,7 @@ import { hydrateGiftEvidence } from "@/lib/gift-card-persistence.server";
 export const dynamic = "force-dynamic";
 
 export async function GET(_request: Request, context: { params: Promise<{ tenantId: string }> }) {
-  await hydrateOperationalState();
+  await hydrateOperationalState({ refresh: true });
   const { tenantId } = await context.params;
   await hydrateGiftEvidence(tenantId);
   return NextResponse.json(getDashboardSnapshot(tenantId), {

@@ -151,7 +151,16 @@ async function saveEncryptedState(payload: EncryptedState) {
   await rename(temporaryFile, localFile);
 }
 
-export async function hydrateOperationalState() {
+export async function hydrateOperationalState(options: { refresh?: boolean } = {}) {
+  if (options.refresh) {
+    // A Vercel deployment can have several warm function instances. Their
+    // in-memory snapshots must not hide newer writes made by another instance.
+    await globalThis.__shieldLedgerPersistenceQueue;
+    const payload = await loadEncryptedState();
+    if (payload) restoreOperationalState(decryptPrivateData(payload));
+    globalThis.__shieldLedgerHydration = Promise.resolve();
+    return;
+  }
   if (!globalThis.__shieldLedgerHydration) {
     const hydration = (async () => {
     const payload = await loadEncryptedState();
