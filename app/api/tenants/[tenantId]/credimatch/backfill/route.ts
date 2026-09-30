@@ -46,10 +46,12 @@ export async function POST(request: Request, context: { params: Promise<{ tenant
         const hydrated = await Promise.all(batch.map(async (chargeback) => {
           try {
             const transaction = await getCrediMatchTransaction(chargeback.transactionId!);
+            const transactionTime = crediMatchTransactionTime(transaction);
             return {
               ...chargeback,
               providerUid: crediMatchTransactionUid(transaction) ?? chargeback.providerUid,
-              dealTime: crediMatchTransactionTime(transaction) ?? chargeback.dealTime,
+              dealTime: transactionTime ?? chargeback.dealTime,
+              dealTimePrecise: transactionTime ? true : chargeback.dealTimePrecise,
             };
           } catch (error) {
             console.warn("[credimatch-backfill] transaction uid unavailable", {

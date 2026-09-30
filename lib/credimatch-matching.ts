@@ -149,7 +149,7 @@ export function normalizeCrediMatchChargebacks(input: {
       transactionId,
       providerUid: text(transaction?.uid),
       receivedAt: input.receivedAt ?? new Date().toISOString(),
-      dealTime: text(transaction?.transactionDate) ?? text(item.dealTime), creationTime: text(item.creationTime), originalAmount: number(item.originalAmount), payments: number(item.payments) ?? number(transaction?.numberOfPayments),
+      dealTime: text(transaction?.transactionDate) ?? text(item.dealTime), dealTimePrecise: Boolean(text(transaction?.transactionDate)), creationTime: text(item.creationTime), originalAmount: number(item.originalAmount), payments: number(item.payments) ?? number(transaction?.numberOfPayments),
       status: description(item.discrepancyStatus), type: description(item.discrepancyType), creditCompany: description(item.creditCompany),
       last4Digits: last4(item.last4Digits ?? transaction?.creditCardSufix), terminalNumber: text(item.terminalNumber ?? transaction?.terminalNumber), confirmationNumber: text(item.confirmationNumber ?? transaction?.confirmationNumber),
       voucherNumber: text(item.voucherNumber), sessionNumber: text(item.sessionNumber), additionalDetails: text(item.additionalDetails),
@@ -191,7 +191,7 @@ export function matchCrediMatchChargeback(chargeback: CrediMatchChargeback, orde
       const terminal = sameNumber(chargeback.terminalNumber, payment.terminalNumber);
       const session = sameNumber(chargeback.sessionNumber, payment.sessionNumber);
       const distance = timeDistance(chargeback.dealTime, payment.processedAt ?? order.createdAt);
-      const preciseTime = distance <= 15 * 60_000;
+      const preciseTime = chargeback.dealTimePrecise === true && distance <= 15 * 60_000;
       const time = distance <= 3 * 86_400_000;
       if (provider) score += 100;
       if (confirmation) score += 80;

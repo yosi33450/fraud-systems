@@ -155,6 +155,7 @@ export interface CrediMatchChargeback {
   providerUid?: string;
   receivedAt: string;
   dealTime?: string;
+  dealTimePrecise?: boolean;
   creationTime?: string;
   originalAmount?: number;
   payments?: number;

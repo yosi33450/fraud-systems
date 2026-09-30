@@ -5,7 +5,7 @@ import { matchCrediMatchChargeback, normalizeCrediMatchChargebacks, paymentFinge
 
 const chargeback = (overrides = {}) => ({
   id: 'credimatch-21893735', tenantId: 'tenant-primary', discrepancyId: '21893735', receivedAt: '2026-09-29T12:00:00Z',
-  dealTime: '2026-09-28T10:01:00Z', originalAmount: 349.9, currency: 'ILS', last4Digits: '4242', confirmationNumber: 'AUTH-77',
+  dealTime: '2026-09-28T10:01:00Z', dealTimePrecise: true, originalAmount: 349.9, currency: 'ILS', last4Digits: '4242', confirmationNumber: 'AUTH-77',
   settlements: [], ...overrides,
 });
 
@@ -77,6 +77,7 @@ test('normalizes CrediMatch discrepancy and transaction responses without invent
   assert.equal(result[0].currency, 'ILS');
   assert.equal(result[0].providerUid, 'provider-uid-55');
   assert.equal(result[0].dealTime, '2026-09-28T10:02:00Z');
+  assert.equal(result[0].dealTimePrecise, true);
   assert.equal(result[0].settlements[0].expectedNetAmount, 330);
 });
 
@@ -118,6 +119,16 @@ test('does not auto-confirm when two orders have the same amount in the same tim
     last4Digits: undefined, confirmationNumber: undefined,
   }), [candidate, { ...candidate, shopifyOrderId: 'gid://shopify/Order/124', orderNumber: '#124' }]);
   assert.equal(match.confidence, 'possible');
+});
+
+test('does not treat a date-only midnight value as a precise transaction time', () => {
+  const match = matchCrediMatchChargeback(chargeback({
+    dealTime: '2026-09-28T00:00:00Z', dealTimePrecise: false,
+    last4Digits: undefined, confirmationNumber: undefined,
+  }), [order({
+    payments: [{ amount: 349.9, currency: 'ILS', processedAt: '2026-09-28T00:04:00Z' }],
+  })]);
+  assert.equal(match.confidence, 'unmatched');
 });
 
 test('rejects an amount-and-time-only candidate when the card suffix is unavailable', () => {
