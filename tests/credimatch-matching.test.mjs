@@ -69,13 +69,14 @@ test('normalizes CrediMatch discrepancy and transaction responses without invent
   const result = normalizeCrediMatchChargebacks({
     tenantId: 'tenant-primary', discrepancyId: '21893735', receivedAt: '2026-09-29T12:00:00Z',
     discrepancyPayload: { discrepancies: [{ id: 21893735, dealTime: '2026-09-28T10:01:00Z', originalAmount: 349.9, last4Digits: '4242', transactionId: 55, discrepancyType: { description: 'הכחשה' } }] },
-    transactionPayloads: [{ transactions: [{ id: 55, uid: 'provider-uid-55', grossAmount: 349.9, currency: { translatedCurrencyType: 'ILS' }, creditAndDebits: [{ expectedNetAmount: 330 }] }] }],
+    transactionPayloads: [{ transactions: [{ id: 55, uid: 'provider-uid-55', transactionDate: '2026-09-28T10:02:00Z', grossAmount: 349.9, currency: { translatedCurrencyType: 'ILS' }, creditAndDebits: [{ expectedNetAmount: 330 }] }] }],
   });
   assert.equal(result.length, 1);
   assert.equal(result[0].discrepancyId, '21893735');
   assert.equal(result[0].type, 'הכחשה');
   assert.equal(result[0].currency, 'ILS');
   assert.equal(result[0].providerUid, 'provider-uid-55');
+  assert.equal(result[0].dealTime, '2026-09-28T10:02:00Z');
   assert.equal(result[0].settlements[0].expectedNetAmount, 330);
 });
 
@@ -97,6 +98,26 @@ test('links an exact chargeback using authorization and amount', () => {
   assert.equal(match.orderNumber, '#123');
   assert.ok(match.reasons.includes('מספר אישור זהה'));
   assert.ok(match.comparisons.find((item) => item.key === 'amount')?.matched);
+});
+
+test('links a unique order using exact amount and a transaction time within fifteen minutes', () => {
+  const match = matchCrediMatchChargeback(chargeback({
+    last4Digits: undefined, confirmationNumber: undefined,
+  }), [order({
+    payments: [{ amount: 349.9, currency: 'ILS', processedAt: '2026-09-28T10:05:00Z' }],
+  })]);
+  assert.equal(match.confidence, 'exact');
+  assert.equal(match.orderNumber, '#123');
+});
+
+test('does not auto-confirm when two orders have the same amount in the same time window', () => {
+  const candidate = order({
+    payments: [{ amount: 349.9, currency: 'ILS', processedAt: '2026-09-28T10:05:00Z' }],
+  });
+  const match = matchCrediMatchChargeback(chargeback({
+    last4Digits: undefined, confirmationNumber: undefined,
+  }), [candidate, { ...candidate, shopifyOrderId: 'gid://shopify/Order/124', orderNumber: '#124' }]);
+  assert.equal(match.confidence, 'possible');
 });
 
 test('rejects an amount-and-time-only candidate when the card suffix is unavailable', () => {

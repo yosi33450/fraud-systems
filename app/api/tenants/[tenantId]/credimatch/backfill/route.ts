@@ -4,7 +4,7 @@ import { hydrateOperationalState } from "@/lib/persistence.server";
 import { getFreshStoreConnection } from "@/lib/shopify-connection.server";
 import { syncCrediMatchOrderCandidatesPage } from "@/lib/shopify-sync.server";
 import { getCrediMatchTransaction } from "@/lib/credimatch.server";
-import { crediMatchTransactionUid } from "@/lib/credimatch-matching";
+import { crediMatchTransactionTime, crediMatchTransactionUid } from "@/lib/credimatch-matching";
 import { exportCrediMatchChargebacks, restoreCrediMatchChargebacks } from "@/lib/operational-store";
 
 export const runtime = "nodejs";
@@ -39,14 +39,18 @@ export async function POST(request: Request, context: { params: Promise<{ tenant
     await hydrateOperationalState({ refresh: true });
     await hydrateCrediMatchChargebacks();
     if (!body.after) {
-      const missingProviderUids = exportCrediMatchChargebacks().filter((chargeback) =>
-        chargeback.tenantId === tenantId && chargeback.transactionId && !chargeback.providerUid);
-      for (let index = 0; index < missingProviderUids.length; index += 5) {
-        const batch = missingProviderUids.slice(index, index + 5);
+      const apiChargebacks = exportCrediMatchChargebacks().filter((chargeback) =>
+        chargeback.tenantId === tenantId && chargeback.transactionId);
+      for (let index = 0; index < apiChargebacks.length; index += 5) {
+        const batch = apiChargebacks.slice(index, index + 5);
         const hydrated = await Promise.all(batch.map(async (chargeback) => {
           try {
             const transaction = await getCrediMatchTransaction(chargeback.transactionId!);
-            return { ...chargeback, providerUid: crediMatchTransactionUid(transaction) };
+            return {
+              ...chargeback,
+              providerUid: crediMatchTransactionUid(transaction) ?? chargeback.providerUid,
+              dealTime: crediMatchTransactionTime(transaction) ?? chargeback.dealTime,
+            };
           } catch (error) {
             console.warn("[credimatch-backfill] transaction uid unavailable", {
               transactionId: chargeback.transactionId,

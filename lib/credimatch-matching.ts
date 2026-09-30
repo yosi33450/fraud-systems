@@ -122,6 +122,11 @@ export function crediMatchTransactionUid(payload: unknown): string | undefined {
   return text(transaction?.uid);
 }
 
+export function crediMatchTransactionTime(payload: unknown): string | undefined {
+  const transaction = array(record(payload)?.transactions).map(record).find((item): item is UnknownRecord => Boolean(item));
+  return text(transaction?.transactionDate);
+}
+
 export function normalizeCrediMatchChargebacks(input: {
   tenantId: string;
   discrepancyId: string;
@@ -144,7 +149,7 @@ export function normalizeCrediMatchChargebacks(input: {
       transactionId,
       providerUid: text(transaction?.uid),
       receivedAt: input.receivedAt ?? new Date().toISOString(),
-      dealTime: text(item.dealTime) ?? text(transaction?.transactionDate), creationTime: text(item.creationTime), originalAmount: number(item.originalAmount), payments: number(item.payments) ?? number(transaction?.numberOfPayments),
+      dealTime: text(transaction?.transactionDate) ?? text(item.dealTime), creationTime: text(item.creationTime), originalAmount: number(item.originalAmount), payments: number(item.payments) ?? number(transaction?.numberOfPayments),
       status: description(item.discrepancyStatus), type: description(item.discrepancyType), creditCompany: description(item.creditCompany),
       last4Digits: last4(item.last4Digits ?? transaction?.creditCardSufix), terminalNumber: text(item.terminalNumber ?? transaction?.terminalNumber), confirmationNumber: text(item.confirmationNumber ?? transaction?.confirmationNumber),
       voucherNumber: text(item.voucherNumber), sessionNumber: text(item.sessionNumber), additionalDetails: text(item.additionalDetails),
@@ -180,11 +185,13 @@ export function matchCrediMatchChargeback(chargeback: CrediMatchChargeback, orde
       const voucher = sameNumber(chargeback.voucherNumber, payment.voucherNumber)
         || sameNumber(chargeback.voucherNumber, payment.gatewayReference);
       const card = Boolean(chargeback.last4Digits && payment.last4 && chargeback.last4Digits === payment.last4);
+      const cardConflict = Boolean(chargeback.last4Digits && payment.last4 && chargeback.last4Digits !== payment.last4);
       const amountMatch = sameMoney(amount, paymentAmount);
       const currency = Boolean(chargeback.currency && (payment.currency ?? order.currency) && chargeback.currency === (payment.currency ?? order.currency)?.toUpperCase());
       const terminal = sameNumber(chargeback.terminalNumber, payment.terminalNumber);
       const session = sameNumber(chargeback.sessionNumber, payment.sessionNumber);
       const distance = timeDistance(chargeback.dealTime, payment.processedAt ?? order.createdAt);
+      const preciseTime = distance <= 15 * 60_000;
       const time = distance <= 3 * 86_400_000;
       if (provider) score += 100;
       if (confirmation) score += 80;
@@ -212,7 +219,7 @@ export function matchCrediMatchChargeback(chargeback: CrediMatchChargeback, orde
       // charged amount. Amount and date alone create many false positives,
       // while a missing Shopify card suffix is not evidence of a match.
       const cardAndAmount = card && amountMatch;
-      const exact = (provider && amountMatch) || (cardAndAmount && (confirmation || voucher));
+      const exact = (provider && amountMatch) || (cardAndAmount && (confirmation || voucher)) || (amountMatch && preciseTime && !cardConflict);
       const strong = cardAndAmount && (confirmation || voucher || distance <= 86_400_000 || score >= 65);
       const possible = cardAndAmount && time;
       return { order, score: Math.min(score, 100), comparisons, reasons, exact, strong, possible };
@@ -221,8 +228,9 @@ export function matchCrediMatchChargeback(chargeback: CrediMatchChargeback, orde
 
   const best = candidates[0];
   if (!best || (!best.exact && !best.strong && !best.possible)) return { confidence: "unmatched", score: 0, reasons: [], comparisons: [] };
+  const exactAlternative = best.exact && candidates.slice(1).some((candidate) => candidate.exact);
   const closeAlternative = candidates[1] && best.score - candidates[1].score < 10;
-  const confidence = best.exact && !closeAlternative ? "exact" : best.strong && !closeAlternative ? "strong" : "possible";
+  const confidence = best.exact && !exactAlternative ? "exact" : best.strong && !closeAlternative ? "strong" : "possible";
   return {
     confidence, score: best.score, orderId: best.order.shopifyOrderId, orderNumber: best.order.orderNumber,
     storeId: best.order.storeId, storeName: best.order.storeName, customer: best.order.customer, email: best.order.email,
