@@ -3,6 +3,9 @@ import { hydrateCrediMatchChargebacks, persistCrediMatchChargebacks } from "@/li
 import { hydrateOperationalState } from "@/lib/persistence.server";
 import { getFreshStoreConnection } from "@/lib/shopify-connection.server";
 import { syncCrediMatchOrderCandidatesPage } from "@/lib/shopify-sync.server";
+import { getCrediMatchTransaction } from "@/lib/credimatch.server";
+import { crediMatchTransactionUid } from "@/lib/credimatch-matching";
+import { exportCrediMatchChargebacks, restoreCrediMatchChargebacks } from "@/lib/operational-store";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -35,6 +38,30 @@ export async function POST(request: Request, context: { params: Promise<{ tenant
 
     await hydrateOperationalState({ refresh: true });
     await hydrateCrediMatchChargebacks();
+    if (!body.after) {
+      const missingProviderUids = exportCrediMatchChargebacks().filter((chargeback) =>
+        chargeback.tenantId === tenantId && chargeback.transactionId && !chargeback.providerUid);
+      for (let index = 0; index < missingProviderUids.length; index += 5) {
+        const batch = missingProviderUids.slice(index, index + 5);
+        const hydrated = await Promise.all(batch.map(async (chargeback) => {
+          try {
+            const transaction = await getCrediMatchTransaction(chargeback.transactionId!);
+            return { ...chargeback, providerUid: crediMatchTransactionUid(transaction) };
+          } catch (error) {
+            console.warn("[credimatch-backfill] transaction uid unavailable", {
+              transactionId: chargeback.transactionId,
+              code: error instanceof Error ? error.message : "UNKNOWN",
+            });
+            return chargeback;
+          }
+        }));
+        restoreCrediMatchChargebacks(hydrated);
+      }
+      console.info("[credimatch-backfill] CrediMatch uid coverage", {
+        chargebacks: exportCrediMatchChargebacks().filter((item) => item.tenantId === tenantId).length,
+        providerUids: exportCrediMatchChargebacks().filter((item) => item.tenantId === tenantId && item.providerUid).length,
+      });
+    }
     const connection = await getFreshStoreConnection(tenantId, body.storeId);
     const result = await syncCrediMatchOrderCandidatesPage({
       tenantId,

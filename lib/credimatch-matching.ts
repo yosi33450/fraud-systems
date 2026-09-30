@@ -67,12 +67,13 @@ const receiptValue = (receipt: unknown, keys: string[]) => {
 };
 
 export function paymentFingerprintsFromShopify(
-  transactions: Array<{ id?: string; gateway_reference?: string; gateway?: string; formatted_gateway?: string; account_number?: string; payment_details?: { number?: string | null } | null; authorization_code?: string; amount?: string | number; processed_at?: string; receipt?: unknown }>,
+  transactions: Array<{ id?: string; payment_id?: string; gateway_reference?: string; gateway?: string; formatted_gateway?: string; account_number?: string; payment_details?: { number?: string | null } | null; authorization_code?: string; amount?: string | number; processed_at?: string; receipt?: unknown }>,
   fallbackCurrency?: string,
 ): OrderPaymentFingerprint[] {
   return transactions.map((transaction) => ({
     transactionId: text(transaction.id),
-    gatewayReference: text(transaction.gateway_reference),
+    paymentId: text(transaction.payment_id),
+    gatewayReference: text(transaction.gateway_reference ?? receiptValue(transaction.receipt, ["payment_id", "paymentId", "uid", "transaction_uid", "transactionUid"])),
     gateway: text(transaction.formatted_gateway ?? transaction.gateway),
     amount: number(transaction.amount),
     currency: normalizedCurrency(receiptValue(transaction.receipt, ["currency", "currencyCode"])) ?? normalizedCurrency(fallbackCurrency),
@@ -116,6 +117,11 @@ export function crediMatchTransactionIds(payload: unknown): string[] {
   return [...new Set(array(root?.discrepancies).map((entry) => text(record(entry)?.transactionId)).filter((value): value is string => Boolean(value)))];
 }
 
+export function crediMatchTransactionUid(payload: unknown): string | undefined {
+  const transaction = array(record(payload)?.transactions).map(record).find((item): item is UnknownRecord => Boolean(item));
+  return text(transaction?.uid);
+}
+
 export function normalizeCrediMatchChargebacks(input: {
   tenantId: string;
   discrepancyId: string;
@@ -136,6 +142,7 @@ export function normalizeCrediMatchChargebacks(input: {
       tenantId: input.tenantId,
       discrepancyId: text(item.id) ?? input.discrepancyId,
       transactionId,
+      providerUid: text(transaction?.uid),
       receivedAt: input.receivedAt ?? new Date().toISOString(),
       dealTime: text(item.dealTime) ?? text(transaction?.transactionDate), creationTime: text(item.creationTime), originalAmount: number(item.originalAmount), payments: number(item.payments) ?? number(transaction?.numberOfPayments),
       status: description(item.discrepancyStatus), type: description(item.discrepancyType), creditCompany: description(item.creditCompany),
@@ -166,6 +173,8 @@ export function matchCrediMatchChargeback(chargeback: CrediMatchChargeback, orde
       let score = 0;
       const amount = chargeback.originalAmount ?? chargeback.grossAmount;
       const paymentAmount = payment.amount ?? order.amount;
+      const provider = sameNumber(chargeback.providerUid, payment.paymentId)
+        || sameNumber(chargeback.providerUid, payment.gatewayReference);
       const confirmation = sameNumber(chargeback.confirmationNumber, payment.confirmationNumber)
         || sameNumber(chargeback.confirmationNumber, payment.gatewayReference);
       const voucher = sameNumber(chargeback.voucherNumber, payment.voucherNumber)
@@ -177,6 +186,7 @@ export function matchCrediMatchChargeback(chargeback: CrediMatchChargeback, orde
       const session = sameNumber(chargeback.sessionNumber, payment.sessionNumber);
       const distance = timeDistance(chargeback.dealTime, payment.processedAt ?? order.createdAt);
       const time = distance <= 3 * 86_400_000;
+      if (provider) score += 100;
       if (confirmation) score += 80;
       if (voucher) score += 75;
       if (card) score += 25;
@@ -188,6 +198,7 @@ export function matchCrediMatchChargeback(chargeback: CrediMatchChargeback, orde
       const add = (key: ChargebackMatchComparison["key"], label: string, matched: boolean, crediMatchValue?: string, shopifyValue?: string) => {
         if (crediMatchValue || shopifyValue) comparisons.push({ key, label, matched, crediMatchValue, shopifyValue });
       };
+      add("provider", "מזהה עסקה", provider, chargeback.providerUid, payment.gatewayReference ?? payment.paymentId);
       add("confirmation", "מספר אישור", confirmation, chargeback.confirmationNumber, payment.confirmationNumber ?? payment.gatewayReference);
       add("voucher", "מספר שובר", voucher, chargeback.voucherNumber, payment.voucherNumber ?? payment.gatewayReference);
       add("last4", "4 ספרות אחרונות", card, chargeback.last4Digits ? `•••• ${chargeback.last4Digits}` : undefined, payment.last4 ? `•••• ${payment.last4}` : undefined);
@@ -196,12 +207,12 @@ export function matchCrediMatchChargeback(chargeback: CrediMatchChargeback, orde
       add("time", "מועד העסקה", time, chargeback.dealTime, payment.processedAt ?? order.createdAt);
       add("terminal", "מסוף", terminal, chargeback.terminalNumber, payment.terminalNumber);
       add("session", "סשן", session, chargeback.sessionNumber, payment.sessionNumber);
-      const reasons = [confirmation && "מספר אישור זהה", voucher && "מספר שובר זהה", card && "4 ספרות אחרונות זהות", amountMatch && "סכום זהה", time && `מועד עסקה ${displayTime(distance)}`].filter((value): value is string => Boolean(value));
+      const reasons = [provider && "מזהה עסקה זהה", confirmation && "מספר אישור זהה", voucher && "מספר שובר זהה", card && "4 ספרות אחרונות זהות", amountMatch && "סכום זהה", time && `מועד עסקה ${displayTime(distance)}`].filter((value): value is string => Boolean(value));
       // A chargeback candidate must refer to the same card and the same
       // charged amount. Amount and date alone create many false positives,
       // while a missing Shopify card suffix is not evidence of a match.
       const cardAndAmount = card && amountMatch;
-      const exact = cardAndAmount && (confirmation || voucher);
+      const exact = (provider && amountMatch) || (cardAndAmount && (confirmation || voucher));
       const strong = cardAndAmount && (confirmation || voucher || distance <= 86_400_000 || score >= 65);
       const possible = cardAndAmount && time;
       return { order, score: Math.min(score, 100), comparisons, reasons, exact, strong, possible };

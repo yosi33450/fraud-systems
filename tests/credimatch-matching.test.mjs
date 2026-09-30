@@ -22,7 +22,7 @@ test('extracts a safe Shopify payment fingerprint from receipt data', () => {
     receipt: JSON.stringify({ authorization_code: 'AUTH-77', voucher_number: 9988, terminal_id: '42' }),
   }], 'ILS'), [{
     transactionId: 'gid://shopify/OrderTransaction/1', gateway: 'PayPlus', amount: 349.9, currency: 'ILS', processedAt: '2026-09-28T10:00:30Z',
-    gatewayReference: undefined, last4: '4242', confirmationNumber: 'AUTH-77', voucherNumber: '9988', terminalNumber: '42', sessionNumber: undefined,
+    paymentId: undefined, gatewayReference: undefined, last4: '4242', confirmationNumber: 'AUTH-77', voucherNumber: '9988', terminalNumber: '42', sessionNumber: undefined,
   }]);
 });
 
@@ -69,13 +69,26 @@ test('normalizes CrediMatch discrepancy and transaction responses without invent
   const result = normalizeCrediMatchChargebacks({
     tenantId: 'tenant-primary', discrepancyId: '21893735', receivedAt: '2026-09-29T12:00:00Z',
     discrepancyPayload: { discrepancies: [{ id: 21893735, dealTime: '2026-09-28T10:01:00Z', originalAmount: 349.9, last4Digits: '4242', transactionId: 55, discrepancyType: { description: 'הכחשה' } }] },
-    transactionPayloads: [{ transactions: [{ id: 55, grossAmount: 349.9, currency: { translatedCurrencyType: 'ILS' }, creditAndDebits: [{ expectedNetAmount: 330 }] }] }],
+    transactionPayloads: [{ transactions: [{ id: 55, uid: 'provider-uid-55', grossAmount: 349.9, currency: { translatedCurrencyType: 'ILS' }, creditAndDebits: [{ expectedNetAmount: 330 }] }] }],
   });
   assert.equal(result.length, 1);
   assert.equal(result[0].discrepancyId, '21893735');
   assert.equal(result[0].type, 'הכחשה');
   assert.equal(result[0].currency, 'ILS');
+  assert.equal(result[0].providerUid, 'provider-uid-55');
   assert.equal(result[0].settlements[0].expectedNetAmount, 330);
+});
+
+test('links an exact chargeback using the shared provider uid even when Shopify hides card details', () => {
+  const match = matchCrediMatchChargeback(chargeback({
+    providerUid: 'payplus-uid-123', last4Digits: '1944', confirmationNumber: undefined,
+  }), [order({
+    amount: 349.9,
+    payments: [{ paymentId: 'payplus-uid-123', amount: 349.9, currency: 'ILS', processedAt: '2026-09-28T10:00:30Z' }],
+  })]);
+  assert.equal(match.confidence, 'exact');
+  assert.equal(match.orderNumber, '#123');
+  assert.ok(match.reasons.includes('מזהה עסקה זהה'));
 });
 
 test('links an exact chargeback using authorization and amount', () => {

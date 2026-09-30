@@ -94,6 +94,7 @@ export interface FraudCase {
 
 export interface OrderPaymentFingerprint {
   transactionId?: string;
+  paymentId?: string;
   gatewayReference?: string;
   gateway?: string;
   amount?: number;
@@ -109,7 +110,7 @@ export interface OrderPaymentFingerprint {
 export type ChargebackMatchConfidence = "exact" | "strong" | "possible" | "unmatched";
 
 export interface ChargebackMatchComparison {
-  key: "confirmation" | "voucher" | "last4" | "amount" | "currency" | "time" | "terminal" | "session";
+  key: "provider" | "confirmation" | "voucher" | "last4" | "amount" | "currency" | "time" | "terminal" | "session";
   label: string;
   matched: boolean;
   crediMatchValue?: string;
@@ -151,6 +152,7 @@ export interface CrediMatchChargeback {
   tenantId: string;
   discrepancyId: string;
   transactionId?: string;
+  providerUid?: string;
   receivedAt: string;
   dealTime?: string;
   creationTime?: string;

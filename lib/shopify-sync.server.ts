@@ -553,6 +553,7 @@ export async function syncCrediMatchOrderCandidatesPage(input: {
     createdAt: order.createdAt,
     payments: [...paymentFingerprintsFromShopify(order.transactions.map((transaction) => ({
       id: transaction.id,
+      payment_id: transaction.paymentId ?? undefined,
       gateway: transaction.gateway ?? undefined,
       formatted_gateway: transaction.formattedGateway ?? undefined,
       account_number: transaction.accountNumber ?? undefined,
@@ -586,6 +587,7 @@ export async function syncCrediMatchOrderCandidatesPage(input: {
     const crediMatchTransactionIds = new Set(chargebacks.map((item) => normalizeDiagnosticId(item.transactionId)).filter(Boolean));
     const crediMatchConfirmationNumbers = new Set(chargebacks.map((item) => normalizeDiagnosticId(item.confirmationNumber)).filter(Boolean));
     const crediMatchVoucherNumbers = new Set(chargebacks.map((item) => normalizeDiagnosticId(item.voucherNumber)).filter(Boolean));
+    const crediMatchProviderUids = new Set(chargebacks.map((item) => normalizeDiagnosticId(item.providerUid)).filter(Boolean));
     const shopifyPaymentIds = transactions.map((item) => item.paymentId).filter((value): value is string => Boolean(value));
     const identifierMatches = (values: string[], expected: Set<string>) => values.filter((value) => expected.has(normalizeDiagnosticId(value))).length;
     console.info("[credimatch-backfill] Shopify payment field coverage", {
@@ -600,9 +602,11 @@ export async function syncCrediMatchOrderCandidatesPage(input: {
       paymentIdMatchesCrediMatchTransaction: identifierMatches(shopifyPaymentIds, crediMatchTransactionIds),
       paymentIdMatchesCrediMatchConfirmation: identifierMatches(shopifyPaymentIds, crediMatchConfirmationNumbers),
       paymentIdMatchesCrediMatchVoucher: identifierMatches(shopifyPaymentIds, crediMatchVoucherNumbers),
+      paymentIdMatchesCrediMatchUid: identifierMatches(shopifyPaymentIds, crediMatchProviderUids),
       receiptPaymentIdMatchesCrediMatchTransaction: identifierMatches(receiptPaymentIds, crediMatchTransactionIds),
       receiptPaymentIdMatchesCrediMatchConfirmation: identifierMatches(receiptPaymentIds, crediMatchConfirmationNumbers),
       receiptPaymentIdMatchesCrediMatchVoucher: identifierMatches(receiptPaymentIds, crediMatchVoucherNumbers),
+      receiptPaymentIdMatchesCrediMatchUid: identifierMatches(receiptPaymentIds, crediMatchProviderUids),
       receiptKeys: [...receiptKeys].slice(0, 40),
     });
   }
