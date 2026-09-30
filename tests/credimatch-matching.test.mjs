@@ -1,7 +1,7 @@
 import './register-ts-alias.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { matchCrediMatchChargeback, normalizeCrediMatchChargebacks, paymentFingerprintsFromShopify } from '../lib/credimatch-matching.ts';
+import { matchCrediMatchChargeback, normalizeCrediMatchChargebacks, paymentFingerprintsFromShopify, shopifyChargebackSearchQuery } from '../lib/credimatch-matching.ts';
 
 const chargeback = (overrides = {}) => ({
   id: 'credimatch-21893735', tenantId: 'tenant-primary', discrepancyId: '21893735', receivedAt: '2026-09-29T12:00:00Z',
@@ -42,6 +42,15 @@ test('extracts the last four digits from Shopify card payment details when accou
   }], 'ILS');
   assert.equal(payment.last4, '1944');
   assert.equal('payment_details' in payment, false);
+});
+
+test('builds a targeted Shopify search for known chargeback card suffixes', () => {
+  const query = shopifyChargebackSearchQuery({
+    since: '2026-01-01T00:00:00.000Z', until: '2026-09-30T00:00:00.000Z',
+    chargebacks: [{ last4Digits: '1944' }, { last4Digits: '•••• 1944' }, { last4Digits: '3136' }],
+  });
+  assert.match(query, /credit_card_last4:1944 OR credit_card_last4:3136/);
+  assert.equal((query.match(/credit_card_last4:1944/g) ?? []).length, 1);
 });
 
 test('normalizes CrediMatch discrepancy and transaction responses without inventing fields', () => {

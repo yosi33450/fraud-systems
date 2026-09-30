@@ -81,6 +81,18 @@ export function paymentFingerprintsFromShopify(
   })).filter((payment) => Object.values(payment).some(Boolean));
 }
 
+export function shopifyChargebackSearchQuery(input: {
+  since: string;
+  until: string;
+  chargebacks: Array<Pick<CrediMatchChargeback, "last4Digits">>;
+}) {
+  const suffixes = [...new Set(input.chargebacks.map((item) => last4(item.last4Digits)).filter((value): value is string => /^\d{4}$/.test(value ?? "")))];
+  const dateRange = `created_at:>=${input.since} created_at:<=${input.until}`;
+  return suffixes.length
+    ? `${dateRange} (${suffixes.map((value) => `credit_card_last4:${value}`).join(" OR ")})`
+    : dateRange;
+}
+
 const settlement = (value: unknown): CrediMatchSettlement | null => {
   const item = record(value);
   if (!item) return null;

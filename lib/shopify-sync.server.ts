@@ -1,6 +1,6 @@
 import { completeHistoricalSync, exportCrediMatchChargebacks, failHistoricalSync, ingestShopifyOrder, openCaseOrderReferences, replaceGiftCardRegistry, restoreCrediMatchOrderCandidates, upsertGiftCardRegistry, type GiftCardRegistryInput, type ShopifyOrderPayload } from "@/lib/operational-store";
 import { matchCrediMatchChargeback } from "@/lib/credimatch-matching";
-import { paymentFingerprintsFromShopify } from "@/lib/credimatch-matching";
+import { paymentFingerprintsFromShopify, shopifyChargebackSearchQuery } from "@/lib/credimatch-matching";
 import type { CrediMatchOrderCandidate, Store } from "@/lib/types";
 import { shopifyAdminRequest } from "@/lib/shopify-admin.server";
 import { selectCustomerEmail } from "@/lib/customer-identity";
@@ -440,7 +440,11 @@ export async function syncCrediMatchOrderCandidatesPage(input: {
     variables: {
       first: 200,
       after: input.after ?? null,
-      query: `created_at:>=${input.since} created_at:<=${input.until}`,
+      query: shopifyChargebackSearchQuery({
+        since: input.since,
+        until: input.until,
+        chargebacks: exportCrediMatchChargebacks().filter((item) => item.tenantId === input.tenantId),
+      }),
     },
   });
 
@@ -469,7 +473,7 @@ export async function syncCrediMatchOrderCandidatesPage(input: {
       receipt: transaction.receiptJson,
     })), order.totalPriceSet.shopMoney.currencyCode),
   }));
-  const chargebacks = exportCrediMatchChargebacks();
+  const chargebacks = exportCrediMatchChargebacks().filter((item) => item.tenantId === input.tenantId);
   restoreCrediMatchOrderCandidates(candidates.filter((candidate) =>
     chargebacks.some((chargeback) => matchCrediMatchChargeback(chargeback, [candidate]).confidence !== "unmatched")));
 
