@@ -238,6 +238,18 @@ export function restoreOperationalState(snapshot: PersistedOperationalState) {
   migrateLegacyRules();
 }
 
+export function exportCrediMatchChargebacks() {
+  return clone(state.chargebacks);
+}
+
+export function restoreCrediMatchChargebacks(chargebacks: CrediMatchChargeback[]) {
+  for (const chargeback of clone(chargebacks)) {
+    const index = state.chargebacks.findIndex((item) => item.tenantId === chargeback.tenantId && item.discrepancyId === chargeback.discrepancyId);
+    if (index < 0) state.chargebacks.push(chargeback);
+    else state.chargebacks[index] = { ...state.chargebacks[index], ...chargeback };
+  }
+}
+
 const normalizeEmail = (value: string) => value.trim().toLowerCase();
 const normalizePhone = (value: string) => value.replace(/\D/g, "");
 const normalizeAddress = (value: string) => value.trim().toLowerCase().replace(/\s+/g, " ");
@@ -1365,7 +1377,8 @@ export function recordCrediMatchDiscrepancy(discrepancyId: string, payload: unkn
   const eventKey = `credimatch:discrepancy:${discrepancyId}`;
   const tenantIds = [...new Set(state.stores.map((store) => store.tenantId))];
   if (tenantIds.length !== 1) throw new Error(tenantIds.length ? "CREDIMATCH_TENANT_AMBIGUOUS" : "CREDIMATCH_TENANT_NOT_FOUND");
-  const duplicate = state.webhookIds.has(eventKey);
+  const duplicate = state.webhookIds.has(eventKey)
+    || state.chargebacks.some((item) => item.discrepancyId === discrepancyId);
   const receivedAt = state.audit.find((entry) => entry.action === "credimatch.chargeback.received" && entry.resourceId === discrepancyId)?.createdAt ?? new Date().toISOString();
   const normalized = normalizeCrediMatchChargebacks({ tenantId: tenantIds[0], discrepancyId, discrepancyPayload: payload, transactionPayloads, receivedAt });
   for (const chargeback of normalized) {

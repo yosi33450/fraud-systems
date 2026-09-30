@@ -4,6 +4,7 @@ import { crediMatchTransactionIds } from "@/lib/credimatch-matching";
 import { CrediMatchWebhookValidationError, parseCrediMatchWebhook } from "@/lib/credimatch-webhook";
 import { recordCrediMatchDiscrepancy } from "@/lib/operational-store";
 import { hydrateOperationalState, persistOperationalState } from "@/lib/persistence.server";
+import { hydrateCrediMatchChargebacks, persistCrediMatchChargebacks } from "@/lib/credimatch-persistence.server";
 
 export const runtime = "nodejs";
 
@@ -38,6 +39,7 @@ export async function POST(request: Request) {
     }
 
     await hydrateOperationalState({ refresh: true });
+    await hydrateCrediMatchChargebacks();
     let duplicates = 0;
     for (const discrepancyId of discrepancyIds) {
       const discrepancy = await getCrediMatchDiscrepancy(discrepancyId);
@@ -46,6 +48,7 @@ export async function POST(request: Request) {
       if (result.duplicate) duplicates += 1;
       console.info("[credimatch-webhook] discrepancy received", { discrepancyId, duplicate: result.duplicate, transactions: transactions.length, response: responseShape(discrepancy) });
     }
+    await persistCrediMatchChargebacks();
     await persistOperationalState();
     return NextResponse.json({ accepted: true, processed: discrepancyIds.length - duplicates, duplicates, ignoredEvents }, { status: 202 });
   } catch (error) {
