@@ -84,12 +84,14 @@ export function paymentFingerprintsFromShopify(
 export function shopifyChargebackSearchQuery(input: {
   since: string;
   until: string;
-  chargebacks: Array<Pick<CrediMatchChargeback, "last4Digits">>;
+  chargebacks: Array<Pick<CrediMatchChargeback, "originalAmount" | "grossAmount">>;
 }) {
-  const suffixes = [...new Set(input.chargebacks.map((item) => last4(item.last4Digits)).filter((value): value is string => /^\d{4}$/.test(value ?? "")))];
+  const amounts = [...new Set(input.chargebacks.map((item) => item.originalAmount ?? item.grossAmount)
+    .filter((value): value is number => Number.isFinite(value))
+    .map((value) => Math.abs(value).toFixed(2)))];
   const dateRange = `created_at:>=${input.since} created_at:<=${input.until}`;
-  return suffixes.length
-    ? `${dateRange} (${suffixes.map((value) => `credit_card_last4:${value}`).join(" OR ")})`
+  return amounts.length
+    ? `${dateRange} (${amounts.map((value) => `current_total_price:${value}`).join(" OR ")})`
     : dateRange;
 }
 

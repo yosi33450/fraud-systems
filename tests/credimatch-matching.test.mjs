@@ -44,13 +44,13 @@ test('extracts the last four digits from Shopify card payment details when accou
   assert.equal('payment_details' in payment, false);
 });
 
-test('builds a targeted Shopify search for known chargeback card suffixes', () => {
+test('builds a targeted Shopify search for known chargeback amounts', () => {
   const query = shopifyChargebackSearchQuery({
     since: '2026-01-01T00:00:00.000Z', until: '2026-09-30T00:00:00.000Z',
-    chargebacks: [{ last4Digits: '1944' }, { last4Digits: '•••• 1944' }, { last4Digits: '3136' }],
+    chargebacks: [{ originalAmount: 445 }, { originalAmount: 445 }, { grossAmount: -314.5 }],
   });
-  assert.match(query, /credit_card_last4:1944 OR credit_card_last4:3136/);
-  assert.equal((query.match(/credit_card_last4:1944/g) ?? []).length, 1);
+  assert.match(query, /current_total_price:445\.00 OR current_total_price:314\.50/);
+  assert.equal((query.match(/current_total_price:445\.00/g) ?? []).length, 1);
 });
 
 test('normalizes CrediMatch discrepancy and transaction responses without inventing fields', () => {
