@@ -77,6 +77,7 @@ export const CREDIMATCH_ORDER_CANDIDATES_QUERY = `#graphql
           id
           gateway
           formattedGateway
+          paymentId
           accountNumber
           authorizationCode
           processedAt
@@ -413,6 +414,7 @@ type CrediMatchOrderCandidateNode = {
     id: string;
     gateway?: string | null;
     formattedGateway?: string | null;
+    paymentId?: string | null;
     accountNumber?: string | null;
     authorizationCode?: string | null;
     paymentDetails?: { __typename?: string; number?: string | null; company?: string | null } | null;
@@ -564,15 +566,28 @@ export async function syncCrediMatchOrderCandidatesPage(input: {
   if (!input.after) {
     const transactions = data.orders.nodes.flatMap((order) => order.transactions);
     const receiptKeys = new Set<string>();
+    const receiptPaymentIds: string[] = [];
     for (const transaction of transactions) {
       let receipt: unknown = transaction.receiptJson;
       if (typeof receipt === "string") {
         try { receipt = JSON.parse(receipt); } catch { receipt = undefined; }
       }
       if (receipt && typeof receipt === "object" && !Array.isArray(receipt)) {
-        for (const key of Object.keys(receipt).slice(0, 40)) receiptKeys.add(key);
+        const receiptRecord = receipt as Record<string, unknown>;
+        for (const key of Object.keys(receiptRecord).slice(0, 40)) receiptKeys.add(key);
+        const receiptPaymentId = receiptRecord.payment_id;
+        if (typeof receiptPaymentId === "string" || typeof receiptPaymentId === "number") {
+          receiptPaymentIds.push(String(receiptPaymentId));
+        }
       }
     }
+    const normalizeDiagnosticId = (value: unknown) => String(value ?? "").replace(/[^a-z0-9]/gi, "").replace(/^0+(?=\d)/, "").toLowerCase();
+    const chargebacks = exportCrediMatchChargebacks().filter((item) => item.tenantId === input.tenantId);
+    const crediMatchTransactionIds = new Set(chargebacks.map((item) => normalizeDiagnosticId(item.transactionId)).filter(Boolean));
+    const crediMatchConfirmationNumbers = new Set(chargebacks.map((item) => normalizeDiagnosticId(item.confirmationNumber)).filter(Boolean));
+    const crediMatchVoucherNumbers = new Set(chargebacks.map((item) => normalizeDiagnosticId(item.voucherNumber)).filter(Boolean));
+    const shopifyPaymentIds = transactions.map((item) => item.paymentId).filter((value): value is string => Boolean(value));
+    const identifierMatches = (values: string[], expected: Set<string>) => values.filter((value) => expected.has(normalizeDiagnosticId(value))).length;
     console.info("[credimatch-backfill] Shopify payment field coverage", {
       orders: data.orders.nodes.length,
       transactions: transactions.length,
@@ -580,6 +595,14 @@ export async function syncCrediMatchOrderCandidatesPage(input: {
       cardPaymentDetails: transactions.filter((item) => item.paymentDetails?.__typename === "CardPaymentDetails").length,
       paymentDetailsNumber: transactions.filter((item) => Boolean(item.paymentDetails?.number)).length,
       extractedLast4: candidates.filter((item) => item.payments?.some((payment) => Boolean(payment.last4))).length,
+      paymentId: shopifyPaymentIds.length,
+      receiptPaymentId: receiptPaymentIds.length,
+      paymentIdMatchesCrediMatchTransaction: identifierMatches(shopifyPaymentIds, crediMatchTransactionIds),
+      paymentIdMatchesCrediMatchConfirmation: identifierMatches(shopifyPaymentIds, crediMatchConfirmationNumbers),
+      paymentIdMatchesCrediMatchVoucher: identifierMatches(shopifyPaymentIds, crediMatchVoucherNumbers),
+      receiptPaymentIdMatchesCrediMatchTransaction: identifierMatches(receiptPaymentIds, crediMatchTransactionIds),
+      receiptPaymentIdMatchesCrediMatchConfirmation: identifierMatches(receiptPaymentIds, crediMatchConfirmationNumbers),
+      receiptPaymentIdMatchesCrediMatchVoucher: identifierMatches(receiptPaymentIds, crediMatchVoucherNumbers),
       receiptKeys: [...receiptKeys].slice(0, 40),
     });
   }
