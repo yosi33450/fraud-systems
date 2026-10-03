@@ -89,6 +89,17 @@ async function loadBlobState(): Promise<EncryptedState | null> {
   return JSON.parse(await new Response(result.stream).text()) as EncryptedState;
 }
 
+async function waitForPendingWrite(timeoutMs = 4_000) {
+  const pending = globalThis.__shieldLedgerPersistenceQueue;
+  if (!pending) return;
+  // A save can be retried later. Reading the last durable snapshot is always
+  // safer than holding the entire dashboard hostage to one stalled write.
+  await Promise.race([
+    pending.catch(() => undefined),
+    new Promise<void>((resolve) => setTimeout(resolve, timeoutMs)),
+  ]);
+}
+
 type PersistenceBackend = "blob" | "supabase" | "local";
 
 function persistenceBackend(): PersistenceBackend {
@@ -166,7 +177,7 @@ async function saveEncryptedState(payload: EncryptedState) {
   }
   if (backend === "supabase") {
     const supabase = supabaseConfiguration()!;
-    const response = await fetch(`${supabase.url}/rest/v1/shield_ledger_state`, {
+    const response = await fetchWithTimeout(`${supabase.url}/rest/v1/shield_ledger_state`, {
       method: "POST",
       headers: {
         ...supabaseHeaders(supabase),
@@ -186,7 +197,7 @@ export async function hydrateOperationalState(options: { refresh?: boolean } = {
   if (options.refresh) {
     // A Vercel deployment can have several warm function instances. Their
     // in-memory snapshots must not hide newer writes made by another instance.
-    await globalThis.__shieldLedgerPersistenceQueue;
+    await waitForPendingWrite();
     const payload = await loadEncryptedState();
     if (payload) restoreOperationalState(decryptPrivateData(payload));
     globalThis.__shieldLedgerHydration = Promise.resolve();
