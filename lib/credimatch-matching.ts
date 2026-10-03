@@ -174,6 +174,13 @@ const timeDistance = (left?: string, right?: string) => {
   const distance = Math.abs(Date.parse(left) - Date.parse(right));
   return Number.isFinite(distance) ? distance : Number.POSITIVE_INFINITY;
 };
+const israelDay = (value?: string) => {
+  if (!value || !Number.isFinite(Date.parse(value))) return undefined;
+  const parts = new Intl.DateTimeFormat("en-CA", { year: "numeric", month: "2-digit", day: "2-digit", timeZone: "Asia/Jerusalem" }).formatToParts(new Date(value));
+  const part = (type: string) => parts.find((item) => item.type === type)?.value;
+  const year = part("year"); const month = part("month"); const day = part("day");
+  return year && month && day ? `${year}-${month}-${day}` : undefined;
+};
 const displayTime = (distance: number) => distance <= 15 * 60_000 ? "עד 15 דקות" : distance <= 86_400_000 ? "באותו יום" : "עד 3 ימים";
 
 export function matchCrediMatchChargeback(chargeback: CrediMatchChargeback, orders: MatchableShopifyOrder[]): ChargebackOrderMatch {
@@ -199,6 +206,7 @@ export function matchCrediMatchChargeback(chargeback: CrediMatchChargeback, orde
       const distance = timeDistance(chargeback.dealTime, payment.processedAt ?? order.createdAt);
       const preciseTime = chargeback.dealTimePrecise === true && distance <= 15 * 60_000;
       const time = distance <= 3 * 86_400_000;
+      const sameDay = israelDay(chargeback.dealTime) === israelDay(payment.processedAt ?? order.createdAt);
       if (provider) score += 100;
       if (confirmation) score += 80;
       if (voucher) score += 75;
@@ -220,7 +228,7 @@ export function matchCrediMatchChargeback(chargeback: CrediMatchChargeback, orde
       add("time", "מועד העסקה", time, chargeback.dealTime, payment.processedAt ?? order.createdAt);
       add("terminal", "מסוף", terminal, chargeback.terminalNumber, payment.terminalNumber);
       add("session", "סשן", session, chargeback.sessionNumber, payment.sessionNumber);
-      const reasons = [provider && "מזהה עסקה זהה", confirmation && "מספר אישור זהה", voucher && "מספר שובר זהה", card && "4 ספרות אחרונות זהות", amountMatch && "סכום זהה", time && `מועד עסקה ${displayTime(distance)}`].filter((value): value is string => Boolean(value));
+      const reasons = [provider && "מזהה עסקה זהה", confirmation && "מספר אישור זהה", voucher && "מספר שובר זהה", card && "4 ספרות אחרונות זהות", amountMatch && "סכום זהה", sameDay && "יום עסקה זהה", time && `מועד עסקה ${displayTime(distance)}`].filter((value): value is string => Boolean(value));
       // A chargeback candidate must refer to the same card and the same
       // charged amount. Amount and date alone create many false positives,
       // while a missing Shopify card suffix is not evidence of a match.
@@ -228,15 +236,20 @@ export function matchCrediMatchChargeback(chargeback: CrediMatchChargeback, orde
       const exact = (provider && amountMatch) || (cardAndAmount && (confirmation || voucher)) || (amountMatch && preciseTime && !cardConflict);
       const strong = cardAndAmount && (confirmation || voucher || distance <= 86_400_000 || score >= 65);
       const possible = cardAndAmount && time;
-      return { order, score: Math.min(score, 100), comparisons, reasons, exact, strong, possible };
+      return { order, score: Math.min(score, 100), comparisons, reasons, exact, strong, possible, amountMatch, sameDay, cardConflict };
     }).sort((left, right) => right.score - left.score)[0];
   }).sort((left, right) => right.score - left.score);
 
   const best = candidates[0];
-  if (!best || (!best.exact && !best.strong && !best.possible)) return { confidence: "unmatched", score: 0, reasons: [], comparisons: [] };
+  if (!best) return { confidence: "unmatched", score: 0, reasons: [], comparisons: [] };
   const exactAlternative = best.exact && candidates.slice(1).some((candidate) => candidate.exact);
   const closeAlternative = candidates[1] && best.score - candidates[1].score < 10;
-  const confidence = best.exact && !exactAlternative ? "exact" : best.strong && !closeAlternative ? "strong" : "possible";
+  // When CrediMatch has only a calendar day (often shown as 00:00), a unique
+  // amount + day candidate is useful for review, but never becomes a strong or exact match.
+  const uniqueAmountDay = best.amountMatch && best.sameDay && !best.cardConflict
+    && candidates.filter((candidate) => candidate.amountMatch && candidate.sameDay && !candidate.cardConflict).length === 1;
+  if (!best.exact && !best.strong && !best.possible && !uniqueAmountDay) return { confidence: "unmatched", score: 0, reasons: [], comparisons: [] };
+  const confidence = best.exact && !exactAlternative ? "exact" : best.strong && !closeAlternative ? "strong" : (best.possible || uniqueAmountDay) ? "possible" : "unmatched";
   return {
     confidence, score: best.score, orderId: best.order.shopifyOrderId, orderNumber: best.order.orderNumber,
     storeId: best.order.storeId, storeName: best.order.storeName, customer: best.order.customer, email: best.order.email,

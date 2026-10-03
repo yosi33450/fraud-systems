@@ -3,11 +3,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, ChevronDown, ExternalLink, Gift, Link2, RefreshCcw, Search, ShieldCheck, X } from "lucide-react";
 import { CenteredDialog } from "@/components/centered-dialog";
+import { formatHebrewDateTime } from "@/lib/hebrew-date";
 import type { GiftLedger, GiftLedgerCard } from "@/lib/gift-card-evidence";
 import type { FraudCase, Store } from "@/lib/types";
 
 const money = (amount: number, currency: string) => new Intl.NumberFormat("he-IL", { style: "currency", currency, maximumFractionDigits: 2 }).format(amount);
-const date = (value: string) => new Intl.DateTimeFormat("he-IL", { dateStyle: "short", timeStyle: "short" }).format(new Date(value));
+const date = (value: string) => formatHebrewDateTime(value);
 const numericId = (id: string) => id.split("/").at(-1) ?? id;
 const empty: GiftLedger = { cards: [], orders: [] };
 type Route = { key: string; storeId: string; order: GiftLedgerCard["uses"][number]["order"]; currency: string; amount: number; cards: GiftLedgerCard[] };

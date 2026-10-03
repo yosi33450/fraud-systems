@@ -468,7 +468,7 @@ export function getDashboardSnapshot(tenantId: string): DashboardSnapshot {
     return {
       ...store,
       lastEventAt: storeOrders.length
-        ? new Intl.DateTimeFormat("he-IL", { dateStyle: "short", timeStyle: "short", timeZone: "Asia/Jerusalem" }).format(new Date(latestOrderAt))
+        ? new Intl.DateTimeFormat("he-IL", { dateStyle: "short", timeStyle: "short", timeZone: "Asia/Jerusalem" }).format(new Date(latestOrderAt)).replace(/,?\s*0{1,2}:00$/, "")
         : store.lastEventAt,
       ordersLast30Days: uniqueOrdersSince(thirtyDaysAgo),
       realtimeStatus: store.realtimeStatus ?? "setup-required",
@@ -1307,7 +1307,7 @@ export function ingestShopifyOrder(input: { storeId: string; webhookId: string; 
   if (!existingOrder && orderTime >= startOfToday) store.ordersToday += 1;
   if (!existingOrder && orderTime >= Date.now() - 30 * 86_400_000) store.ordersLast30Days += 1;
   if (input.topic !== "HISTORICAL_SYNC") {
-    store.lastEventAt = new Intl.DateTimeFormat("he-IL", { dateStyle: "short", timeStyle: "short", timeZone: "Asia/Jerusalem" }).format(new Date(createdAt));
+    store.lastEventAt = new Intl.DateTimeFormat("he-IL", { dateStyle: "short", timeStyle: "short", timeZone: "Asia/Jerusalem" }).format(new Date(createdAt)).replace(/,?\s*0{1,2}:00$/, "");
   }
 
   const result = evaluateRisk(signals, new Date(createdAt), state.rulesByTenant.get(store.tenantId) ?? []);

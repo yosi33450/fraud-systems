@@ -353,6 +353,15 @@ button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focu
 .case-section { border-radius: 16px; }
 .section-heading { min-height: 64px; padding-inline: 20px; }
 .filter-bar { padding-inline: 20px; background: #f7f8f7; }
+
+.credit-disputes-page { display: grid; gap: 14px; }
+.credit-disputes-page .page-heading { margin-bottom: 0; }
+.credit-import-body { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(230px, .8fr); gap: 18px; padding: 0 20px 20px; }
+.credit-import-body textarea { min-height: 142px; width: 100%; resize: vertical; padding: 12px; border: 1px solid var(--hairline); border-radius: 10px; background: #fbfcfb; color: var(--ink); line-height: 1.6; }
+.credit-import-body > div { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; color: var(--slate); font-size: 12px; line-height: 1.55; }
+.credit-import-body p { margin: 0; }.credit-import-notice { color: var(--success); font-weight: 650; }
+.credit-match { display: inline-flex; align-items: center; min-height: 28px; padding: 0 9px; border-radius: 7px; font-size: 11px; font-weight: 700; }
+.credit-match-exact-id { color: var(--success); background: var(--success-soft); }.credit-match-amount-date { color: var(--trust); background: var(--trust-soft); }.credit-match-ambiguous { color: var(--warning); background: var(--warning-soft); }.credit-match-unmatched { color: var(--slate); background: var(--surface-muted); }
 .search-box, .filter-bar select, .filter-button { border-color: #d9e0dc; box-shadow: 0 1px 1px rgb(20 36 29 / .025); }
 .case-table th { background: #fafbfa; color: #68756f; }
 .case-table tbody tr:hover { background: #f0f7f4; }

@@ -3,17 +3,17 @@
 import { useMemo, useState } from "react";
 import { ArrowLeftRight, CalendarClock, CheckCircle2, CircleDollarSign, CreditCard, ExternalLink, FileQuestion, RefreshCw, Search, ShieldCheck, X } from "lucide-react";
 import { CenteredDialog } from "@/components/centered-dialog";
+import { formatHebrewDateTime } from "@/lib/hebrew-date";
 import type { ChargebackMatchConfidence, CrediMatchChargeback, Store } from "@/lib/types";
 
 const confidenceCopy: Record<ChargebackMatchConfidence, { label: string; detail: string }> = {
   exact: { label: "התאמה ודאית", detail: "הכרטיס, הסכום ומספר האישור או השובר זהים" },
   strong: { label: "התאמה חזקה", detail: "הכרטיס והסכום זהים ונמצאו סימני תשלום נוספים" },
-  possible: { label: "דורש אימות", detail: "ארבע הספרות והסכום זהים, אך אין מספיק סימנים לאישור אוטומטי" },
-  unmatched: { label: "לא נמצאה הזמנה", detail: "לא נמצאה עסקה עם ארבע ספרות וסכום זהים" },
+  possible: { label: "דורש אימות", detail: "הסכום והיום תואמים, אך אין מספיק סימנים לאישור אוטומטי" },
+  unmatched: { label: "לא נמצאה הזמנה", detail: "לא נמצאה התאמה מספקת בין ההכחשה לעסקה" },
 };
 
-const dateFormatter = new Intl.DateTimeFormat("he-IL", { dateStyle: "short", timeStyle: "short", timeZone: "Asia/Jerusalem" });
-const safeDate = (value?: string) => value && Number.isFinite(Date.parse(value)) ? dateFormatter.format(new Date(value)) : "לא התקבל";
+const safeDate = (value?: string) => value && Number.isFinite(Date.parse(value)) ? formatHebrewDateTime(value) : "לא התקבל";
 const money = (value?: number, currency = "ILS") => {
   if (value === undefined) return "—";
   try { return new Intl.NumberFormat("he-IL", { style: "currency", currency: currency || "ILS", maximumFractionDigits: 2 }).format(value); }
@@ -162,7 +162,7 @@ function ChargebackDialog({ item, stores, onClose }: { item: CrediMatchChargebac
           <div><dt>אימייל</dt><dd><bdi>{match.email || "לא התקבל"}</bdi></dd></div>
           <div><dt>מועד הזמנה</dt><dd>{safeDate(match.createdAt)}</dd></div>
           <div><dt>רמת התאמה</dt><dd>{confidenceCopy[confidence].label}</dd></div>
-        </dl>{shopifyUrl ? <a className="secondary-button shopify-order-link" href={shopifyUrl} target="_blank" rel="noreferrer">פתיחת ההזמנה ב־Shopify <ExternalLink size={15} /></a> : null}</> : <div className="unmatched-guidance"><CalendarClock size={24} /><strong>ההכחשה נשמרה</strong><p>נציג הזמנה רק כאשר ארבע הספרות האחרונות והסכום זהים. סכום או תאריך לבדם אינם מספיקים.</p></div>}</section>
+        </dl>{shopifyUrl ? <a className="secondary-button shopify-order-link" href={shopifyUrl} target="_blank" rel="noreferrer">פתיחת ההזמנה ב־Shopify <ExternalLink size={15} /></a> : null}</> : <div className="unmatched-guidance"><CalendarClock size={24} /><strong>ההכחשה נשמרה</strong><p>כאשר יש התאמה יחידה של סכום ויום, היא תוצג כ״דורש אימות״ בלבד. התאמה ודאית עדיין דורשת פרט תשלום נוסף.</p></div>}</section>
       </div>
 
       {item.settlements.length ? <section className="settlement-section"><div className="chargeback-section-title"><h3>תנועות וזיכויים</h3><span>{item.settlements.length} רשומות כספיות</span></div><div className="settlement-list">{item.settlements.map((entry, index) => <article key={`${entry.invoiceNumber ?? "settlement"}-${index}`}><span>תשלום {entry.currentPaymentNumber ?? index + 1}</span><strong>{money(entry.netAmount ?? entry.expectedNetAmount, item.currency)}</strong><small>צפוי: {safeDate(entry.expectedPaymentTime)} · {entry.receptionStatus ?? "ללא סטטוס"}</small></article>)}</div></section> : null}
