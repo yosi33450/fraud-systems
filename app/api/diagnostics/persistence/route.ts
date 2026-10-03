@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getDashboardSnapshot } from "@/lib/operational-store";
 import { hydrateOperationalState } from "@/lib/persistence.server";
 
 export const dynamic = "force-dynamic";
@@ -33,6 +34,7 @@ export async function GET() {
   }
   const [operational, credimatch] = await Promise.all([probe(url, key, "global"), probe(url, key, "credimatch")]);
   let restore = "skipped";
+  let snapshot = "skipped";
   if (operational === "available") {
     try {
       await hydrateOperationalState({ refresh: true });
@@ -43,5 +45,13 @@ export async function GET() {
       restore = error instanceof Error ? error.message.slice(0, 100) : "failed";
     }
   }
-  return NextResponse.json({ backend: "supabase", operational, credimatch, restore }, { headers: { "Cache-Control": "no-store" } });
+  if (restore === "available") {
+    try {
+      const dashboard = getDashboardSnapshot("tenant-primary");
+      snapshot = dashboard.stores.length ? `available_${dashboard.stores.length}` : "empty";
+    } catch (error) {
+      snapshot = error instanceof Error ? error.message.slice(0, 100) : "failed";
+    }
+  }
+  return NextResponse.json({ backend: "supabase", operational, credimatch, restore, snapshot }, { headers: { "Cache-Control": "no-store" } });
 }
