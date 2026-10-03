@@ -274,11 +274,17 @@ export function matchCrediMatchChargeback(chargeback: CrediMatchChargeback, orde
     };
   }
   if (!best.exact && !best.strong && !best.possible && !uniqueAmountDay) return { confidence: "unmatched", score: 0, reasons: [], comparisons: [] };
-  const confidence = best.exact && !exactAlternative ? "exact" : best.strong && !closeAlternative ? "strong" : (best.possible || uniqueAmountDay) ? "possible" : "unmatched";
+  const confidence = uniqueAmountDay || (best.exact && !exactAlternative)
+    ? "exact"
+    : best.strong && !closeAlternative
+      ? "strong"
+      : best.possible
+        ? "possible"
+        : "unmatched";
   return {
     confidence, score: best.score, orderId: best.order.shopifyOrderId, orderNumber: best.order.orderNumber,
     storeId: best.order.storeId, storeName: best.order.storeName, customer: best.order.customer, email: best.order.email,
     amount: best.order.amount, currency: best.order.currency, createdAt: best.order.createdAt,
-    reasons: best.reasons, comparisons: best.comparisons,
+    reasons: uniqueAmountDay ? [...best.reasons, "סכום ויום ייחודיים"] : best.reasons, comparisons: best.comparisons,
   };
 }

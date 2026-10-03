@@ -11,8 +11,13 @@ const confidenceCopy: Record<ChargebackMatchConfidence, { label: string; detail:
   strong: { label: "התאמה חזקה", detail: "הכרטיס והסכום זהים ונמצאו סימני תשלום נוספים" },
   possible: { label: "דורש אימות", detail: "הסכום והיום תואמים, אך אין מספיק סימנים לאישור אוטומטי" },
   ambiguous: { label: "נמצאה מחלוקת", detail: "נמצאו כמה עסקאות באותו סכום ובאותו יום; לא בוצע חיבור אוטומטי" },
-  unmatched: { label: "לא נמצאה הזמנה", detail: "לא נמצאה התאמה מספקת בין ההכחשה לעסקה" },
+  unmatched: { label: "לא נמצאה הזמנה", detail: "לא נמצאה התאמה בין העסקאות שנסרקו. אפשר להפעיל חיפוש היסטורי לפי יום וסכום." },
 };
+
+const copyFor = (match: CrediMatchChargeback["match"] | undefined, confidence: ChargebackMatchConfidence) =>
+  confidence === "exact" && match?.reasons.includes("סכום ויום ייחודיים")
+    ? { label: "נמצאה עסקה לפי סכום ויום", detail: "נמצאה עסקה יחידה באותו סכום ובאותו יום" }
+    : confidenceCopy[confidence];
 
 const safeDate = (value?: string) => value && Number.isFinite(Date.parse(value)) ? formatHebrewDateTime(value) : "לא התקבל";
 const money = (value?: number, currency = "ILS") => {
@@ -116,12 +121,13 @@ export function ChargebacksWorkspace({ tenantId, chargebacks, stores, onRefresh 
         <div className="chargeback-table-head" role="row"><span>הכחשה</span><span>עסקה</span><span>סכום</span><span>התאמה ל־Shopify</span><span>מצב</span></div>
         {visible.map((item) => {
           const confidence = item.match?.confidence ?? "unmatched";
+          const copy = copyFor(item.match, confidence);
           return <button key={item.id} className="chargeback-row" role="row" onClick={() => setSelected(item)}>
             <span className="chargeback-id"><strong>#{item.discrepancyId}</strong><small>{item.type ?? "סוג הכחשה לא התקבל"}</small></span>
             <span><strong>{safeDate(item.dealTime)}</strong><small>{item.creditCompany ?? "חברת אשראי לא התקבלה"} · {masked(item.last4Digits)}</small></span>
             <span className="chargeback-amount"><strong>{money(item.originalAmount ?? item.grossAmount, item.currency)}</strong><small>{item.payments ? `${item.payments} תשלומים` : "תשלום אחד"}</small></span>
-            <span className="chargeback-order"><strong>{confidence === "ambiguous" ? `${item.match?.candidates?.length ?? 0} עסקאות אפשריות` : item.match?.orderNumber ?? "לא נמצאה הזמנה"}</strong><small>{item.match?.customer || item.match?.email || confidenceCopy[confidence].detail}</small></span>
-            <span className={`match-status match-${confidence}`}><i aria-hidden="true" />{confidenceCopy[confidence].label}<ArrowLeftRight size={15} aria-hidden="true" /></span>
+            <span className="chargeback-order"><strong>{confidence === "ambiguous" ? `${item.match?.candidates?.length ?? 0} עסקאות אפשריות` : item.match?.orderNumber ?? "לא נמצאה הזמנה"}</strong><small>{item.match?.customer || item.match?.email || copy.detail}</small></span>
+            <span className={`match-status match-${confidence}`}><i aria-hidden="true" />{copy.label}<ArrowLeftRight size={15} aria-hidden="true" /></span>
           </button>;
         })}
       </div> : <div className="empty-state chargeback-empty"><CreditCard size={26} /><strong>{chargebacks.length ? "אין תוצאות למסנן שבחרת" : "עדיין לא נקלטו הכחשות"}</strong><span>{chargebacks.length ? "נסה חיפוש אחר או הצג את כל ההתאמות." : "כאשר CrediMatch תשלח הכחשה, היא תופיע כאן ותיבדק מול Shopify."}</span></div>}
@@ -134,6 +140,7 @@ export function ChargebacksWorkspace({ tenantId, chargebacks, stores, onRefresh 
 function ChargebackDialog({ item, stores, onClose }: { item: CrediMatchChargeback; stores: Store[]; onClose: () => void }) {
   const match = item.match;
   const confidence = match?.confidence ?? "unmatched";
+  const copy = copyFor(match, confidence);
   const store = stores.find((candidate) => candidate.id === match?.storeId);
   const numericOrderId = match?.orderId?.match(/\d+$/)?.[0];
   const shopifyUrl = store?.domain && numericOrderId ? `https://${store.domain}/admin/orders/${numericOrderId}` : undefined;
@@ -142,7 +149,7 @@ function ChargebackDialog({ item, stores, onClose }: { item: CrediMatchChargebac
     <div className="chargeback-dialog-body">
       <section className={`chargeback-match-hero match-${confidence}`}>
         <div className="match-hero-icon">{["exact", "strong"].includes(confidence) ? <CheckCircle2 /> : <FileQuestion />}</div>
-        <div><span>תוצאת ההצלבה</span><h3>{confidenceCopy[confidence].label}</h3><p>{confidenceCopy[confidence].detail}</p></div>
+        <div><span>תוצאת ההצלבה</span><h3>{copy.label}</h3><p>{copy.detail}</p></div>
         {match?.score ? <strong>{match.score}<small>/100</small></strong> : null}
       </section>
 
@@ -162,7 +169,7 @@ function ChargebackDialog({ item, stores, onClose }: { item: CrediMatchChargebac
           <div><dt>לקוח</dt><dd>{match.customer || "לא התקבל שם"}</dd></div>
           <div><dt>אימייל</dt><dd><bdi>{match.email || "לא התקבל"}</bdi></dd></div>
           <div><dt>מועד הזמנה</dt><dd>{safeDate(match.createdAt)}</dd></div>
-          <div><dt>רמת התאמה</dt><dd>{confidenceCopy[confidence].label}</dd></div>
+          <div><dt>רמת התאמה</dt><dd>{copy.label}</dd></div>
         </dl>{shopifyUrl ? <a className="secondary-button shopify-order-link" href={shopifyUrl} target="_blank" rel="noreferrer">פתיחת ההזמנה ב־Shopify <ExternalLink size={15} /></a> : null}</> : <div className="unmatched-guidance"><CalendarClock size={24} /><strong>ההכחשה נשמרה</strong><p>כאשר יש התאמה יחידה של סכום ויום, היא תוצג כ״דורש אימות״ בלבד. התאמה ודאית עדיין דורשת פרט תשלום נוסף.</p></div>}</section>
       </div>
 
