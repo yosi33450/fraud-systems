@@ -113,6 +113,7 @@ export interface ChargebackMatchComparison {
   key: "provider" | "confirmation" | "voucher" | "last4" | "amount" | "currency" | "time" | "terminal" | "session";
   label: string;
   matched: boolean;
+  compared: boolean;
   crediMatchValue?: string;
   shopifyValue?: string;
 }

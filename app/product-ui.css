@@ -640,6 +640,7 @@ svg { flex-shrink: 0; }
 .comparison-grid span { color: var(--slate); }
 .comparison-grid strong { margin: 3px 0 7px; color: var(--critical); }
 .comparison-grid .comparison-match strong { color: var(--trust); }
+.comparison-grid .comparison-unavailable strong { color: var(--slate); }
 .comparison-grid small.comparison-values { display: grid; grid-template-columns: minmax(0, 1fr) 14px minmax(0, 1fr); align-items: center; gap: 8px; min-width: 0; color: var(--slate); font-size: .75rem; }
 .comparison-side { display: grid !important; min-width: 0; gap: 2px; }
 .comparison-side em { color: var(--slate); font-size: .6875rem; font-style: normal; font-weight: 500; }
