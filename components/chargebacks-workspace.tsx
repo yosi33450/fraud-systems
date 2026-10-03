@@ -10,6 +10,7 @@ const confidenceCopy: Record<ChargebackMatchConfidence, { label: string; detail:
   exact: { label: "התאמה ודאית", detail: "הכרטיס, הסכום ומספר האישור או השובר זהים" },
   strong: { label: "התאמה חזקה", detail: "הכרטיס והסכום זהים ונמצאו סימני תשלום נוספים" },
   possible: { label: "דורש אימות", detail: "הסכום והיום תואמים, אך אין מספיק סימנים לאישור אוטומטי" },
+  ambiguous: { label: "נמצאה מחלוקת", detail: "נמצאו כמה עסקאות באותו סכום ובאותו יום; לא בוצע חיבור אוטומטי" },
   unmatched: { label: "לא נמצאה הזמנה", detail: "לא נמצאה התאמה מספקת בין ההכחשה לעסקה" },
 };
 
@@ -109,7 +110,7 @@ export function ChargebacksWorkspace({ tenantId, chargebacks, stores, onRefresh 
       <div className="section-heading"><div><h2>יומן התאמות</h2><span>{visible.length} מתוך {chargebacks.length} הכחשות</span></div></div>
       <div className="chargeback-toolbar">
         <label className="search-box"><Search size={17} /><span className="sr-only">חיפוש הכחשה</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="חיפוש לפי הכחשה, הזמנה או לקוח" /></label>
-        <label><span className="sr-only">סינון לפי התאמה</span><select value={filter} onChange={(event) => setFilter(event.target.value as typeof filter)}><option value="all">כל ההתאמות</option><option value="exact">התאמה ודאית</option><option value="strong">התאמה חזקה</option><option value="possible">דורש אימות</option><option value="unmatched">ללא הזמנה</option></select></label>
+        <label><span className="sr-only">סינון לפי התאמה</span><select value={filter} onChange={(event) => setFilter(event.target.value as typeof filter)}><option value="all">כל ההתאמות</option><option value="exact">התאמה ודאית</option><option value="strong">התאמה חזקה</option><option value="possible">דורש אימות</option><option value="ambiguous">כמה עסקאות אפשריות</option><option value="unmatched">ללא הזמנה</option></select></label>
       </div>
       {visible.length ? <div className="chargeback-table" role="table" aria-label="הכחשות אשראי">
         <div className="chargeback-table-head" role="row"><span>הכחשה</span><span>עסקה</span><span>סכום</span><span>התאמה ל־Shopify</span><span>מצב</span></div>
@@ -119,7 +120,7 @@ export function ChargebacksWorkspace({ tenantId, chargebacks, stores, onRefresh 
             <span className="chargeback-id"><strong>#{item.discrepancyId}</strong><small>{item.type ?? "סוג הכחשה לא התקבל"}</small></span>
             <span><strong>{safeDate(item.dealTime)}</strong><small>{item.creditCompany ?? "חברת אשראי לא התקבלה"} · {masked(item.last4Digits)}</small></span>
             <span className="chargeback-amount"><strong>{money(item.originalAmount ?? item.grossAmount, item.currency)}</strong><small>{item.payments ? `${item.payments} תשלומים` : "תשלום אחד"}</small></span>
-            <span className="chargeback-order"><strong>{item.match?.orderNumber ?? "לא נמצאה הזמנה"}</strong><small>{item.match?.customer || item.match?.email || confidenceCopy[confidence].detail}</small></span>
+            <span className="chargeback-order"><strong>{confidence === "ambiguous" ? `${item.match?.candidates?.length ?? 0} עסקאות אפשריות` : item.match?.orderNumber ?? "לא נמצאה הזמנה"}</strong><small>{item.match?.customer || item.match?.email || confidenceCopy[confidence].detail}</small></span>
             <span className={`match-status match-${confidence}`}><i aria-hidden="true" />{confidenceCopy[confidence].label}<ArrowLeftRight size={15} aria-hidden="true" /></span>
           </button>;
         })}
@@ -164,6 +165,8 @@ function ChargebackDialog({ item, stores, onClose }: { item: CrediMatchChargebac
           <div><dt>רמת התאמה</dt><dd>{confidenceCopy[confidence].label}</dd></div>
         </dl>{shopifyUrl ? <a className="secondary-button shopify-order-link" href={shopifyUrl} target="_blank" rel="noreferrer">פתיחת ההזמנה ב־Shopify <ExternalLink size={15} /></a> : null}</> : <div className="unmatched-guidance"><CalendarClock size={24} /><strong>ההכחשה נשמרה</strong><p>כאשר יש התאמה יחידה של סכום ויום, היא תוצג כ״דורש אימות״ בלבד. התאמה ודאית עדיין דורשת פרט תשלום נוסף.</p></div>}</section>
       </div>
+
+      {confidence === "ambiguous" && match?.candidates?.length ? <section className="settlement-section"><div className="chargeback-section-title"><h3>עסקאות אפשריות לבדיקה</h3><span>אותו סכום ואותו יום — בחר ידנית לאחר בדיקה</span></div><div className="settlement-list">{match.candidates.map((candidate) => <article key={candidate.orderId}><span>{candidate.orderNumber ?? "הזמנה"} · {candidate.customer || candidate.email || "לקוח לא התקבל"}</span><strong>{money(candidate.amount, candidate.currency)}</strong><small>{safeDate(candidate.createdAt)} · {candidate.storeName ?? "Shopify"}</small></article>)}</div></section> : null}
 
       {item.settlements.length ? <section className="settlement-section"><div className="chargeback-section-title"><h3>תנועות וזיכויים</h3><span>{item.settlements.length} רשומות כספיות</span></div><div className="settlement-list">{item.settlements.map((entry, index) => <article key={`${entry.invoiceNumber ?? "settlement"}-${index}`}><span>תשלום {entry.currentPaymentNumber ?? index + 1}</span><strong>{money(entry.netAmount ?? entry.expectedNetAmount, item.currency)}</strong><small>צפוי: {safeDate(entry.expectedPaymentTime)} · {entry.receptionStatus ?? "ללא סטטוס"}</small></article>)}</div></section> : null}
     </div>

@@ -251,12 +251,28 @@ export function matchCrediMatchChargeback(chargeback: CrediMatchChargeback, orde
 
   const best = candidates[0];
   if (!best) return { confidence: "unmatched", score: 0, reasons: [], comparisons: [] };
+  const amountDayCandidates = [...new Map(candidates
+    .filter((candidate) => candidate.amountMatch && candidate.sameDay && !candidate.cardConflict)
+    .map((candidate) => [candidate.order.shopifyOrderId, candidate.order]))
+    .values()];
   const exactAlternative = best.exact && candidates.slice(1).some((candidate) => candidate.exact);
   const closeAlternative = candidates[1] && best.score - candidates[1].score < 10;
   // When CrediMatch has only a calendar day (often shown as 00:00), a unique
   // amount + day candidate is useful for review, but never becomes a strong or exact match.
-  const uniqueAmountDay = best.amountMatch && best.sameDay && !best.cardConflict
-    && candidates.filter((candidate) => candidate.amountMatch && candidate.sameDay && !candidate.cardConflict).length === 1;
+  const uniqueAmountDay = amountDayCandidates.length === 1;
+  const ambiguousAmountDay = !best.exact && !best.strong && !best.possible && amountDayCandidates.length > 1;
+  if (ambiguousAmountDay) {
+    return {
+      confidence: "ambiguous", score: best.score,
+      reasons: [`נמצאו ${amountDayCandidates.length} עסקאות באותו סכום ובאותו יום`],
+      comparisons: [],
+      candidates: amountDayCandidates.map((order) => ({
+        orderId: order.shopifyOrderId, orderNumber: order.orderNumber, storeId: order.storeId,
+        storeName: order.storeName, customer: order.customer, email: order.email,
+        amount: order.amount, currency: order.currency, createdAt: order.createdAt,
+      })),
+    };
+  }
   if (!best.exact && !best.strong && !best.possible && !uniqueAmountDay) return { confidence: "unmatched", score: 0, reasons: [], comparisons: [] };
   const confidence = best.exact && !exactAlternative ? "exact" : best.strong && !closeAlternative ? "strong" : (best.possible || uniqueAmountDay) ? "possible" : "unmatched";
   return {

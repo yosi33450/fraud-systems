@@ -107,7 +107,7 @@ export interface OrderPaymentFingerprint {
   sessionNumber?: string;
 }
 
-export type ChargebackMatchConfidence = "exact" | "strong" | "possible" | "unmatched";
+export type ChargebackMatchConfidence = "exact" | "strong" | "possible" | "ambiguous" | "unmatched";
 
 export interface ChargebackMatchComparison {
   key: "provider" | "confirmation" | "voucher" | "last4" | "amount" | "currency" | "time" | "terminal" | "session";
@@ -129,6 +129,17 @@ export interface ChargebackOrderMatch {
   amount?: number;
   currency?: string;
   createdAt?: string;
+  candidates?: Array<{
+    orderId: string;
+    orderNumber?: string;
+    storeId: string;
+    storeName?: string;
+    customer?: string;
+    email?: string;
+    amount: number;
+    currency?: string;
+    createdAt: string;
+  }>;
   reasons: string[];
   comparisons: ChargebackMatchComparison[];
 }
