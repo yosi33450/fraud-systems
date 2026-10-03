@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { hydrateOperationalState } from "@/lib/persistence.server";
 
 export const dynamic = "force-dynamic";
 
@@ -31,5 +32,16 @@ export async function GET() {
     return NextResponse.json({ backend: process.env.PERSISTENCE_BACKEND ?? "auto", status: "not_configured" });
   }
   const [operational, credimatch] = await Promise.all([probe(url, key, "global"), probe(url, key, "credimatch")]);
-  return NextResponse.json({ backend: "supabase", operational, credimatch }, { headers: { "Cache-Control": "no-store" } });
+  let restore = "skipped";
+  if (operational === "available") {
+    try {
+      await hydrateOperationalState({ refresh: true });
+      restore = "available";
+    } catch (error) {
+      // Error identifiers are intentional here; they reveal configuration or
+      // compatibility faults without ever returning encrypted data.
+      restore = error instanceof Error ? error.message.slice(0, 100) : "failed";
+    }
+  }
+  return NextResponse.json({ backend: "supabase", operational, credimatch, restore }, { headers: { "Cache-Control": "no-store" } });
 }
