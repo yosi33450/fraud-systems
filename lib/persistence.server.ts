@@ -71,6 +71,24 @@ const supabaseHeaders = (configuration: NonNullable<ReturnType<typeof supabaseCo
 
 const blobConfigured = () => Boolean(process.env.BLOB_READ_WRITE_TOKEN || process.env.BLOB_STORE_ID);
 
+// Do not let a temporarily slow database turn the whole dashboard into an
+// endless loading screen. The browser can retry on its next background refresh.
+async function fetchWithTimeout(input: string, init: RequestInit, timeoutMs = 7_000) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function loadBlobState(): Promise<EncryptedState | null> {
+  const result = await get(blobPath, { access: "private", useCache: false });
+  if (!result || result.statusCode !== 200 || !result.stream) return null;
+  return JSON.parse(await new Response(result.stream).text()) as EncryptedState;
+}
+
 type PersistenceBackend = "blob" | "supabase" | "local";
 
 function persistenceBackend(): PersistenceBackend {
@@ -99,19 +117,32 @@ function persistenceBackend(): PersistenceBackend {
 async function loadEncryptedState(): Promise<EncryptedState | null> {
   const backend = persistenceBackend();
   if (backend === "blob") {
-    const result = await get(blobPath, { access: "private", useCache: false });
-    if (!result || result.statusCode !== 200 || !result.stream) return null;
-    return JSON.parse(await new Response(result.stream).text()) as EncryptedState;
+    return loadBlobState();
   }
   if (backend === "supabase") {
     const supabase = supabaseConfiguration()!;
-    const response = await fetch(`${supabase.url}/rest/v1/shield_ledger_state?id=eq.${stateId}&select=ciphertext,iv,auth_tag&limit=1`, {
-      headers: supabaseHeaders(supabase),
-      cache: "no-store",
-    });
-    if (!response.ok) throw new Error(`PERSISTENCE_READ_FAILED_${response.status}`);
-    const rows = await response.json() as EncryptedState[];
-    return rows[0] ?? null;
+    try {
+      const response = await fetchWithTimeout(`${supabase.url}/rest/v1/shield_ledger_state?id=eq.${stateId}&select=ciphertext,iv,auth_tag&limit=1`, {
+        headers: supabaseHeaders(supabase),
+        cache: "no-store",
+      });
+      if (!response.ok) throw new Error(`PERSISTENCE_READ_FAILED_${response.status}`);
+      const rows = await response.json() as EncryptedState[];
+      return rows[0] ?? null;
+    } catch (error) {
+      // The former Blob snapshot is retained as a read-only recovery copy.
+      // It keeps stores visible during a transient Supabase incident; all new
+      // writes still go to Supabase once it responds again.
+      if (blobConfigured()) {
+        try {
+          const backup = await loadBlobState();
+          if (backup) return backup;
+        } catch {
+          // Preserve the original database error below when the backup is unavailable.
+        }
+      }
+      throw error;
+    }
   }
   try {
     return JSON.parse(await readFile(localFile, "utf8")) as EncryptedState;

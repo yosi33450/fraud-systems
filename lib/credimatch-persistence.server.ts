@@ -35,6 +35,16 @@ const emptyState = () => ({
   revision: undefined as string | undefined,
 });
 
+async function fetchWithTimeout(input: string, init: RequestInit, timeoutMs = 5_000) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 const decode = (encrypted: EncryptedState) => {
   const decrypted = decryptPrivateData<CrediMatchChargeback[] | CrediMatchPersistedState>(encrypted);
   return Array.isArray(decrypted)
@@ -45,7 +55,7 @@ const decode = (encrypted: EncryptedState) => {
 async function read() {
   const supabase = supabaseConfiguration();
   if (supabase) {
-    const response = await fetch(`${supabase.url}/rest/v1/shield_ledger_state?id=eq.${supabaseStateId}&select=ciphertext,iv,auth_tag,updated_at&limit=1`, {
+    const response = await fetchWithTimeout(`${supabase.url}/rest/v1/shield_ledger_state?id=eq.${supabaseStateId}&select=ciphertext,iv,auth_tag,updated_at&limit=1`, {
       headers: { apikey: supabase.key, Authorization: `Bearer ${supabase.key}` },
       cache: "no-store",
     });
