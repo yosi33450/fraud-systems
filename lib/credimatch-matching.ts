@@ -174,12 +174,21 @@ const timeDistance = (left?: string, right?: string) => {
   const distance = Math.abs(Date.parse(left) - Date.parse(right));
   return Number.isFinite(distance) ? distance : Number.POSITIVE_INFINITY;
 };
+const israelDayFormatter = new Intl.DateTimeFormat("en-CA", { year: "numeric", month: "2-digit", day: "2-digit", timeZone: "Asia/Jerusalem" });
+const israelDayCache = new Map<string, string | undefined>();
 const israelDay = (value?: string) => {
-  if (!value || !Number.isFinite(Date.parse(value))) return undefined;
-  const parts = new Intl.DateTimeFormat("en-CA", { year: "numeric", month: "2-digit", day: "2-digit", timeZone: "Asia/Jerusalem" }).formatToParts(new Date(value));
+  if (!value) return undefined;
+  if (israelDayCache.has(value)) return israelDayCache.get(value);
+  if (!Number.isFinite(Date.parse(value))) {
+    israelDayCache.set(value, undefined);
+    return undefined;
+  }
+  const parts = israelDayFormatter.formatToParts(new Date(value));
   const part = (type: string) => parts.find((item) => item.type === type)?.value;
   const year = part("year"); const month = part("month"); const day = part("day");
-  return year && month && day ? `${year}-${month}-${day}` : undefined;
+  const result = year && month && day ? `${year}-${month}-${day}` : undefined;
+  israelDayCache.set(value, result);
+  return result;
 };
 const displayTime = (distance: number) => distance <= 15 * 60_000 ? "עד 15 דקות" : distance <= 86_400_000 ? "באותו יום" : "עד 3 ימים";
 
