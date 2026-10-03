@@ -89,7 +89,7 @@ async function loadBlobState(): Promise<EncryptedState | null> {
   return JSON.parse(await new Response(result.stream).text()) as EncryptedState;
 }
 
-async function waitForPendingWrite(timeoutMs = 4_000) {
+async function waitForPendingWrite(timeoutMs = 1_000) {
   const pending = globalThis.__shieldLedgerPersistenceQueue;
   if (!pending) return;
   // A save can be retried later. Reading the last durable snapshot is always
