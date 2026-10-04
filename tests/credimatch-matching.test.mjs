@@ -23,6 +23,7 @@ test('extracts a safe Shopify payment fingerprint from receipt data', () => {
   }], 'ILS'), [{
     transactionId: 'gid://shopify/OrderTransaction/1', gateway: 'PayPlus', amount: 349.9, currency: 'ILS', processedAt: '2026-09-28T10:00:30Z',
     paymentId: undefined, gatewayReference: undefined, last4: '4242', confirmationNumber: 'AUTH-77', voucherNumber: '9988', terminalNumber: '42', sessionNumber: undefined,
+    merchantReference: undefined,
   }]);
 });
 
@@ -42,18 +43,6 @@ test('extracts the last four digits from Shopify card payment details when accou
   }], 'ILS');
   assert.equal(payment.last4, '1944');
   assert.equal('payment_details' in payment, false);
-});
-
-test('uses a Shopify tender gateway reference as an exact confirmation match', () => {
-  const [payment] = paymentFingerprintsFromShopify([{
-    gateway_reference: '0084173', amount: '445', processed_at: '2026-09-28T10:00:30Z',
-    payment_details: { number: '•••• •••• •••• 1944' },
-  }], 'ILS');
-  const match = matchCrediMatchChargeback(chargeback({ originalAmount: 445, last4Digits: '1944', confirmationNumber: '84173' }), [
-    order({ amount: 445, payments: [payment] }),
-  ]);
-  assert.equal(match.confidence, 'exact');
-  assert.equal(match.orderNumber, '#123');
 });
 
 test('builds a targeted Shopify search for known chargeback amounts', () => {
@@ -81,87 +70,37 @@ test('normalizes CrediMatch discrepancy and transaction responses without invent
   assert.equal(result[0].settlements[0].expectedNetAmount, 330);
 });
 
-test('links an exact chargeback using the shared provider uid even when Shopify hides card details', () => {
+test('links only a unique PayPlus more_info reference', () => {
   const match = matchCrediMatchChargeback(chargeback({
-    providerUid: 'payplus-uid-123', last4Digits: '1944', confirmationNumber: undefined,
+    payplus: { status: 'found', merchantReference: 'roC52xUh72jCtVT1OlngYqj6L' },
   }), [order({
-    amount: 349.9,
-    payments: [{ paymentId: 'payplus-uid-123', amount: 349.9, currency: 'ILS', processedAt: '2026-09-28T10:00:30Z' }],
+    payments: [{ merchantReference: 'roc52xuh72jctvt1olngyqj6l', amount: 1 }],
   })]);
   assert.equal(match.confidence, 'exact');
   assert.equal(match.orderNumber, '#123');
-  assert.ok(match.reasons.includes('מזהה עסקה זהה'));
+  assert.deepEqual(match.reasons, ['אסמכתת PayPlus זהה']);
+  assert.equal(match.comparisons[0]?.key, 'reference');
 });
 
-test('links an exact chargeback using authorization and amount', () => {
+test('does not link identical amount, card, approval or date without PayPlus more_info', () => {
   const match = matchCrediMatchChargeback(chargeback(), [order()]);
-  assert.equal(match.confidence, 'exact');
-  assert.equal(match.orderNumber, '#123');
-  assert.ok(match.reasons.includes('מספר אישור זהה'));
-  assert.ok(match.comparisons.find((item) => item.key === 'amount')?.matched);
-});
-
-test('links a unique order using exact amount and a transaction time within fifteen minutes', () => {
-  const match = matchCrediMatchChargeback(chargeback({
-    last4Digits: undefined, confirmationNumber: undefined,
-  }), [order({
-    payments: [{ amount: 349.9, currency: 'ILS', processedAt: '2026-09-28T10:05:00Z' }],
-  })]);
-  assert.equal(match.confidence, 'exact');
-  assert.equal(match.orderNumber, '#123');
-});
-
-test('does not auto-confirm when two orders have the same amount in the same time window', () => {
-  const candidate = order({
-    payments: [{ amount: 349.9, currency: 'ILS', processedAt: '2026-09-28T10:05:00Z' }],
-  });
-  const match = matchCrediMatchChargeback(chargeback({
-    last4Digits: undefined, confirmationNumber: undefined,
-  }), [candidate, { ...candidate, shopifyOrderId: 'gid://shopify/Order/124', orderNumber: '#124' }]);
-  assert.equal(match.confidence, 'possible');
-});
-
-test('does not treat a date-only midnight value as a precise transaction time', () => {
-  const match = matchCrediMatchChargeback(chargeback({
-    dealTime: '2026-09-28T00:00:00Z', dealTimePrecise: false,
-    last4Digits: undefined, confirmationNumber: undefined,
-  }), [order({
-    payments: [{ amount: 349.9, currency: 'ILS', processedAt: '2026-09-28T00:04:00Z' }],
-  })]);
-  assert.equal(match.confidence, 'unmatched');
-});
-
-test('marks a midnight transaction timestamp from CrediMatch as date-only', () => {
-  const [result] = normalizeCrediMatchChargebacks({
-    tenantId: 'tenant-primary', discrepancyId: '21893735',
-    discrepancyPayload: { discrepancies: [{ id: 21893735, transactionId: 55 }] },
-    transactionPayloads: [{ transactions: [{ id: 55, transactionDate: '2026-03-05T00:00:00Z' }] }],
-  });
-  assert.equal(result.dealTimePrecise, false);
-});
-
-test('rejects an amount-and-time-only candidate when the card suffix is unavailable', () => {
-  const candidate = order({ payments: [], amount: 349.9, createdAt: '2026-09-28T10:20:00Z' });
-  const match = matchCrediMatchChargeback(chargeback({ confirmationNumber: undefined }), [candidate]);
   assert.equal(match.confidence, 'unmatched');
   assert.equal(match.orderNumber, undefined);
 });
 
-test('rejects a candidate when amount and authorization match but last four digits differ', () => {
-  const candidate = order({ payments: [{ amount: 349.9, currency: 'ILS', processedAt: '2026-09-28T10:00:30Z', last4: '9999', confirmationNumber: 'AUTH77' }] });
-  const match = matchCrediMatchChargeback(chargeback(), [candidate]);
+test('does not link when PayPlus more_info is absent from Shopify', () => {
+  const match = matchCrediMatchChargeback(chargeback({
+    payplus: { status: 'found', merchantReference: 'roC52xUh72jCtVT1OlngYqj6L' },
+  }), [order()]);
   assert.equal(match.confidence, 'unmatched');
 });
 
-test('keeps a same-card same-amount candidate for manual verification', () => {
-  const candidate = order({ payments: [{ amount: 349.9, currency: 'ILS', processedAt: '2026-09-30T10:00:30Z', last4: '4242' }] });
-  const match = matchCrediMatchChargeback(chargeback({ confirmationNumber: undefined }), [candidate]);
-  assert.equal(match.confidence, 'possible');
-  assert.equal(match.orderNumber, '#123');
-});
-
-test('does not auto-confirm when two candidates score almost equally', () => {
-  const first = order();
-  const second = order({ shopifyOrderId: 'gid://shopify/Order/124', orderNumber: '#124' });
-  assert.equal(matchCrediMatchChargeback(chargeback(), [first, second]).confidence, 'possible');
+test('leaves duplicate PayPlus more_info references for review', () => {
+  const reference = 'roC52xUh72jCtVT1OlngYqj6L';
+  const match = matchCrediMatchChargeback(chargeback({ payplus: { status: 'found', merchantReference: reference } }), [
+    order({ payments: [{ merchantReference: reference }] }),
+    order({ shopifyOrderId: 'gid://shopify/Order/124', orderNumber: '#124', payments: [{ merchantReference: reference }] }),
+  ]);
+  assert.equal(match.confidence, 'ambiguous');
+  assert.equal(match.candidates?.length, 2);
 });

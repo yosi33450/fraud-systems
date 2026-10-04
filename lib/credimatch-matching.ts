@@ -34,6 +34,13 @@ const normalizedId = (value: unknown) => {
   const normalized = text(value)?.replace(/[^a-z0-9]/gi, "").toLowerCase();
   return normalized && /^\d+$/.test(normalized) ? normalized.replace(/^0+(?=\d)/, "") : normalized;
 };
+// `more_info` is the merchant's opaque PayPlus reference. Unlike an approval
+// number, it can contain letters and leading zeroes, so normalize punctuation
+// and casing only — never coerce it into a number.
+const normalizedMerchantReference = (value: unknown) =>
+  text(value)?.replace(/[^a-z0-9]/gi, "").toLowerCase() || undefined;
+const sameMerchantReference = (left?: string, right?: string) =>
+  Boolean(left && right && normalizedMerchantReference(left) === normalizedMerchantReference(right));
 const last4 = (value: unknown) => text(value)?.replace(/\D/g, "").slice(-4) || undefined;
 const normalizedCurrency = (value: unknown) => {
   const candidate = text(value)?.toUpperCase();
@@ -194,102 +201,35 @@ const israelDay = (value?: string) => {
 const displayTime = (distance: number) => distance <= 15 * 60_000 ? "עד 15 דקות" : distance <= 86_400_000 ? "באותו יום" : "עד 3 ימים";
 
 export function matchCrediMatchChargeback(chargeback: CrediMatchChargeback, orders: MatchableShopifyOrder[]): ChargebackOrderMatch {
-  const candidates = orders.map((order) => {
-    const paymentOptions = order.payments?.length ? order.payments : [{}];
-    return paymentOptions.map((payment) => {
-      const comparisons: ChargebackMatchComparison[] = [];
-      let score = 0;
-      const amount = chargeback.originalAmount ?? chargeback.grossAmount;
-      const paymentAmount = payment.amount ?? order.amount;
-      const provider = sameNumber(chargeback.providerUid, payment.paymentId)
-        || sameNumber(chargeback.providerUid, payment.gatewayReference);
-      const confirmation = sameNumber(chargeback.confirmationNumber, payment.confirmationNumber)
-        || sameNumber(chargeback.confirmationNumber, payment.gatewayReference);
-      const voucher = sameNumber(chargeback.voucherNumber, payment.voucherNumber)
-        || sameNumber(chargeback.voucherNumber, payment.gatewayReference);
-      const reference = sameNumber(chargeback.payplus?.merchantReference, payment.merchantReference)
-        || sameNumber(chargeback.payplus?.merchantReference, payment.gatewayReference);
-      const card = Boolean(chargeback.last4Digits && payment.last4 && chargeback.last4Digits === payment.last4);
-      const cardConflict = Boolean(chargeback.last4Digits && payment.last4 && chargeback.last4Digits !== payment.last4);
-      const amountMatch = sameMoney(amount, paymentAmount);
-      const currency = Boolean(chargeback.currency && (payment.currency ?? order.currency) && chargeback.currency === (payment.currency ?? order.currency)?.toUpperCase());
-      const terminal = sameNumber(chargeback.terminalNumber, payment.terminalNumber);
-      const session = sameNumber(chargeback.sessionNumber, payment.sessionNumber);
-      const distance = timeDistance(chargeback.dealTime, payment.processedAt ?? order.createdAt);
-      const preciseTime = chargeback.dealTimePrecise === true && distance <= 15 * 60_000;
-      const time = distance <= 3 * 86_400_000;
-      const sameDay = israelDay(chargeback.dealTime) === israelDay(payment.processedAt ?? order.createdAt);
-      if (provider) score += 100;
-      if (confirmation) score += 80;
-      if (voucher) score += 75;
-      if (reference) score += 100;
-      if (card) score += 25;
-      if (amountMatch) score += 25;
-      if (currency) score += 5;
-      if (terminal) score += 8;
-      if (session) score += 20;
-      if (distance <= 15 * 60_000) score += 20; else if (distance <= 86_400_000) score += 12; else if (time) score += 5;
-      const add = (key: ChargebackMatchComparison["key"], label: string, matched: boolean, crediMatchValue?: string, shopifyValue?: string, compared = Boolean(crediMatchValue && shopifyValue)) => {
-        if (crediMatchValue || shopifyValue) comparisons.push({ key, label, matched, compared, crediMatchValue, shopifyValue });
-      };
-      add("provider", "מזהה עסקה", provider, chargeback.providerUid, payment.gatewayReference ?? payment.paymentId, Boolean(normalizedId(chargeback.providerUid) && normalizedId(payment.gatewayReference ?? payment.paymentId)));
-      add("confirmation", "מספר אישור", confirmation, chargeback.confirmationNumber, payment.confirmationNumber ?? payment.gatewayReference, Boolean(normalizedId(chargeback.confirmationNumber) && normalizedId(payment.confirmationNumber ?? payment.gatewayReference)));
-      add("voucher", "מספר שובר", voucher, chargeback.voucherNumber, payment.voucherNumber ?? payment.gatewayReference, Boolean(normalizedId(chargeback.voucherNumber) && normalizedId(payment.voucherNumber ?? payment.gatewayReference)));
-      add("reference", "אסמכתת PayPlus", reference, chargeback.payplus?.merchantReference, payment.merchantReference ?? payment.gatewayReference, Boolean(normalizedId(chargeback.payplus?.merchantReference) && normalizedId(payment.merchantReference ?? payment.gatewayReference)));
-      add("last4", "4 ספרות אחרונות", card, chargeback.last4Digits ? `•••• ${chargeback.last4Digits}` : undefined, payment.last4 ? `•••• ${payment.last4}` : undefined, Boolean(chargeback.last4Digits && payment.last4));
-      add("amount", "סכום", amountMatch, amount?.toFixed(2), paymentAmount?.toFixed(2), amount !== undefined && paymentAmount !== undefined);
-      add("currency", "מטבע", currency, chargeback.currency, payment.currency ?? order.currency, Boolean(normalizedCurrency(chargeback.currency) && normalizedCurrency(payment.currency ?? order.currency)));
-      add("time", "מועד העסקה", time, chargeback.dealTime, payment.processedAt ?? order.createdAt, Boolean(chargeback.dealTime && (payment.processedAt ?? order.createdAt) && Number.isFinite(Date.parse(chargeback.dealTime)) && Number.isFinite(Date.parse(payment.processedAt ?? order.createdAt))));
-      add("terminal", "מסוף", terminal, chargeback.terminalNumber, payment.terminalNumber, Boolean(normalizedId(chargeback.terminalNumber) && normalizedId(payment.terminalNumber)));
-      add("session", "סשן", session, chargeback.sessionNumber, payment.sessionNumber, Boolean(normalizedId(chargeback.sessionNumber) && normalizedId(payment.sessionNumber)));
-      const reasons = [provider && "מזהה עסקה זהה", confirmation && "מספר אישור זהה", voucher && "מספר שובר זהה", reference && "אסמכתת PayPlus זהה", card && "4 ספרות אחרונות זהות", amountMatch && "סכום זהה", sameDay && "יום עסקה זהה", time && `מועד עסקה ${displayTime(distance)}`].filter((value): value is string => Boolean(value));
-      // A chargeback candidate must refer to the same card and the same
-      // charged amount. Amount and date alone create many false positives,
-      // while a missing Shopify card suffix is not evidence of a match.
-      const cardAndAmount = card && amountMatch;
-      const exact = (reference && amountMatch) || (provider && amountMatch) || (cardAndAmount && (confirmation || voucher)) || (amountMatch && preciseTime && !cardConflict);
-      const strong = cardAndAmount && (confirmation || voucher || distance <= 86_400_000 || score >= 65);
-      const possible = cardAndAmount && time;
-      return { order, score: Math.min(score, 100), comparisons, reasons, exact, strong, possible, amountMatch, sameDay, cardConflict };
-    }).sort((left, right) => right.score - left.score)[0];
-  }).sort((left, right) => right.score - left.score);
+  const merchantReference = chargeback.payplus?.merchantReference;
+  if (!merchantReference) return { confidence: "unmatched", score: 0, reasons: [], comparisons: [] };
 
-  const best = candidates[0];
-  if (!best) return { confidence: "unmatched", score: 0, reasons: [], comparisons: [] };
-  const amountDayCandidates = [...new Map(candidates
-    .filter((candidate) => candidate.amountMatch && candidate.sameDay && !candidate.cardConflict)
-    .map((candidate) => [candidate.order.shopifyOrderId, candidate.order]))
-    .values()];
-  const exactAlternative = best.exact && candidates.slice(1).some((candidate) => candidate.exact);
-  const closeAlternative = candidates[1] && best.score - candidates[1].score < 10;
-  // When CrediMatch has only a calendar day (often shown as 00:00), a unique
-  // amount + day candidate is useful for review, but never becomes a strong or exact match.
-  const uniqueAmountDay = amountDayCandidates.length === 1;
-  const ambiguousAmountDay = !best.exact && !best.strong && !best.possible && amountDayCandidates.length > 1;
-  if (ambiguousAmountDay) {
+  const matches = orders.flatMap((order) => (order.payments ?? [])
+    .filter((payment) => sameMerchantReference(merchantReference, payment.merchantReference))
+    .map((payment) => ({ order, payment })));
+  const uniqueOrders = [...new Map(matches.map((match) => [match.order.shopifyOrderId, match])).values()];
+  if (uniqueOrders.length === 0) return { confidence: "unmatched", score: 0, reasons: [], comparisons: [] };
+  if (uniqueOrders.length > 1) {
     return {
-      confidence: "ambiguous", score: best.score,
-      reasons: [`נמצאו ${amountDayCandidates.length} עסקאות באותו סכום ובאותו יום`],
-      comparisons: [],
-      candidates: amountDayCandidates.map((order) => ({
+      confidence: "ambiguous", score: 100,
+      reasons: [`אסמכתת PayPlus נמצאה ב־${uniqueOrders.length} הזמנות`], comparisons: [],
+      candidates: uniqueOrders.map(({ order }) => ({
         orderId: order.shopifyOrderId, orderNumber: order.orderNumber, storeId: order.storeId,
         storeName: order.storeName, customer: order.customer, email: order.email,
         amount: order.amount, currency: order.currency, createdAt: order.createdAt,
       })),
     };
   }
-  if (!best.exact && !best.strong && !best.possible && !uniqueAmountDay) return { confidence: "unmatched", score: 0, reasons: [], comparisons: [] };
-  const confidence = uniqueAmountDay || (best.exact && !exactAlternative)
-    ? "exact"
-    : best.strong && !closeAlternative
-      ? "strong"
-      : best.possible
-        ? "possible"
-        : "unmatched";
+
+  const { order, payment } = uniqueOrders[0];
   return {
-    confidence, score: best.score, orderId: best.order.shopifyOrderId, orderNumber: best.order.orderNumber,
-    storeId: best.order.storeId, storeName: best.order.storeName, customer: best.order.customer, email: best.order.email,
-    amount: best.order.amount, currency: best.order.currency, createdAt: best.order.createdAt,
-    reasons: uniqueAmountDay ? [...best.reasons, "סכום ויום ייחודיים"] : best.reasons, comparisons: best.comparisons,
+    confidence: "exact", score: 100, orderId: order.shopifyOrderId, orderNumber: order.orderNumber,
+    storeId: order.storeId, storeName: order.storeName, customer: order.customer, email: order.email,
+    amount: order.amount, currency: order.currency, createdAt: order.createdAt,
+    reasons: ["אסמכתת PayPlus זהה"],
+    comparisons: [{
+      key: "reference", label: "אסמכתת PayPlus (more_info)", matched: true, compared: true,
+      crediMatchValue: merchantReference, shopifyValue: payment.merchantReference,
+    }],
   };
 }
