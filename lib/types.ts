@@ -105,12 +105,13 @@ export interface OrderPaymentFingerprint {
   voucherNumber?: string;
   terminalNumber?: string;
   sessionNumber?: string;
+  merchantReference?: string;
 }
 
 export type ChargebackMatchConfidence = "exact" | "strong" | "possible" | "ambiguous" | "unmatched";
 
 export interface ChargebackMatchComparison {
-  key: "provider" | "confirmation" | "voucher" | "last4" | "amount" | "currency" | "time" | "terminal" | "session";
+  key: "provider" | "confirmation" | "voucher" | "reference" | "last4" | "amount" | "currency" | "time" | "terminal" | "session";
   label: string;
   matched: boolean;
   compared: boolean;
@@ -178,6 +179,8 @@ export interface PayPlusPaymentEvidence {
   email?: string;
   phone?: string;
   merchantReference?: string;
+  /** Sanitized scalar fields returned by PayPlus, for the investigation view. */
+  details?: Record<string, string>;
   message?: string;
 }
 

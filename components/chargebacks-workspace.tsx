@@ -208,7 +208,7 @@ function ChargebackDialog({ item, stores, onClose }: { item: CrediMatchChargebac
         <div><dt>אימייל</dt><dd><bdi>{item.payplus.email ?? "לא התקבל"}</bdi></dd></div>
         <div><dt>טלפון</dt><dd><bdi>{item.payplus.phone ?? "לא התקבל"}</bdi></dd></div>
         {item.payplus.merchantReference ? <div><dt>אסמכתת חנות</dt><dd><bdi>{item.payplus.merchantReference}</bdi></dd></div> : null}
-      </dl>{item.payplus.message ? <p className="payplus-message">{item.payplus.message}</p> : null}</section> : null}
+      </dl>{item.payplus.details && Object.keys(item.payplus.details).length ? <details className="payplus-details"><summary>כל הפרטים שחזרו מ־PayPlus ({Object.keys(item.payplus.details).length})</summary><dl>{Object.entries(item.payplus.details).map(([key, value]) => <div key={key}><dt><bdi>{key}</bdi></dt><dd><bdi>{value}</bdi></dd></div>)}</dl></details> : null}{item.payplus.message ? <p className="payplus-message">{item.payplus.message}</p> : null}</section> : null}
 
       {confidence === "ambiguous" && match?.candidates?.length ? <section className="settlement-section"><div className="chargeback-section-title"><h3>עסקאות אפשריות לבדיקה</h3><span>אותו סכום ואותו יום — בחר ידנית לאחר בדיקה</span></div><div className="settlement-list">{match.candidates.map((candidate) => <article key={candidate.orderId}><span>{candidate.orderNumber ?? "הזמנה"} · {candidate.customer || candidate.email || "לקוח לא התקבל"}</span><strong>{money(candidate.amount, candidate.currency)}</strong><small>{safeDate(candidate.createdAt)} · {candidate.storeName ?? "Shopify"}</small></article>)}</div></section> : null}
 

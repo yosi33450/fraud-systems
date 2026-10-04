@@ -656,6 +656,9 @@ svg { flex-shrink: 0; }
 .payplus-evidence { background: #f7fbf8; }
 .payplus-evidence dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 28px; }
 .payplus-message { margin: 14px 0 0; color: var(--slate); font-size: .8125rem; }
+.payplus-details { margin-top: 16px; border-top: 1px solid var(--hairline); }
+.payplus-details summary { padding: 14px 0; cursor: pointer; color: var(--trust); font-size: .875rem; font-weight: 650; }
+.payplus-details[open] summary { border-bottom: 1px solid var(--hairline); }
 .shopify-match { background: #f8fbf9; }
 .matched-order-number { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 14px 16px; margin-bottom: 8px; border-radius: 14px; background: var(--trust-soft); color: var(--trust); }
 .matched-order-number span { font-size: 1.125rem; font-weight: 700; }

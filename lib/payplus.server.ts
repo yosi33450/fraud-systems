@@ -44,6 +44,27 @@ const israelDay = (value?: string) => value && Number.isFinite(Date.parse(value)
     .format(new Date(value))
   : undefined;
 
+const sensitiveField = /(cvv|cvc|card.*(?:number|num)|(?:token|secret|api.?key|password|signature)|authorization)/i;
+const sensitiveValue = (value: string) => /\b\d[\d -]{10,}\d\b/.test(value);
+function safeDetails(value: unknown, prefix = "", depth = 0, result: Record<string, string> = {}) {
+  if (depth > 4 || Object.keys(result).length >= 80) return result;
+  if (Array.isArray(value)) {
+    value.slice(0, 12).forEach((entry, index) => safeDetails(entry, `${prefix}[${index}]`, depth + 1, result));
+    return result;
+  }
+  const source = record(value);
+  if (source) {
+    for (const [key, entry] of Object.entries(source)) {
+      const path = prefix ? `${prefix}.${key}` : key;
+      if (!sensitiveField.test(path)) safeDetails(entry, path, depth + 1, result);
+    }
+    return result;
+  }
+  const scalar = text(value);
+  if (scalar && prefix && scalar.length <= 360 && !sensitiveValue(scalar)) result[prefix] = scalar;
+  return result;
+}
+
 function responseData(payload: unknown): UnknownRecord | undefined {
   const root = record(payload);
   const data = record(root?.data);
@@ -67,6 +88,7 @@ function normalizePayload(approvalNumber: string, payload: unknown): Omit<PayPlu
     email: valueAt(data, ["customer.email", "email", "customer_email"]),
     phone: valueAt(data, ["customer.phone", "phone", "customer_phone"]),
     merchantReference: valueAt(data, ["more_info", "more_info_1", "moreInfo", "merchant_reference", "reference"]),
+    details: safeDetails(data),
   };
 }
 
