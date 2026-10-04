@@ -2,9 +2,13 @@ import { NextResponse } from "next/server";
 import { CrediMatchApiError, CrediMatchConfigurationError, getCrediMatchDiscrepancy, getCrediMatchTransaction } from "@/lib/credimatch.server";
 import { crediMatchTransactionIds } from "@/lib/credimatch-matching";
 import { CrediMatchWebhookValidationError, parseCrediMatchWebhook } from "@/lib/credimatch-webhook";
-import { recordCrediMatchDiscrepancy } from "@/lib/operational-store";
+import { exportCrediMatchChargebacks, getDashboardSnapshot, recordCrediMatchDiscrepancy, restoreCrediMatchChargebacks } from "@/lib/operational-store";
 import { hydrateOperationalState, persistOperationalState } from "@/lib/persistence.server";
 import { hydrateCrediMatchChargebacks, persistCrediMatchChargebacks } from "@/lib/credimatch-persistence.server";
+import { enrichChargebackFromPayPlus, lookUpPayPlusPayment, payPlusConfigured } from "@/lib/payplus.server";
+import { getFreshStoreConnection } from "@/lib/shopify-connection.server";
+import { syncCrediMatchOrderCandidatesPage } from "@/lib/shopify-sync.server";
+import type { CrediMatchChargeback } from "@/lib/types";
 
 export const runtime = "nodejs";
 
@@ -15,6 +19,52 @@ const responseShape = (payload: unknown) => {
   if (payload && typeof payload === "object") return { type: "object", keys: Object.keys(payload).slice(0, 20) };
   return { type: typeof payload };
 };
+
+/**
+ * A new CrediMatch event is reconciled immediately, without requiring a user
+ * to press either PayPlus or historical-search buttons.  The search is kept
+ * deliberately small: PayPlus supplies the reference and the payment date,
+ * then Shopify is queried only around that payment date.  The eventual match
+ * remains reference-only (`more_info` <-> `remoteReference`).
+ */
+async function reconcileReceivedChargebacks(chargebacks: CrediMatchChargeback[]) {
+  if (!chargebacks.length || !payPlusConfigured()) return;
+  const enriched: CrediMatchChargeback[] = [];
+  for (let index = 0; index < chargebacks.length; index += 3) {
+    const batch = await Promise.all(chargebacks.slice(index, index + 3).map(async (chargeback) =>
+      enrichChargebackFromPayPlus(chargeback, await lookUpPayPlusPayment(chargeback))));
+    enriched.push(...batch);
+  }
+  restoreCrediMatchChargebacks(enriched);
+
+  for (const chargeback of enriched) {
+    const paymentTime = Date.parse(chargeback.payplus?.paidAt ?? chargeback.dealTime ?? "");
+    if (!chargeback.payplus?.merchantReference || !Number.isFinite(paymentTime)) continue;
+    const snapshot = getDashboardSnapshot(chargeback.tenantId);
+    for (const store of snapshot.stores.filter((item) => item.status !== "disabled")) {
+      try {
+        const connection = await getFreshStoreConnection(chargeback.tenantId, store.id);
+        await syncCrediMatchOrderCandidatesPage({
+          tenantId: chargeback.tenantId,
+          storeId: store.id,
+          shopDomain: connection.store.domain,
+          accessToken: connection.accessToken,
+          // A compact window makes a live reconciliation fast even in a busy
+          // store.  It is not used as proof of a match; only `more_info` is.
+          since: new Date(paymentTime - 36 * 86_400_000).toISOString(),
+          until: new Date(paymentTime + 36 * 86_400_000).toISOString(),
+          scanned: 0,
+        });
+      } catch (error) {
+        console.warn("[credimatch-webhook] automatic Shopify reconciliation deferred", {
+          discrepancyId: chargeback.discrepancyId,
+          storeId: store.id,
+          code: error instanceof Error ? error.message : "UNKNOWN",
+        });
+      }
+    }
+  }
+}
 
 export async function POST(request: Request) {
   const declaredLength = Number(request.headers.get("content-length") ?? 0);
@@ -41,13 +91,16 @@ export async function POST(request: Request) {
     await hydrateOperationalState({ refresh: true });
     await hydrateCrediMatchChargebacks();
     let duplicates = 0;
+    const receivedIds = new Set<string>();
     for (const discrepancyId of discrepancyIds) {
       const discrepancy = await getCrediMatchDiscrepancy(discrepancyId);
       const transactions = await Promise.all(crediMatchTransactionIds(discrepancy).map((transactionId) => getCrediMatchTransaction(transactionId)));
       const result = recordCrediMatchDiscrepancy(discrepancyId, discrepancy, transactions);
       if (result.duplicate) duplicates += 1;
+      else receivedIds.add(discrepancyId);
       console.info("[credimatch-webhook] discrepancy received", { discrepancyId, duplicate: result.duplicate, transactions: transactions.length, response: responseShape(discrepancy) });
     }
+    await reconcileReceivedChargebacks(exportCrediMatchChargebacks().filter((item) => receivedIds.has(item.discrepancyId)));
     await persistCrediMatchChargebacks();
     await persistOperationalState();
     return NextResponse.json({ accepted: true, processed: discrepancyIds.length - duplicates, duplicates, ignoredEvents }, { status: 202 });
