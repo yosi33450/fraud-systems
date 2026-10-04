@@ -39,10 +39,6 @@ const dateAt = (source: UnknownRecord | undefined, paths: string[]) => {
   const candidate = valueAt(source, paths);
   return candidate && Number.isFinite(Date.parse(candidate)) ? candidate : undefined;
 };
-const israelDay = (value?: string) => value && Number.isFinite(Date.parse(value))
-  ? new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jerusalem", year: "numeric", month: "2-digit", day: "2-digit" })
-    .format(new Date(value))
-  : undefined;
 
 const sensitiveField = /(cvv|cvc|card.*(?:number|num)|(?:token|secret|api.?key|password|signature)|authorization)/i;
 const sensitiveValue = (value: string) => /\b\d[\d -]{10,}\d\b/.test(value);
@@ -132,12 +128,9 @@ export async function lookUpPayPlusPayment(chargeback: CrediMatchChargeback): Pr
       return { status: "not-found", checkedAt: new Date().toISOString(), approvalNumber, message: "PayPlus לא החזירה עסקה תואמת" };
     }
     const evidence = normalizePayload(approvalNumber, payload);
-    const chargebackAmount = chargeback.originalAmount ?? chargeback.grossAmount;
-    const amountMismatch = chargebackAmount !== undefined && evidence.amount !== undefined && Math.abs(chargebackAmount - evidence.amount) >= 0.01;
-    const dateMismatch = chargeback.dealTime && evidence.paidAt && israelDay(chargeback.dealTime) !== israelDay(evidence.paidAt);
-    if (amountMismatch || dateMismatch) {
-      return { ...evidence, status: "conflict", checkedAt: new Date().toISOString(), message: "מספר האישור נמצא, אך הסכום או יום העסקה אינם תואמים" };
-    }
+    // The approval number is the authoritative bridge from CrediMatch to
+    // PayPlus. Amounts and dates are descriptive fields only: they must not
+    // block the retrieval of `more_info`, which is the actual Shopify key.
     return { ...evidence, status: "found", checkedAt: new Date().toISOString() };
   } catch (error) {
     if (error instanceof Error && error.message === "PAYPLUS_NOT_CONFIGURED") throw error;

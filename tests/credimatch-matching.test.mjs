@@ -82,6 +82,14 @@ test('links only a unique PayPlus more_info reference', () => {
   assert.equal(match.comparisons[0]?.key, 'reference');
 });
 
+test('preserves Shopify remote reference as the PayPlus more_info key', () => {
+  const [payment] = paymentFingerprintsFromShopify([{
+    receipt: { more_info: 'roC52xUh72jCtVT1OlngYqj6L' }, amount: '445',
+  }], 'ILS');
+  assert.equal(payment.merchantReference, 'roC52xUh72jCtVT1OlngYqj6L');
+  assert.equal(payment.gatewayReference, undefined);
+});
+
 test('does not link identical amount, card, approval or date without PayPlus more_info', () => {
   const match = matchCrediMatchChargeback(chargeback(), [order()]);
   assert.equal(match.confidence, 'unmatched');

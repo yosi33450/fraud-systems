@@ -469,7 +469,10 @@ async function tenderFingerprintsForOrders(input: {
       if (tender.remoteReference) remoteReferences += 1;
       if (tender.paymentDetails?.creditCardNumber) cardSuffixes += 1;
       const [fingerprint] = paymentFingerprintsFromShopify([{
-        gateway_reference: tender.remoteReference ?? undefined,
+        // Shopify exposes PayPlus' opaque merchant reference as the tender
+        // remote reference. Preserve it as `more_info`, not as a generic
+        // gateway id, so it can be compared directly with PayPlus.
+        receipt: { more_info: tender.remoteReference ?? undefined },
         payment_details: { number: tender.paymentDetails?.creditCardNumber },
         amount: tender.amount.amount,
         processed_at: tender.processedAt ?? undefined,
