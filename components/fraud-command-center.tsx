@@ -437,6 +437,7 @@ export function FraudCommandCenter() {
             onRefresh={refreshSnapshot}
             refreshing={syncState === "loading"}
             initializing={syncState === "loading" && storeData.length === 0}
+            loadFailed={syncState === "error" && storeData.length === 0}
             deliveries={deliveries}
             onShowAll={() => setView("cases")}
             onOpenNotifications={() => setView("notifications")}
@@ -539,11 +540,11 @@ function clusterCases(items: FraudCase[]): CaseCluster[] {
   }).sort((left, right) => severityOrder[right.severity] - severityOrder[left.severity] || right.cases.length - left.cases.length);
 }
 
-function Overview({ cases, ledger, query, setQuery, severity, setSeverity, store, setStore, stores, onOpen, casesOnly, onRefresh, refreshing, initializing, deliveries, onShowAll, onOpenNotifications, onOpenStores }: {
+function Overview({ cases, ledger, query, setQuery, severity, setSeverity, store, setStore, stores, onOpen, casesOnly, onRefresh, refreshing, initializing, loadFailed, deliveries, onShowAll, onOpenNotifications, onOpenStores }: {
   ledger?: GiftLedger;
   cases: FraudCase[]; query: string; setQuery: (value: string) => void; severity: Severity | "all"; setSeverity: (value: Severity | "all") => void;
   store: string; setStore: (value: string) => void; stores: Store[]; onOpen: (item: FraudCase) => void; casesOnly: boolean;
-  onRefresh: () => Promise<void>; refreshing: boolean; initializing: boolean;
+  onRefresh: () => Promise<void>; refreshing: boolean; initializing: boolean; loadFailed: boolean;
   deliveries: NotificationDelivery[];
   onShowAll: () => void; onOpenNotifications: () => void; onOpenStores: () => void;
 }) {
@@ -557,9 +558,9 @@ function Overview({ cases, ledger, query, setQuery, severity, setSeverity, store
   const clusters = useMemo(() => clusterCases(displayCases), [displayCases]);
   const selectedCluster = clusters.find((cluster) => cluster.id === selectedClusterId);
   return <div className={`page-content product-page ${casesOnly ? "evidence-workspace" : "overview-workspace"}`}>
-    <PageHeading eyebrow="" title={casesOnly ? "התראות וחקירות" : initializing ? "טוען את מרכז הבקרה…" : hasStores ? "תמונת מצב" : "חיבור חנות Shopify"} description={initializing || hasStores ? undefined : "חבר חנות כדי להתחיל לנטר הזמנות."} action={hasStores ? <button className="secondary-button" onClick={() => void onRefresh()} disabled={refreshing}><RefreshCcw size={15} className={refreshing ? "spin" : ""} /> {refreshing ? "מסנכרן…" : "רענון נתונים"}</button> : initializing ? undefined : <button className="primary-button" onClick={onOpenStores}><Plus size={16} /> חיבור חנות</button>} />
+    <PageHeading eyebrow="" title={casesOnly ? "התראות וחקירות" : initializing ? "טוען את מרכז הבקרה…" : loadFailed ? "טעינת החנות מתעכבת" : hasStores ? "תמונת מצב" : "חיבור חנות Shopify"} description={initializing || hasStores ? undefined : loadFailed ? "חיבור Shopify נשמר. הנתונים השמורים לא נטענו כרגע — נסה לרענן בעוד רגע." : "חבר חנות כדי להתחיל לנטר הזמנות."} action={hasStores || loadFailed ? <button className="secondary-button" onClick={() => void onRefresh()} disabled={refreshing}><RefreshCcw size={15} className={refreshing ? "spin" : ""} /> {refreshing ? "מסנכרן…" : "נסה שוב"}</button> : initializing ? undefined : <button className="primary-button" onClick={onOpenStores}><Plus size={16} /> חיבור חנות</button>} />
 
-    {!casesOnly && initializing ? <section className="connection-empty dashboard-initial-loading" aria-busy="true"><div className="connection-empty-icon"><RefreshCcw size={28} className="spin" /></div><div><span className="eyebrow">טוען נתונים שמורים</span><h2>מכינים את סביבת העבודה</h2><p>בודקים את החנויות, ההתראות וההזמנות האחרונות שלך.</p></div></section> : !casesOnly && !hasStores ? <section className="connection-empty"><div className="connection-empty-icon"><StoreIcon size={28} /></div><div><span className="eyebrow">מתחילים מנתונים אמיתיים</span><h2>סביבת העבודה נקייה ומוכנה לחיבור</h2><p>לא יופיעו עסקאות, עובדים, התראות או נתוני לקוחות עד שחנות Shopify אמיתית תחובר.</p></div><ol><li><strong>1</strong><span>מחברים חנות ומאשרים גישה להזמנות</span></li><li><strong>2</strong><span>בוחרים חוקי סיכון ונמעני אימייל</span></li><li><strong>3</strong><span>הזמנות חדשות נבדקות בזמן אמת</span></li></ol><button className="primary-button" onClick={onOpenStores}>עבור לחיבור חנות <ChevronLeft size={15} /></button></section> : null}
+    {!casesOnly && initializing ? <section className="connection-empty dashboard-initial-loading" aria-busy="true"><div className="connection-empty-icon"><RefreshCcw size={28} className="spin" /></div><div><span className="eyebrow">טוען נתונים שמורים</span><h2>מכינים את סביבת העבודה</h2><p>בודקים את החנויות, ההתראות וההזמנות האחרונות שלך.</p></div></section> : !casesOnly && loadFailed ? <section className="connection-empty dashboard-load-failed"><div className="connection-empty-icon"><RefreshCcw size={28} /></div><div><span className="eyebrow">החנות לא נותקה</span><h2>הנתונים השמורים מתעכבים</h2><p>החיבור ל־Shopify נשמר. המערכת לא הצליחה לקבל כרגע את נתוני המסד, ולכן אינה מציגה מצב חיבור שגוי.</p></div><button className="secondary-button" onClick={() => void onRefresh()}>נסה לטעון שוב <RefreshCcw size={15} /></button></section> : !casesOnly && !hasStores ? <section className="connection-empty"><div className="connection-empty-icon"><StoreIcon size={28} /></div><div><span className="eyebrow">מתחילים מנתונים אמיתיים</span><h2>סביבת העבודה נקייה ומוכנה לחיבור</h2><p>לא יופיעו עסקאות, עובדים, התראות או נתוני לקוחות עד שחנות Shopify אמיתית תחובר.</p></div><ol><li><strong>1</strong><span>מחברים חנות ומאשרים גישה להזמנות</span></li><li><strong>2</strong><span>בוחרים חוקי סיכון ונמעני אימייל</span></li><li><strong>3</strong><span>הזמנות חדשות נבדקות בזמן אמת</span></li></ol><button className="primary-button" onClick={onOpenStores}>עבור לחיבור חנות <ChevronLeft size={15} /></button></section> : null}
 
     {!casesOnly && hasStores ? <>
       <section className="overview-brief" aria-label="תמונת מצב">

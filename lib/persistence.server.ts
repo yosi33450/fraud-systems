@@ -73,7 +73,10 @@ const blobConfigured = () => Boolean(process.env.BLOB_READ_WRITE_TOKEN || proces
 
 // Do not let a temporarily slow database turn the whole dashboard into an
 // endless loading screen. The browser can retry on its next background refresh.
-async function fetchWithTimeout(input: string, init: RequestInit, timeoutMs = 7_000) {
+// Reads contain the encrypted tenant snapshot and may take longer than a small
+// REST query immediately after a cold deployment. Keep this below the browser
+// refresh deadline, but do not make a healthy store appear disconnected.
+async function fetchWithTimeout(input: string, init: RequestInit, timeoutMs = 15_000) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
