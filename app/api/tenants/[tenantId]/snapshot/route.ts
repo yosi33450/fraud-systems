@@ -9,9 +9,10 @@ export const dynamic = "force-dynamic";
 export async function GET(_request: Request, context: { params: Promise<{ tenantId: string }> }) {
   await hydrateOperationalState({ refresh: true });
   const { tenantId } = await context.params;
-  // These independent ledgers enrich the response after a warm start. They
-  // must never delay the primary Shopify snapshot or make a store look gone.
-  void hydrateCrediMatchChargebacks().catch(() => undefined);
+  // Chargebacks are persisted separately from the Shopify snapshot.  Await
+  // their small encrypted document here so a cold instance never sends an
+  // empty chargeback screen before the hydration finishes.
+  await hydrateCrediMatchChargebacks();
   void hydrateGiftEvidence(tenantId).catch(() => undefined);
   return NextResponse.json(getDashboardSnapshot(tenantId), {
     headers: { "Cache-Control": "no-store" },
