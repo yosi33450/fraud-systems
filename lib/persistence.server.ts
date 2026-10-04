@@ -22,7 +22,14 @@ declare global {
   var __shieldLedgerHydration: Promise<void> | undefined;
   // eslint-disable-next-line no-var
   var __shieldLedgerPersistenceQueue: Promise<void> | undefined;
+  // eslint-disable-next-line no-var
+  var __shieldLedgerLastHydratedAt: number | undefined;
 }
+
+// The dashboard asks for a fresh snapshot in the background.  Keep a warm
+// server instance from downloading the complete encrypted state on each of
+// those checks; writes update this timestamp immediately below.
+const refreshIntervalMs = 5 * 60 * 1000;
 
 const encryptionKey = () => {
   const secret = process.env.STATE_ENCRYPTION_KEY;
@@ -196,20 +203,24 @@ async function saveEncryptedState(payload: EncryptedState) {
   await rename(temporaryFile, localFile);
 }
 
-export async function hydrateOperationalState(options: { refresh?: boolean } = {}) {
-  if (options.refresh) {
+export async function hydrateOperationalState(options: { refresh?: boolean; force?: boolean } = {}) {
+  const isFresh = Boolean(globalThis.__shieldLedgerLastHydratedAt)
+    && Date.now() - globalThis.__shieldLedgerLastHydratedAt! < refreshIntervalMs;
+  if (options.refresh && (options.force || !isFresh)) {
     // A Vercel deployment can have several warm function instances. Their
     // in-memory snapshots must not hide newer writes made by another instance.
     await waitForPendingWrite();
     const payload = await loadEncryptedState();
     if (payload) restoreOperationalState(decryptPrivateData(payload));
     globalThis.__shieldLedgerHydration = Promise.resolve();
+    globalThis.__shieldLedgerLastHydratedAt = Date.now();
     return;
   }
   if (!globalThis.__shieldLedgerHydration) {
     const hydration = (async () => {
     const payload = await loadEncryptedState();
     if (payload) restoreOperationalState(decryptPrivateData(payload));
+    globalThis.__shieldLedgerLastHydratedAt = Date.now();
     })();
     // A short database outage must not poison a warm serverless instance forever.
     // Reset the cached promise on failure so the next request can recover normally.
@@ -224,5 +235,6 @@ export async function hydrateOperationalState(options: { refresh?: boolean } = {
 export async function persistOperationalState() {
   const persist = async () => saveEncryptedState(encryptPrivateData(exportOperationalState()));
   globalThis.__shieldLedgerPersistenceQueue = (globalThis.__shieldLedgerPersistenceQueue ?? Promise.resolve()).then(persist, persist);
-  return globalThis.__shieldLedgerPersistenceQueue;
+  await globalThis.__shieldLedgerPersistenceQueue;
+  globalThis.__shieldLedgerLastHydratedAt = Date.now();
 }

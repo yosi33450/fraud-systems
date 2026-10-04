@@ -11,6 +11,14 @@ import type { CrediMatchChargeback, CrediMatchOrderCandidate } from "@/lib/types
 
 const blobPath = "private/credimatch-chargebacks.enc.json";
 const supabaseStateId = "credimatch";
+const hydrationIntervalMs = 5 * 60 * 1000;
+
+declare global {
+  // eslint-disable-next-line no-var
+  var __shieldLedgerCrediMatchLastHydratedAt: number | undefined;
+  // eslint-disable-next-line no-var
+  var __shieldLedgerCrediMatchHydration: Promise<void> | undefined;
+}
 type CrediMatchPersistedState = {
   version: 2;
   chargebacks: CrediMatchChargeback[];
@@ -143,6 +151,7 @@ export async function persistCrediMatchChargebacks() {
       await write(encryptPrivateData(persisted), current.revision);
       restoreCrediMatchChargebacks([...merged.values()]);
       replaceCrediMatchOrderCandidates(persisted.orderCandidates);
+      globalThis.__shieldLedgerCrediMatchLastHydratedAt = Date.now();
       return;
     } catch (error) {
       if (attempt === 6 || !/precondition|already exists|etag|condition.*match|conflicting operation/i.test(error instanceof Error ? error.message : "")) throw error;
@@ -153,7 +162,23 @@ export async function persistCrediMatchChargebacks() {
 
 export async function hydrateCrediMatchChargebacks() {
   if (!configured()) return;
-  const current = await read();
-  restoreCrediMatchChargebacks(current.chargebacks);
-  replaceCrediMatchOrderCandidates(current.orderCandidates);
+  const isFresh = Boolean(globalThis.__shieldLedgerCrediMatchLastHydratedAt)
+    && Date.now() - globalThis.__shieldLedgerCrediMatchLastHydratedAt! < hydrationIntervalMs;
+  if (isFresh) return;
+  if (!globalThis.__shieldLedgerCrediMatchHydration) {
+    const hydration = (async () => {
+      const current = await read();
+      restoreCrediMatchChargebacks(current.chargebacks);
+      replaceCrediMatchOrderCandidates(current.orderCandidates);
+      globalThis.__shieldLedgerCrediMatchLastHydratedAt = Date.now();
+    })();
+    globalThis.__shieldLedgerCrediMatchHydration = hydration.then(
+      () => { globalThis.__shieldLedgerCrediMatchHydration = undefined; },
+      (error) => {
+        globalThis.__shieldLedgerCrediMatchHydration = undefined;
+        throw error;
+      },
+    );
+  }
+  return globalThis.__shieldLedgerCrediMatchHydration;
 }
