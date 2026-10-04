@@ -4,6 +4,7 @@ import { AUTH_COOKIE, verifySessionToken } from "@/lib/auth";
 const publicPath = (pathname: string) =>
   pathname === "/login" ||
   pathname === "/api/auth/login" ||
+  pathname === "/api/recovery/import" ||
   pathname === "/api/credimatch/webhook" ||
   pathname.startsWith("/api/shopify/webhooks/");
 
