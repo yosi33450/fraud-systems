@@ -90,7 +90,11 @@ export function paymentFingerprintsFromShopify(
     voucherNumber: text(receiptValue(transaction.receipt, ["voucherNumber", "voucher", "shovar"])),
     terminalNumber: text(receiptValue(transaction.receipt, ["terminalNumber", "terminalId", "terminal"])),
     sessionNumber: text(receiptValue(transaction.receipt, ["sessionNumber", "sessionId", "session"])),
-    merchantReference: text(receiptValue(transaction.receipt, ["more_info", "moreInfo", "merchantReference", "merchant_reference", "reference"])),
+    // Shopify presents PayPlus' value as "Payment ID" on the order's payment
+    // details.  PayPlus returns that exact opaque value as `more_info`.
+    // It is the only Shopify value eligible for an automatic chargeback link.
+    merchantReference: text(transaction.payment_id)
+      ?? text(receiptValue(transaction.receipt, ["more_info", "moreInfo", "merchantReference", "merchant_reference", "reference"])),
   })).filter((payment) => Object.values(payment).some(Boolean));
 }
 

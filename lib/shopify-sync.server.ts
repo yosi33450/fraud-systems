@@ -535,16 +535,6 @@ export async function syncCrediMatchOrderCandidatesPage(input: {
     },
   });
 
-  // `more_info` from PayPlus is stored by Shopify as the tender transaction's
-  // remoteReference, not consistently in OrderTransaction.receiptJson.  Read
-  // it for this page before matching: CrediMatch approval_num -> PayPlus
-  // more_info -> this exact Shopify reference.
-  const tenderPaymentsByOrder = await tenderFingerprintsForOrders({
-    shopDomain: input.shopDomain,
-    accessToken: input.accessToken,
-    orders: data.orders.nodes,
-  });
-
   const candidates: CrediMatchOrderCandidate[] = data.orders.nodes.map((order) => ({
     tenantId: input.tenantId,
     storeId: input.storeId,
@@ -558,8 +548,7 @@ export async function syncCrediMatchOrderCandidatesPage(input: {
     amount: Number(order.totalPriceSet.shopMoney.amount),
     currency: order.totalPriceSet.shopMoney.currencyCode,
     createdAt: order.createdAt,
-    payments: [
-      ...paymentFingerprintsFromShopify(order.transactions.map((transaction) => ({
+    payments: paymentFingerprintsFromShopify(order.transactions.map((transaction) => ({
         id: transaction.id,
         payment_id: transaction.paymentId ?? undefined,
         gateway: transaction.gateway ?? undefined,
@@ -571,8 +560,6 @@ export async function syncCrediMatchOrderCandidatesPage(input: {
         processed_at: transaction.processedAt ?? undefined,
         receipt: transaction.receiptJson,
       })), order.totalPriceSet.shopMoney.currencyCode),
-      ...(tenderPaymentsByOrder.get(order.id) ?? []),
-    ],
   }));
   if (!input.after) {
     const transactions = data.orders.nodes.flatMap((order) => order.transactions);
