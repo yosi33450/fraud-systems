@@ -7,17 +7,14 @@ import { formatHebrewDateTime } from "@/lib/hebrew-date";
 import type { ChargebackMatchConfidence, CrediMatchChargeback, Store } from "@/lib/types";
 
 const confidenceCopy: Record<ChargebackMatchConfidence, { label: string; detail: string }> = {
-  exact: { label: "התאמה ודאית", detail: "הכרטיס, הסכום ומספר האישור או השובר זהים" },
+  exact: { label: "התאמה ודאית", detail: "אסמכתת PayPlus ‏(more_info) זהה לאסמכתה שנשמרה בעסקת Shopify" },
   strong: { label: "התאמה חזקה", detail: "הכרטיס והסכום זהים ונמצאו סימני תשלום נוספים" },
   possible: { label: "דורש אימות", detail: "הסכום והיום תואמים, אך אין מספיק סימנים לאישור אוטומטי" },
   ambiguous: { label: "נמצאה מחלוקת", detail: "נמצאו כמה עסקאות באותו סכום ובאותו יום; לא בוצע חיבור אוטומטי" },
-  unmatched: { label: "לא נמצאה הזמנה", detail: "לא נמצאה התאמה בין העסקאות שנסרקו. אפשר להפעיל חיפוש היסטורי לפי יום וסכום." },
+  unmatched: { label: "לא נמצאה הזמנה", detail: "לא נמצאה אסמכתת PayPlus תואמת בעסקאות Shopify שנסרקו." },
 };
 
-const copyFor = (match: CrediMatchChargeback["match"] | undefined, confidence: ChargebackMatchConfidence) =>
-  confidence === "exact" && match?.reasons.includes("סכום ויום ייחודיים")
-    ? { label: "נמצאה עסקה לפי סכום ויום", detail: "נמצאה עסקה יחידה באותו סכום ובאותו יום" }
-    : confidenceCopy[confidence];
+const copyFor = (_match: CrediMatchChargeback["match"] | undefined, confidence: ChargebackMatchConfidence) => confidenceCopy[confidence];
 
 const safeDate = (value?: string) => value && Number.isFinite(Date.parse(value)) ? formatHebrewDateTime(value) : "לא התקבל";
 const money = (value?: number, currency = "ILS") => {
@@ -124,7 +121,7 @@ export function ChargebacksWorkspace({ tenantId, chargebacks, stores, onRefresh 
   };
 
   return <div className="page-content product-page chargebacks-page">
-    <div className="page-heading"><div><h1>הכחשות אשראי</h1><p>הכחשות מ־CrediMatch מוצלבות מול PayPlus ו־Shopify לפי מספר אישור, כרטיס, סכום ומועד.</p></div>{chargebacks.length ? <div className="page-heading-actions">{stores.length ? <button className="secondary-button" onClick={backfillMatches} disabled={backfillState === "loading"}><RefreshCw size={16} className={backfillState === "loading" ? "spin" : undefined} />{backfillState === "loading" ? "מחפש התאמות…" : "חיפוש היסטורי"}</button> : null}<button className="secondary-button" onClick={enrichWithPayPlus} disabled={payPlusState === "loading"}><RefreshCw size={16} className={payPlusState === "loading" ? "spin" : undefined} />{payPlusState === "loading" ? "בודק PayPlus…" : "השלמת נתוני PayPlus"}</button></div> : null}</div>
+    <div className="page-heading"><div><h1>הכחשות אשראי</h1><p>CrediMatch → PayPlus → Shopify: לפי מספר אישור ואסמכתת PayPlus בלבד.</p></div>{chargebacks.length ? <div className="page-heading-actions">{stores.length ? <button className="secondary-button" onClick={backfillMatches} disabled={backfillState === "loading"}><RefreshCw size={16} className={backfillState === "loading" ? "spin" : undefined} />{backfillState === "loading" ? "מחפש התאמות…" : "חיפוש היסטורי"}</button> : null}<button className="secondary-button" onClick={enrichWithPayPlus} disabled={payPlusState === "loading"}><RefreshCw size={16} className={payPlusState === "loading" ? "spin" : undefined} />{payPlusState === "loading" ? "בודק PayPlus…" : "השלמת נתוני PayPlus"}</button></div> : null}</div>
     {backfillProgress ? <div className={`inline-notice ${backfillState === "error" || backfillState === "permission" ? "notice-warning" : ""}`} role="status">{backfillProgress}</div> : null}
     {payPlusProgress ? <div className={`inline-notice ${payPlusState === "error" || payPlusState === "configuration" ? "notice-warning" : ""}`} role="status">{payPlusProgress}</div> : null}
 
