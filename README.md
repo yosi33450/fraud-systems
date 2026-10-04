@@ -32,6 +32,7 @@ Copy `.env.example` to `.env.local` and set:
 - `SUPABASE_PUBLISHABLE_KEY` and `PERSISTENCE_API_KEY`: alternative server-only RLS credential used by the pilot deployment when a service-role key isn't provisioned.
 - `DASHBOARD_PASSWORD` and `AUTH_SECRET`: protect the owner dashboard when it is publicly deployed.
 - `CREDIMATCH_USERNAME`, `CREDIMATCH_PASSWORD`, `CREDIMATCH_ID`, and `x_cm_api_key`: server-only CrediMatch API credentials, report/account ID, and encrypted API header key. All four are required when the CrediMatch webhook is enabled. Preserve the exact lowercase spelling of `x_cm_api_key`.
+- `PAYPLUS_API_KEY` and `PAYPLUS_SECRET_KEY`: server-only PayPlus credentials used only to enrich CrediMatch chargebacks by their approval number. Never use a `NEXT_PUBLIC_` prefix and never put these values in client code.
 
 Local development stores the same encrypted snapshot under `.data/`. The directory is excluded from Git. Production deployments fail closed when neither private Vercel Blob nor Supabase persistence is configured, preventing accidental use of ephemeral serverless memory.
 

@@ -38,6 +38,8 @@ export function ChargebacksWorkspace({ tenantId, chargebacks, stores, onRefresh 
   const [filter, setFilter] = useState<ChargebackMatchConfidence | "all">("all");
   const [backfillState, setBackfillState] = useState<"idle" | "loading" | "done" | "error" | "permission">("idle");
   const [backfillProgress, setBackfillProgress] = useState<string>();
+  const [payPlusState, setPayPlusState] = useState<"idle" | "loading" | "done" | "error" | "configuration">("idle");
+  const [payPlusProgress, setPayPlusProgress] = useState<string>();
   const visible = useMemo(() => {
     const search = query.trim().toLowerCase();
     return chargebacks.filter((item) => {
@@ -100,9 +102,31 @@ export function ChargebacksWorkspace({ tenantId, chargebacks, stores, onRefresh 
     }
   };
 
+  const enrichWithPayPlus = async () => {
+    setPayPlusState("loading");
+    setPayPlusProgress("מאתר פרטי תשלום ב־PayPlus לפי מספרי האישור…");
+    try {
+      const response = await fetch(`/api/tenants/${tenantId}/payplus/reconcile`, { method: "POST" });
+      const result = await response.json() as { checked?: number; found?: number; notFound?: number; conflicts?: number; errors?: number; error?: string };
+      if (response.status === 503 && result.error === "PAYPLUS_NOT_CONFIGURED") {
+        setPayPlusState("configuration");
+        setPayPlusProgress("נדרשים מפתח API וסוד שרת של PayPlus בהגדרות השרת לפני תחילת ההצלבה.");
+        return;
+      }
+      if (!response.ok || !Number.isSafeInteger(result.checked)) throw new Error(result.error ?? "PAYPLUS_RECONCILIATION_FAILED");
+      await onRefresh();
+      setPayPlusState("done");
+      setPayPlusProgress(`נבדקו ${result.checked} הכחשות: נמצאו ${result.found ?? 0} התאמות ב־PayPlus${result.conflicts ? `, ו־${result.conflicts} הושארו לבדיקה משום שהפרטים סותרים` : ""}.`);
+    } catch {
+      setPayPlusState("error");
+      setPayPlusProgress("ההצלבה מול PayPlus לא הושלמה. אפשר לנסות שוב; לא נשמרו מפתחות או פרטי כרטיס מלאים.");
+    }
+  };
+
   return <div className="page-content product-page chargebacks-page">
-    <div className="page-heading"><div><h1>הכחשות אשראי</h1><p>הכחשות מ־CrediMatch מוצלבות מול עסקאות Shopify לפי מספר אישור, כרטיס, סכום ומועד.</p></div>{chargebacks.length && stores.length ? <button className="secondary-button" onClick={backfillMatches} disabled={backfillState === "loading"}><RefreshCw size={16} className={backfillState === "loading" ? "spin" : undefined} />{backfillState === "loading" ? "מחפש התאמות…" : "חיפוש היסטורי"}</button> : null}</div>
+    <div className="page-heading"><div><h1>הכחשות אשראי</h1><p>הכחשות מ־CrediMatch מוצלבות מול PayPlus ו־Shopify לפי מספר אישור, כרטיס, סכום ומועד.</p></div>{chargebacks.length ? <div className="page-heading-actions">{stores.length ? <button className="secondary-button" onClick={backfillMatches} disabled={backfillState === "loading"}><RefreshCw size={16} className={backfillState === "loading" ? "spin" : undefined} />{backfillState === "loading" ? "מחפש התאמות…" : "חיפוש היסטורי"}</button> : null}<button className="secondary-button" onClick={enrichWithPayPlus} disabled={payPlusState === "loading"}><RefreshCw size={16} className={payPlusState === "loading" ? "spin" : undefined} />{payPlusState === "loading" ? "בודק PayPlus…" : "השלמת נתוני PayPlus"}</button></div> : null}</div>
     {backfillProgress ? <div className={`inline-notice ${backfillState === "error" || backfillState === "permission" ? "notice-warning" : ""}`} role="status">{backfillProgress}</div> : null}
+    {payPlusProgress ? <div className={`inline-notice ${payPlusState === "error" || payPlusState === "configuration" ? "notice-warning" : ""}`} role="status">{payPlusProgress}</div> : null}
 
     <section className="chargeback-summary" aria-label="סיכום הכחשות">
       <div className="chargeback-summary-primary"><span><FileQuestion size={18} /> הכחשות שנקלטו</span><strong>{chargebacks.length.toLocaleString("he-IL")}</strong><small>המידע מגיע ישירות מ־CrediMatch</small></div>
@@ -172,6 +196,19 @@ function ChargebackDialog({ item, stores, onClose }: { item: CrediMatchChargebac
           <div><dt>רמת התאמה</dt><dd>{copy.label}</dd></div>
         </dl>{shopifyUrl ? <a className="secondary-button shopify-order-link" href={shopifyUrl} target="_blank" rel="noreferrer">פתיחת ההזמנה ב־Shopify <ExternalLink size={15} /></a> : null}</> : <div className="unmatched-guidance"><CalendarClock size={24} /><strong>ההכחשה נשמרה</strong><p>כאשר יש התאמה יחידה של סכום ויום, היא תוצג כ״דורש אימות״ בלבד. התאמה ודאית עדיין דורשת פרט תשלום נוסף.</p></div>}</section>
       </div>
+
+      {item.payplus ? <section className="chargeback-facts payplus-evidence"><div className="chargeback-section-title"><h3>פרטי תשלום מ־PayPlus</h3><span>{item.payplus.status === "found" ? "נמצאה עסקה תואמת" : item.payplus.status === "conflict" ? "נדרשת בדיקה" : "לא נמצאה עסקה"}</span></div><dl>
+        <div><dt>מספר אישור</dt><dd><bdi>{item.payplus.approvalNumber || "לא התקבל"}</bdi></dd></div>
+        <div><dt>מזהה עסקה</dt><dd><bdi>{item.payplus.transactionUid ?? "לא התקבל"}</bdi></dd></div>
+        <div><dt>מספר שובר</dt><dd><bdi>{item.payplus.voucherNumber ?? "לא התקבל"}</bdi></dd></div>
+        <div><dt>סכום</dt><dd>{money(item.payplus.amount, item.payplus.currency ?? item.currency)}</dd></div>
+        <div><dt>מועד תשלום</dt><dd>{safeDate(item.payplus.paidAt)}</dd></div>
+        <div><dt>כרטיס</dt><dd>{masked(item.payplus.cardLast4)}</dd></div>
+        <div><dt>לקוח</dt><dd>{item.payplus.customerName ?? "לא התקבל"}</dd></div>
+        <div><dt>אימייל</dt><dd><bdi>{item.payplus.email ?? "לא התקבל"}</bdi></dd></div>
+        <div><dt>טלפון</dt><dd><bdi>{item.payplus.phone ?? "לא התקבל"}</bdi></dd></div>
+        {item.payplus.merchantReference ? <div><dt>אסמכתת חנות</dt><dd><bdi>{item.payplus.merchantReference}</bdi></dd></div> : null}
+      </dl>{item.payplus.message ? <p className="payplus-message">{item.payplus.message}</p> : null}</section> : null}
 
       {confidence === "ambiguous" && match?.candidates?.length ? <section className="settlement-section"><div className="chargeback-section-title"><h3>עסקאות אפשריות לבדיקה</h3><span>אותו סכום ואותו יום — בחר ידנית לאחר בדיקה</span></div><div className="settlement-list">{match.candidates.map((candidate) => <article key={candidate.orderId}><span>{candidate.orderNumber ?? "הזמנה"} · {candidate.customer || candidate.email || "לקוח לא התקבל"}</span><strong>{money(candidate.amount, candidate.currency)}</strong><small>{safeDate(candidate.createdAt)} · {candidate.storeName ?? "Shopify"}</small></article>)}</div></section> : null}
 

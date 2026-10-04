@@ -159,6 +159,28 @@ export interface CrediMatchSettlement {
   receptionStatus?: string;
 }
 
+/** A minimized, encrypted payment fingerprint returned by PayPlus.
+ * Never contains a full card number, card token, or payment credentials. */
+export interface PayPlusPaymentEvidence {
+  status: "found" | "not-found" | "conflict" | "error";
+  checkedAt: string;
+  approvalNumber: string;
+  transactionUid?: string;
+  paymentRequestUid?: string;
+  voucherNumber?: string;
+  amount?: number;
+  currency?: string;
+  paidAt?: string;
+  paymentStatus?: string;
+  cardLast4?: string;
+  terminalNumber?: string;
+  customerName?: string;
+  email?: string;
+  phone?: string;
+  merchantReference?: string;
+  message?: string;
+}
+
 export interface CrediMatchChargeback {
   id: string;
   tenantId: string;
@@ -189,6 +211,7 @@ export interface CrediMatchChargeback {
   netAmount?: number;
   transactionType?: string;
   settlements: CrediMatchSettlement[];
+  payplus?: PayPlusPaymentEvidence;
   match?: ChargebackOrderMatch;
 }
 
