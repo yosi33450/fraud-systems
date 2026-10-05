@@ -487,6 +487,8 @@ export function getDashboardSnapshot(tenantId: string): DashboardSnapshot {
     const historical = chargebackMatchOrders.get(key);
     chargebackMatchOrders.set(key, {
       ...order,
+      orderNumber: order.orderNumber || historical?.orderNumber,
+      customer: order.customer || historical?.customer,
       payments: [...(historical?.payments ?? []), ...(order.payments ?? [])],
     });
   }

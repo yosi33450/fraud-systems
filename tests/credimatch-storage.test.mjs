@@ -48,7 +48,7 @@ test('a live order without gateway reference does not hide its verified historic
   const orderId = 'gid://shopify/Order/6111350292620';
   const state = structuredClone(initial);
   state.orders.push({
-    tenantId, storeId: 'store-1', shopifyOrderId: orderId, orderNumber: '542939',
+    tenantId, storeId: 'store-1', shopifyOrderId: orderId,
     email: 'buyer@example.com', amount: 357, currency: 'ILS', createdAt: '2026-09-07T15:49:27Z',
     payments: [{ amount: 357, currency: 'ILS', processedAt: '2026-09-07T15:49:27Z' }],
   });
