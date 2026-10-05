@@ -214,7 +214,7 @@ const israelDay = (value?: string) => {
 const displayTime = (distance: number) => distance <= 15 * 60_000 ? "עד 15 דקות" : distance <= 86_400_000 ? "באותו יום" : "עד 3 ימים";
 
 export function matchCrediMatchChargeback(chargeback: CrediMatchChargeback, orders: MatchableShopifyOrder[]): ChargebackOrderMatch {
-  const merchantReference = chargeback.payplus?.merchantReference;
+  const merchantReference = chargeback.payplus?.status === "found" ? chargeback.payplus.merchantReference : undefined;
   if (!merchantReference) return { confidence: "unmatched", score: 0, reasons: [], comparisons: [] };
 
   const matches = orders.flatMap((order) => (order.payments ?? [])

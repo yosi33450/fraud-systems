@@ -2,6 +2,7 @@ import './register-ts-alias.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { matchCrediMatchChargeback, normalizeCrediMatchChargebacks, paymentFingerprintsFromShopify, shopifyChargebackSearchQuery } from '../lib/credimatch-matching.ts';
+import { normalizePayPlusPayload } from '../lib/payplus.server.ts';
 
 const chargeback = (overrides = {}) => ({
   id: 'credimatch-21893735', tenantId: 'tenant-primary', discrepancyId: '21893735', receivedAt: '2026-09-29T12:00:00Z',
@@ -80,6 +81,23 @@ test('links only a unique PayPlus more_info reference', () => {
   assert.equal(match.orderNumber, '#123');
   assert.deepEqual(match.reasons, ['אסמכתת PayPlus זהה']);
   assert.equal(match.comparisons[0]?.key, 'reference');
+});
+
+test('reads PayPlus card suffix and terminal from the actual top-level response fields', () => {
+  const evidence = normalizePayPlusPayload('7641146', { data: {
+    approval_num: '7641146', four_digits: '7202', terminal_merchant_number: '7149427013',
+    more_info: 'rGRBnyao738mUAOvYiFd3rQd7', amount: 400,
+  } });
+  assert.equal(evidence.cardLast4, '7202');
+  assert.equal(evidence.terminalNumber, '7149427013');
+  assert.equal(evidence.merchantReference, 'rGRBnyao738mUAOvYiFd3rQd7');
+});
+
+test('never links a PayPlus payment rejected as a card conflict', () => {
+  const result = matchCrediMatchChargeback(chargeback({
+    payplus: { status: 'conflict', merchantReference: 'same-payment-id' },
+  }), [order({ payments: [{ merchantReference: 'same-payment-id' }] })]);
+  assert.equal(result.confidence, 'unmatched');
 });
 
 test('preserves Shopify remote reference as the PayPlus more_info key', () => {

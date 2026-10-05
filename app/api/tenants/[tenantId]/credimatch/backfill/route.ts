@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { hydrateCrediMatchChargebacks, persistCrediMatchChargebacks } from "@/lib/credimatch-persistence.server";
 import { hydrateOperationalState } from "@/lib/persistence.server";
 import { getFreshStoreConnection } from "@/lib/shopify-connection.server";
-import { syncCrediMatchOrderCandidatesPage } from "@/lib/shopify-sync.server";
+import { syncCrediMatchOrderCandidatesPage, syncCrediMatchTenderCandidatesPage } from "@/lib/shopify-sync.server";
 import { getCrediMatchTransaction } from "@/lib/credimatch.server";
 import { crediMatchTransactionTime, crediMatchTransactionTimeIsPrecise, crediMatchTransactionUid } from "@/lib/credimatch-matching";
 import { exportCrediMatchChargebacks, restoreCrediMatchChargebacks } from "@/lib/operational-store";
@@ -22,6 +22,7 @@ export async function POST(request: Request, context: { params: Promise<{ tenant
       after?: string | null;
       scanned?: number;
       exactReferenceScan?: boolean;
+      tenderReferenceScan?: boolean;
     };
     const sinceTime = typeof body.since === "string" ? Date.parse(body.since) : NaN;
     const untilTime = typeof body.until === "string" ? Date.parse(body.until) : NaN;
@@ -39,7 +40,7 @@ export async function POST(request: Request, context: { params: Promise<{ tenant
 
     await hydrateOperationalState({ refresh: true });
     await hydrateCrediMatchChargebacks();
-    if (!body.after && !body.exactReferenceScan) {
+    if (!body.after && !body.exactReferenceScan && !body.tenderReferenceScan) {
       const apiChargebacks = exportCrediMatchChargebacks().filter((chargeback) =>
         chargeback.tenantId === tenantId && chargeback.transactionId);
       for (let index = 0; index < apiChargebacks.length; index += 5) {
@@ -70,7 +71,7 @@ export async function POST(request: Request, context: { params: Promise<{ tenant
       });
     }
     const connection = await getFreshStoreConnection(tenantId, body.storeId);
-    const result = await syncCrediMatchOrderCandidatesPage({
+    const range = {
       tenantId,
       storeId: body.storeId,
       shopDomain: connection.store.domain,
@@ -79,6 +80,9 @@ export async function POST(request: Request, context: { params: Promise<{ tenant
       until: new Date(untilTime).toISOString(),
       after: body.after ?? null,
       scanned,
+    };
+    const result = body.tenderReferenceScan ? await syncCrediMatchTenderCandidatesPage(range) : await syncCrediMatchOrderCandidatesPage({
+      ...range,
       searchQuery: body.exactReferenceScan
         ? `created_at:>=${new Date(sinceTime).toISOString()} created_at:<=${new Date(untilTime).toISOString()}`
         : undefined,

@@ -67,7 +67,7 @@ function responseData(payload: unknown): UnknownRecord | undefined {
   return data ?? root;
 }
 
-function normalizePayload(approvalNumber: string, payload: unknown): Omit<PayPlusPaymentEvidence, "status" | "checkedAt"> {
+export function normalizePayPlusPayload(approvalNumber: string, payload: unknown): Omit<PayPlusPaymentEvidence, "status" | "checkedAt"> {
   const data = responseData(payload);
   return {
     approvalNumber: valueAt(data, ["approval_num", "approval_number", "approvalNumber"]) ?? approvalNumber,
@@ -78,8 +78,8 @@ function normalizePayload(approvalNumber: string, payload: unknown): Omit<PayPlu
     currency: currency(valueAt(data, ["currency", "currency_code", "transaction.currency"])),
     paidAt: dateAt(data, ["transaction_date", "transactionDate", "created_at", "createdAt", "transaction.date"]),
     paymentStatus: valueAt(data, ["status", "transaction.status", "payment_status"]),
-    cardLast4: last4(valueAt(data, ["card_information.four_digits", "card_information.last4", "card_last4", "last4"])),
-    terminalNumber: valueAt(data, ["terminal_number", "terminalNumber", "terminal.num"]),
+    cardLast4: last4(valueAt(data, ["four_digits", "card_information.four_digits", "card_information.last4", "card_last4", "last4"])),
+    terminalNumber: valueAt(data, ["terminal_merchant_number", "terminal_number", "terminalNumber", "terminal.num"]),
     customerName: valueAt(data, ["customer_name", "customer.name", "customer.full_name"]),
     email: valueAt(data, ["customer.email", "email", "customer_email"]),
     phone: valueAt(data, ["customer.phone", "phone", "customer_phone"]),
@@ -127,10 +127,15 @@ export async function lookUpPayPlusPayment(chargeback: CrediMatchChargeback): Pr
     if (resultStatus && !["success", "ok", "succeeded"].includes(resultStatus)) {
       return { status: "not-found", checkedAt: new Date().toISOString(), approvalNumber, message: "PayPlus לא החזירה עסקה תואמת" };
     }
-    const evidence = normalizePayload(approvalNumber, payload);
-    // The approval number is the authoritative bridge from CrediMatch to
-    // PayPlus. Amounts and dates are descriptive fields only: they must not
-    // block the retrieval of `more_info`, which is the actual Shopify key.
+    const evidence = normalizePayPlusPayload(approvalNumber, payload);
+    // PayPlus documents that an approval number may repeat and its lookup
+    // returns the latest transaction. Verify independent card evidence before
+    // using the returned more_info as an automatic Shopify linking key.
+    const expectedLast4 = last4(chargeback.last4Digits);
+    if ((evidence.approvalNumber && evidence.approvalNumber !== approvalNumber)
+      || (expectedLast4 && evidence.cardLast4 && expectedLast4 !== evidence.cardLast4)) {
+      return { ...evidence, status: "conflict", checkedAt: new Date().toISOString(), message: "מספר האישור החזיר עסקה שפרטיה אינם תואמים להכחשה" };
+    }
     return { ...evidence, status: "found", checkedAt: new Date().toISOString() };
   } catch (error) {
     if (error instanceof Error && error.message === "PAYPLUS_NOT_CONFIGURED") throw error;

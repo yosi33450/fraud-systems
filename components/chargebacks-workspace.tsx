@@ -40,6 +40,8 @@ export function ChargebacksWorkspace({ tenantId, chargebacks, stores, onRefresh 
   const [payPlusProgress, setPayPlusProgress] = useState<string>();
   const [fullMatchState, setFullMatchState] = useState<"idle" | "loading" | "done" | "error">("idle");
   const [fullMatchProgress, setFullMatchProgress] = useState<string>();
+  const [tenderScanState, setTenderScanState] = useState<"idle" | "loading" | "done" | "error">("idle");
+  const [tenderScanProgress, setTenderScanProgress] = useState<string>();
   const visible = useMemo(() => {
     const search = query.trim().toLowerCase();
     return chargebacks.filter((item) => {
@@ -163,9 +165,56 @@ export function ChargebacksWorkspace({ tenantId, chargebacks, stores, onRefresh 
     }
   };
 
+  const scanTenderReferences = async () => {
+    setTenderScanState("loading");
+    const pending = chargebacks.filter((item) => item.match?.confidence !== "exact" && item.payplus?.status === "found" && item.payplus.merchantReference);
+    const days = [...new Set(pending.map((item) => {
+      const time = Date.parse(item.dealTime ?? item.creationTime ?? item.receivedAt);
+      return Number.isFinite(time) ? new Date(time).toISOString().slice(0, 10) : undefined;
+    }).filter((day): day is string => Boolean(day)))];
+    let totalScanned = 0;
+    let exactReferences = 0;
+    try {
+      for (const store of stores.filter((item) => item.status !== "disabled")) {
+        for (const day of days) {
+          const center = Date.parse(`${day}T00:00:00.000Z`);
+          const since = new Date(center - 2 * 86_400_000).toISOString();
+          const until = new Date(Math.min(center + 3 * 86_400_000, Date.now())).toISOString();
+          let after: string | null = null;
+          let scanned = 0;
+          for (let page = 0; page < 2_000; page += 1) {
+            const response = await fetch(`/api/tenants/${tenantId}/credimatch/backfill`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ storeId: store.id, since, until, after, scanned, tenderReferenceScan: true }),
+            });
+            const result = await response.json() as { scanned?: number; matchedTenders?: number; nextCursor?: string | null; complete?: boolean; error?: string };
+            if (!response.ok || !Number.isSafeInteger(result.scanned)) throw new Error(result.error ?? "TENDER_SCAN_FAILED");
+            scanned = result.scanned!;
+            exactReferences += result.matchedTenders ?? 0;
+            setTenderScanProgress(`נבדקו ${(totalScanned + scanned).toLocaleString("he-IL")} תנועות תשלום ב־Shopify…`);
+            if (result.complete) break;
+            if (!result.nextCursor || result.nextCursor === after || page === 1_999) throw new Error("TENDER_SCAN_PAGE_LIMIT");
+            after = result.nextCursor;
+            if (page % 5 === 4) await onRefresh();
+          }
+          totalScanned += scanned;
+        }
+      }
+      await onRefresh();
+      setTenderScanState("done");
+      setTenderScanProgress(`נבדקו ${totalScanned.toLocaleString("he-IL")} תנועות תשלום; נמצאו ${exactReferences} אסמכתאות זהות נוספות.`);
+    } catch {
+      await onRefresh();
+      setTenderScanState("error");
+      setTenderScanProgress(`בדיקת תנועות התשלום נעצרה אחרי ${totalScanned.toLocaleString("he-IL")} תנועות. התאמות שכבר נמצאו נשמרו.`);
+    }
+  };
+
   return <div className="page-content product-page chargebacks-page">
-    <div className="page-heading"><div><h1>הכחשות אשראי</h1><p>CrediMatch → PayPlus → Shopify: לפי מספר אישור ואסמכתת PayPlus בלבד.</p></div>{chargebacks.length ? <div className="page-heading-actions">{stores.length && unresolved ? <button className="secondary-button" onClick={reconcileAll} disabled={fullMatchState === "loading"}><RefreshCw size={16} className={fullMatchState === "loading" ? "spin" : undefined} />{fullMatchState === "loading" ? "משלים התאמות…" : "בדוק את כל ההכחשות"}</button> : null}{stores.length ? <button className="secondary-button" onClick={backfillMatches} disabled={backfillState === "loading"}><RefreshCw size={16} className={backfillState === "loading" ? "spin" : undefined} />{backfillState === "loading" ? "מחפש התאמות…" : "חיפוש היסטורי"}</button> : null}<button className="secondary-button" onClick={enrichWithPayPlus} disabled={payPlusState === "loading"}><RefreshCw size={16} className={payPlusState === "loading" ? "spin" : undefined} />{payPlusState === "loading" ? "בודק PayPlus…" : "השלמת נתוני PayPlus"}</button></div> : null}</div>
+    <div className="page-heading"><div><h1>הכחשות אשראי</h1><p>CrediMatch → PayPlus → Shopify: לפי מספר אישור ואסמכתת PayPlus בלבד.</p></div>{chargebacks.length ? <div className="page-heading-actions">{stores.length && unresolved ? <button className="secondary-button" onClick={reconcileAll} disabled={fullMatchState === "loading" || tenderScanState === "loading"}><RefreshCw size={16} className={fullMatchState === "loading" ? "spin" : undefined} />{fullMatchState === "loading" ? "משלים התאמות…" : "בדוק את כל ההכחשות"}</button> : null}{stores.length && unresolved ? <button className="secondary-button" onClick={scanTenderReferences} disabled={tenderScanState === "loading" || fullMatchState === "loading"}><RefreshCw size={16} className={tenderScanState === "loading" ? "spin" : undefined} />{tenderScanState === "loading" ? "בודק תנועות…" : "בדיקת תנועות תשלום"}</button> : null}{stores.length ? <button className="secondary-button" onClick={backfillMatches} disabled={backfillState === "loading"}><RefreshCw size={16} className={backfillState === "loading" ? "spin" : undefined} />{backfillState === "loading" ? "מחפש התאמות…" : "חיפוש היסטורי"}</button> : null}<button className="secondary-button" onClick={enrichWithPayPlus} disabled={payPlusState === "loading"}><RefreshCw size={16} className={payPlusState === "loading" ? "spin" : undefined} />{payPlusState === "loading" ? "בודק PayPlus…" : "השלמת נתוני PayPlus"}</button></div> : null}</div>
     {fullMatchProgress ? <div className={`inline-notice ${fullMatchState === "error" ? "notice-warning" : ""}`} role="status">{fullMatchProgress}</div> : null}
+    {tenderScanProgress ? <div className={`inline-notice ${tenderScanState === "error" ? "notice-warning" : ""}`} role="status">{tenderScanProgress}</div> : null}
     {backfillProgress ? <div className={`inline-notice ${backfillState === "error" || backfillState === "permission" ? "notice-warning" : ""}`} role="status">{backfillProgress}</div> : null}
     {payPlusProgress ? <div className={`inline-notice ${payPlusState === "error" || payPlusState === "configuration" ? "notice-warning" : ""}`} role="status">{payPlusProgress}</div> : null}
 

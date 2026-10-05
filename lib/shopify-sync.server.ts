@@ -108,6 +108,21 @@ export const CREDIMATCH_TENDER_CANDIDATES_QUERY = `#graphql
   }
 `;
 
+const CREDIMATCH_TENDER_ORDER_QUERY = `#graphql
+  query CrediMatchTenderOrder($id: ID!) {
+    order(id: $id) {
+      id name createdAt email
+      totalPriceSet { shopMoney { amount currencyCode } }
+      customer { firstName lastName defaultEmailAddress { emailAddress } }
+      transactions {
+        id gateway formattedGateway paymentId accountNumber authorizationCode processedAt receiptJson
+        paymentDetails { __typename ... on CardPaymentDetails { number company } }
+        amountSet { shopMoney { amount currencyCode } }
+      }
+    }
+  }
+`;
+
 export const CREDIMATCH_ORDER_ACCESS_QUERY = `#graphql
   query CrediMatchOrderAccess {
     currentAppInstallation { accessScopes { handle } }
@@ -490,6 +505,84 @@ async function tenderFingerprintsForOrders(input: {
     cardSuffixes,
   });
   return byOrder;
+}
+
+/** Scan actual money movements separately from order transactions. Only an
+ * exact PayPlus more_info/remoteReference equality is persisted as a link. */
+export async function syncCrediMatchTenderCandidatesPage(input: {
+  tenantId: string;
+  storeId: string;
+  shopDomain: string;
+  accessToken: string;
+  since: string;
+  until: string;
+  after?: string | null;
+  scanned: number;
+}) {
+  const chargebacks = exportCrediMatchChargebacks().filter((item) =>
+    item.tenantId === input.tenantId && item.match?.confidence !== "exact" && item.payplus?.status === "found" && item.payplus.merchantReference);
+  const wanted = new Set(chargebacks.map((item) => item.payplus!.merchantReference!.replace(/[^a-z0-9]/gi, "").toLowerCase()));
+  const data = await shopifyAdminRequest<{ tenderTransactions: {
+    nodes: TenderTransactionNode[];
+    pageInfo: { hasNextPage: boolean; endCursor: string | null };
+  } }>({
+    shopDomain: input.shopDomain,
+    accessToken: input.accessToken,
+    query: CREDIMATCH_TENDER_CANDIDATES_QUERY,
+    variables: { first: 200, after: input.after ?? null, query: `processed_at:>=${input.since} processed_at:<=${input.until}` },
+  });
+  const candidates: CrediMatchOrderCandidate[] = [];
+  const matchedTenders = data.tenderTransactions.nodes.filter((tender) => tender.order?.id && tender.remoteReference
+    && wanted.has(tender.remoteReference.replace(/[^a-z0-9]/gi, "").toLowerCase()));
+  for (const tender of matchedTenders) {
+    const orderId = tender.order!.id;
+    const result = await shopifyAdminRequest<{ order: CrediMatchOrderCandidateNode | null }>({
+      shopDomain: input.shopDomain,
+      accessToken: input.accessToken,
+      query: CREDIMATCH_TENDER_ORDER_QUERY,
+      variables: { id: orderId },
+    });
+    const order = result.order;
+    if (!order) continue;
+    const payments = paymentFingerprintsFromShopify(order.transactions.map((transaction) => ({
+      id: transaction.id,
+      payment_id: transaction.paymentId ?? undefined,
+      gateway: transaction.gateway ?? undefined,
+      formatted_gateway: transaction.formattedGateway ?? undefined,
+      account_number: transaction.accountNumber ?? undefined,
+      payment_details: transaction.paymentDetails,
+      authorization_code: transaction.authorizationCode ?? undefined,
+      amount: transaction.amountSet.shopMoney.amount,
+      processed_at: transaction.processedAt ?? undefined,
+      receipt: transaction.receiptJson,
+    })), order.totalPriceSet.shopMoney.currencyCode);
+    const [tenderPayment] = paymentFingerprintsFromShopify([{
+      receipt: { more_info: tender.remoteReference },
+      payment_details: { number: tender.paymentDetails?.creditCardNumber },
+      amount: tender.amount.amount,
+      processed_at: tender.processedAt ?? undefined,
+    }], tender.amount.currencyCode);
+    const candidate: CrediMatchOrderCandidate = {
+      tenantId: input.tenantId,
+      storeId: input.storeId,
+      shopifyOrderId: order.id,
+      orderNumber: order.name,
+      customer: [order.customer?.firstName, order.customer?.lastName].filter(Boolean).join(" ") || undefined,
+      email: selectCustomerEmail({ orderEmail: order.email, customerEmail: order.customer?.defaultEmailAddress?.emailAddress }),
+      amount: Number(order.totalPriceSet.shopMoney.amount),
+      currency: order.totalPriceSet.shopMoney.currencyCode,
+      createdAt: order.createdAt,
+      payments: [...payments, tenderPayment],
+    };
+    const existing = candidates.find((item) => item.shopifyOrderId === order.id);
+    if (existing) existing.payments = [...(existing.payments ?? []), tenderPayment];
+    else candidates.push(candidate);
+  }
+  restoreCrediMatchOrderCandidates(candidates.filter((candidate) =>
+    chargebacks.some((chargeback) => matchCrediMatchChargeback(chargeback, [candidate]).confidence === "exact")));
+  const nextCursor = data.tenderTransactions.pageInfo.hasNextPage ? data.tenderTransactions.pageInfo.endCursor : null;
+  if (data.tenderTransactions.pageInfo.hasNextPage && !nextCursor) throw new Error("SHOPIFY_TENDER_CURSOR_MISSING");
+  return { scanned: input.scanned + data.tenderTransactions.nodes.length, nextCursor, complete: !nextCursor, matchedTenders: candidates.length };
 }
 
 /**
