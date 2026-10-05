@@ -2,7 +2,7 @@ import { after, NextResponse } from "next/server";
 import { CrediMatchApiError, CrediMatchConfigurationError, getCrediMatchDiscrepancy, getCrediMatchTransaction } from "@/lib/credimatch.server";
 import { crediMatchTransactionIds } from "@/lib/credimatch-matching";
 import { CrediMatchWebhookValidationError, parseCrediMatchWebhook } from "@/lib/credimatch-webhook";
-import { exportCrediMatchChargebacks, recordCrediMatchDiscrepancy } from "@/lib/operational-store";
+import { exportCrediMatchChargebacks, getDashboardSnapshot, recordCrediMatchDiscrepancy } from "@/lib/operational-store";
 import { hydrateOperationalState, persistOperationalState } from "@/lib/persistence.server";
 import { hydrateCrediMatchChargebacks, persistCrediMatchChargebacks } from "@/lib/credimatch-persistence.server";
 import { reconcileChargebacksAutomatically } from "@/lib/credimatch-auto-reconcile.server";
@@ -59,7 +59,10 @@ export async function POST(request: Request) {
     // persisted before this work starts, and the daily job retries failures.
     after(async () => {
       try {
-        await reconcileChargebacksAutomatically(exportCrediMatchChargebacks().filter((item) => receivedIds.has(item.discrepancyId)), 8);
+        const resolved = new Set(getDashboardSnapshot(exportCrediMatchChargebacks()[0]?.tenantId ?? "").chargebacks
+          .filter((item) => item.match?.confidence === "exact").map((item) => item.discrepancyId));
+        await reconcileChargebacksAutomatically(exportCrediMatchChargebacks().filter((item) =>
+          receivedIds.has(item.discrepancyId) && !resolved.has(item.discrepancyId)), 8);
         await persistCrediMatchChargebacks();
       } catch (error) {
         console.error("[credimatch-webhook] background reconciliation failed", {
