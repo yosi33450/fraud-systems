@@ -97,6 +97,16 @@ test('uses Shopify Payment ID as the PayPlus more_info key', () => {
   assert.equal(payment.merchantReference, 'roC52xUh72jCtVT1OlngYqj6L');
 });
 
+test('keeps a distinct receipt more_info as a second exact reference', () => {
+  const payments = paymentFingerprintsFromShopify([{
+    payment_id: 'shopify-payment-id', receipt: { more_info: 'payplus-merchant-reference' }, amount: '445',
+  }], 'ILS');
+  assert.deepEqual(payments.map((payment) => payment.merchantReference), ['shopify-payment-id', 'payplus-merchant-reference']);
+  assert.equal(matchCrediMatchChargeback(chargeback({
+    payplus: { status: 'found', merchantReference: 'payplus-merchant-reference' },
+  }), [order({ payments })]).confidence, 'exact');
+});
+
 test('does not link identical amount, card, approval or date without PayPlus more_info', () => {
   const match = matchCrediMatchChargeback(chargeback(), [order()]);
   assert.equal(match.confidence, 'unmatched');

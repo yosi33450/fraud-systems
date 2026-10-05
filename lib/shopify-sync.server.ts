@@ -507,6 +507,7 @@ export async function syncCrediMatchOrderCandidatesPage(input: {
   after?: string | null;
   scanned: number;
   searchQuery?: string;
+  includeTender?: boolean;
 }) {
   if (!input.after && Date.parse(input.since) < Date.now() - 60 * 86_400_000) {
     const access = await shopifyAdminRequest<{ currentAppInstallation: { accessScopes: Array<{ handle: string }> } }>({
@@ -607,6 +608,14 @@ export async function syncCrediMatchOrderCandidatesPage(input: {
       receiptPaymentIdMatchesCrediMatchUid: identifierMatches(receiptPaymentIds, crediMatchProviderUids),
       receiptKeys: [...receiptKeys].slice(0, 40),
     });
+  }
+  if (input.includeTender && candidates.length) {
+    const tenderByOrder = await tenderFingerprintsForOrders({
+      shopDomain: input.shopDomain, accessToken: input.accessToken, orders: data.orders.nodes,
+    });
+    for (const candidate of candidates) {
+      candidate.payments = [...(candidate.payments ?? []), ...(tenderByOrder.get(candidate.shopifyOrderId) ?? [])];
+    }
   }
   const chargebacks = exportCrediMatchChargebacks().filter((item) => item.tenantId === input.tenantId);
   restoreCrediMatchOrderCandidates(candidates.filter((candidate) =>

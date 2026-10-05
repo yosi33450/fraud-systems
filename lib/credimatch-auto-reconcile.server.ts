@@ -12,7 +12,7 @@ export function pendingAutomaticChargebacks(tenantId: string, limit = 5) {
   return snapshot.chargebacks.filter((item) => {
     if (!item.confirmationNumber || item.match?.confidence === "exact") return false;
     const checkedAt = Date.parse(item.payplus?.checkedAt ?? "");
-    return !Number.isFinite(checkedAt) || Date.now() - checkedAt >= DAY;
+    return Boolean(item.reconciliationCursor) || !Number.isFinite(checkedAt) || Date.now() - checkedAt >= DAY;
   }).sort((left, right) => {
     const leftChecked = Date.parse(left.payplus?.checkedAt ?? "") || 0;
     const rightChecked = Date.parse(right.payplus?.checkedAt ?? "") || 0;
@@ -34,42 +34,49 @@ export async function reconcileChargebacksAutomatically(chargebacks: CrediMatchC
     if (!enriched.payplus?.merchantReference || !Number.isFinite(paymentTime)) { deferred += 1; continue; }
     const stores = getDashboardSnapshot(enriched.tenantId).stores.filter((store) => store.status !== "disabled");
     let resumeStoreId = enriched.reconciliationCursor?.storeId;
+    let linkedThisChargeback = false;
     for (const store of stores) {
       if (resumeStoreId && resumeStoreId !== store.id) continue;
       try {
         const connection = await getFreshStoreConnection(enriched.tenantId, store.id);
-        let after: string | null = resumeStoreId ? enriched.reconciliationCursor?.after ?? null : null;
         const since = new Date(paymentTime - 36 * DAY).toISOString();
         const until = new Date(paymentTime + 36 * DAY).toISOString();
-        for (let page = 0; page < maxPages; page += 1) {
-          const result = await syncCrediMatchOrderCandidatesPage({
-            tenantId: enriched.tenantId,
-            storeId: store.id,
-            shopDomain: connection.store.domain,
-            accessToken: connection.accessToken,
-            since,
-            until,
-            after,
-            scanned: 0,
-            // Stable query is required when resuming a cursor on the next run.
-            searchQuery: `created_at:>=${since} created_at:<=${until}`,
-          });
-          const current = getDashboardSnapshot(enriched.tenantId).chargebacks.find((item) => item.discrepancyId === enriched.discrepancyId);
-          if (current?.match?.confidence === "exact") {
-            restoreCrediMatchChargebacks([{ ...enriched, reconciliationCursor: undefined }]);
-            linked += 1;
-            break;
+        const cardLast4 = enriched.last4Digits?.replace(/\D/g, "").slice(-4);
+        const phases: Array<"card" | "date"> = cardLast4?.length === 4 ? ["card", "date"] : ["date"];
+        let incomplete = false;
+        for (const phase of phases) {
+          const saved = enriched.reconciliationCursor;
+          const resumePhase = saved?.phase ?? "date";
+          if (resumeStoreId === store.id && saved && phases.indexOf(phase) < phases.indexOf(resumePhase)) continue;
+          let after: string | null = resumeStoreId === store.id && saved && phase === resumePhase ? saved.after : null;
+          const dateQuery = `created_at:>=${since} created_at:<=${until}`;
+          const searchQuery = phase === "card" ? `${dateQuery} credit_card_last4:${cardLast4}` : dateQuery;
+          for (let page = 0; page < maxPages; page += 1) {
+            const result = await syncCrediMatchOrderCandidatesPage({
+              tenantId: enriched.tenantId,
+              storeId: store.id,
+              shopDomain: connection.store.domain,
+              accessToken: connection.accessToken,
+              since, until, after, scanned: 0, searchQuery,
+            });
+            const current = getDashboardSnapshot(enriched.tenantId).chargebacks.find((item) => item.discrepancyId === enriched.discrepancyId);
+            if (current?.match?.confidence === "exact") {
+              restoreCrediMatchChargebacks([{ ...enriched, reconciliationCursor: undefined }]);
+              linked += 1;
+              linkedThisChargeback = true;
+              break;
+            }
+            if (result.complete) break;
+            if (!result.nextCursor || result.nextCursor === after) throw new Error("SHOPIFY_SYNC_CURSOR_MISSING");
+            after = result.nextCursor;
+            restoreCrediMatchChargebacks([{ ...enriched, reconciliationCursor: { storeId: store.id, after, phase } }]);
+            if (page === maxPages - 1) incomplete = true;
           }
-          if (result.complete) {
-            restoreCrediMatchChargebacks([{ ...enriched, reconciliationCursor: undefined }]);
-            resumeStoreId = undefined;
-            break;
-          }
-          if (!result.nextCursor || result.nextCursor === after) throw new Error("SHOPIFY_SYNC_CURSOR_MISSING");
-          after = result.nextCursor;
-          restoreCrediMatchChargebacks([{ ...enriched, reconciliationCursor: { storeId: store.id, after } }]);
+          if (linkedThisChargeback || incomplete) break;
         }
-        if (getDashboardSnapshot(enriched.tenantId).chargebacks.some((item) => item.discrepancyId === enriched.discrepancyId && item.match?.confidence === "exact")) break;
+        if (linkedThisChargeback || incomplete) break;
+        restoreCrediMatchChargebacks([{ ...enriched, reconciliationCursor: undefined }]);
+        resumeStoreId = undefined;
       } catch (error) {
         deferred += 1;
         console.warn("[credimatch-auto] Shopify reconciliation deferred", {

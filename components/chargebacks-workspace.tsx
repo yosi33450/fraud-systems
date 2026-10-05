@@ -12,7 +12,7 @@ const confidenceCopy: Record<ChargebackMatchConfidence, { label: string; detail:
   strong: { label: "התאמה חזקה", detail: "הכרטיס והסכום זהים ונמצאו סימני תשלום נוספים" },
   possible: { label: "דורש אימות", detail: "הסכום והיום תואמים, אך אין מספיק סימנים לאישור אוטומטי" },
   ambiguous: { label: "נמצאה מחלוקת", detail: "נמצאו כמה עסקאות באותו סכום ובאותו יום; לא בוצע חיבור אוטומטי" },
-  unmatched: { label: "לא נמצאה הזמנה", detail: "לא נמצאה אסמכתת PayPlus תואמת בעסקאות Shopify שנסרקו." },
+  unmatched: { label: "טרם קושרה הזמנה", detail: "עדיין לא אומתה אסמכתת PayPlus זהה בעסקת Shopify." },
 };
 
 const copyFor = (_match: CrediMatchChargeback["match"] | undefined, confidence: ChargebackMatchConfidence) => confidenceCopy[confidence];
@@ -38,6 +38,8 @@ export function ChargebacksWorkspace({ tenantId, chargebacks, stores, onRefresh 
   const [backfillProgress, setBackfillProgress] = useState<string>();
   const [payPlusState, setPayPlusState] = useState<"idle" | "loading" | "done" | "error" | "configuration">("idle");
   const [payPlusProgress, setPayPlusProgress] = useState<string>();
+  const [fullMatchState, setFullMatchState] = useState<"idle" | "loading" | "done" | "error">("idle");
+  const [fullMatchProgress, setFullMatchProgress] = useState<string>();
   const visible = useMemo(() => {
     const search = query.trim().toLowerCase();
     return chargebacks.filter((item) => {
@@ -121,8 +123,44 @@ export function ChargebacksWorkspace({ tenantId, chargebacks, stores, onRefresh 
     }
   };
 
+  const reconcileAll = async () => {
+    const pending = chargebacks.filter((item) => item.match?.confidence !== "exact");
+    setFullMatchState("loading");
+    let checked = 0;
+    let linkedNow = 0;
+    try {
+      for (const item of pending) {
+        // The server stores a Shopify cursor between requests, so even large
+        // order histories are completed without one long browser request.
+        for (let part = 0; part < 100; part += 1) {
+          setFullMatchProgress(`בודק הכחשה ${checked + 1} מתוך ${pending.length}…`);
+          const response = await fetch(`/api/tenants/${tenantId}/credimatch/auto-reconcile`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ discrepancyId: item.discrepancyId }),
+          });
+          const result = await response.json() as { linked?: boolean; complete?: boolean; error?: string };
+          if (!response.ok) throw new Error(result.error ?? "RECONCILIATION_FAILED");
+          if (result.linked) linkedNow += 1;
+          if (result.linked || result.complete) break;
+          if (part === 99) throw new Error("RECONCILIATION_PAGE_LIMIT");
+        }
+        checked += 1;
+        if (checked % 5 === 0) await onRefresh();
+      }
+      await onRefresh();
+      setFullMatchState("done");
+      setFullMatchProgress(`נבדקו ${checked} הכחשות. ${linkedNow} קושרו כעת לפי אסמכתה זהה; היתר נשארו ללא שיוך ודאי.`);
+    } catch {
+      await onRefresh();
+      setFullMatchState("error");
+      setFullMatchProgress(`הבדיקה נעצרה אחרי ${checked} הכחשות. ההתאמות והתקדמות הסריקה נשמרו; אפשר להמשיך.`);
+    }
+  };
+
   return <div className="page-content product-page chargebacks-page">
-    <div className="page-heading"><div><h1>הכחשות אשראי</h1><p>CrediMatch → PayPlus → Shopify: לפי מספר אישור ואסמכתת PayPlus בלבד.</p></div>{chargebacks.length ? <div className="page-heading-actions">{stores.length ? <button className="secondary-button" onClick={backfillMatches} disabled={backfillState === "loading"}><RefreshCw size={16} className={backfillState === "loading" ? "spin" : undefined} />{backfillState === "loading" ? "מחפש התאמות…" : "חיפוש היסטורי"}</button> : null}<button className="secondary-button" onClick={enrichWithPayPlus} disabled={payPlusState === "loading"}><RefreshCw size={16} className={payPlusState === "loading" ? "spin" : undefined} />{payPlusState === "loading" ? "בודק PayPlus…" : "השלמת נתוני PayPlus"}</button></div> : null}</div>
+    <div className="page-heading"><div><h1>הכחשות אשראי</h1><p>CrediMatch → PayPlus → Shopify: לפי מספר אישור ואסמכתת PayPlus בלבד.</p></div>{chargebacks.length ? <div className="page-heading-actions">{stores.length && unresolved ? <button className="secondary-button" onClick={reconcileAll} disabled={fullMatchState === "loading"}><RefreshCw size={16} className={fullMatchState === "loading" ? "spin" : undefined} />{fullMatchState === "loading" ? "משלים התאמות…" : "בדוק את כל ההכחשות"}</button> : null}{stores.length ? <button className="secondary-button" onClick={backfillMatches} disabled={backfillState === "loading"}><RefreshCw size={16} className={backfillState === "loading" ? "spin" : undefined} />{backfillState === "loading" ? "מחפש התאמות…" : "חיפוש היסטורי"}</button> : null}<button className="secondary-button" onClick={enrichWithPayPlus} disabled={payPlusState === "loading"}><RefreshCw size={16} className={payPlusState === "loading" ? "spin" : undefined} />{payPlusState === "loading" ? "בודק PayPlus…" : "השלמת נתוני PayPlus"}</button></div> : null}</div>
+    {fullMatchProgress ? <div className={`inline-notice ${fullMatchState === "error" ? "notice-warning" : ""}`} role="status">{fullMatchProgress}</div> : null}
     {backfillProgress ? <div className={`inline-notice ${backfillState === "error" || backfillState === "permission" ? "notice-warning" : ""}`} role="status">{backfillProgress}</div> : null}
     {payPlusProgress ? <div className={`inline-notice ${payPlusState === "error" || payPlusState === "configuration" ? "notice-warning" : ""}`} role="status">{payPlusProgress}</div> : null}
 
@@ -148,7 +186,7 @@ export function ChargebacksWorkspace({ tenantId, chargebacks, stores, onRefresh 
             <span className="chargeback-id"><strong>#{item.discrepancyId}</strong><small>{item.type ?? "סוג הכחשה לא התקבל"}</small></span>
             <span><strong>{safeDate(item.dealTime)}</strong><small>{item.creditCompany ?? "חברת אשראי לא התקבלה"} · {masked(item.last4Digits)}</small></span>
             <span className="chargeback-amount"><strong>{money(item.originalAmount ?? item.grossAmount, item.currency)}</strong><small>{item.payments ? `${item.payments} תשלומים` : "תשלום אחד"}</small></span>
-            <span className="chargeback-order"><strong>{confidence === "ambiguous" ? `${item.match?.candidates?.length ?? 0} עסקאות אפשריות` : item.match?.orderNumber ?? "לא נמצאה הזמנה"}</strong><small>{item.match?.customer || item.match?.email || copy.detail}</small>{relatedCustomerChargebacks(item, chargebacks).length ? <small className="chargeback-related-count">עוד {relatedCustomerChargebacks(item, chargebacks).length} הכחשות מאותו מייל</small> : null}</span>
+            <span className="chargeback-order"><strong>{confidence === "ambiguous" ? `${item.match?.candidates?.length ?? 0} עסקאות אפשריות` : item.match?.orderNumber ?? "טרם קושרה הזמנה"}</strong><small>{item.match?.customer || item.match?.email || copy.detail}</small>{relatedCustomerChargebacks(item, chargebacks).length ? <small className="chargeback-related-count">עוד {relatedCustomerChargebacks(item, chargebacks).length} הכחשות מאותו מייל</small> : null}</span>
             <span className={`match-status match-${confidence}`}><i aria-hidden="true" />{copy.label}<ArrowLeftRight size={15} aria-hidden="true" /></span>
           </button>;
         })}

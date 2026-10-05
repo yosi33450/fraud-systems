@@ -27,12 +27,13 @@ test('historical match candidates stay out of the operational order ledger', () 
   const chargeback = {
     id: 'credimatch-candidate-only', tenantId, discrepancyId: 'candidate-only', receivedAt: '2026-09-30T00:00:00Z',
     dealTime: '2026-03-15T10:01:00Z', originalAmount: 445, currency: 'ILS', last4Digits: '1944', settlements: [],
+    payplus: { status: 'found', merchantReference: 'payplus-1944' },
   };
   store.restoreCrediMatchChargebacks([chargeback]);
   store.restoreCrediMatchOrderCandidates([{
     tenantId, storeId: 'store-1', shopifyOrderId: 'gid://shopify/Order/1944', orderNumber: '#1944',
     customer: 'Historical Buyer', email: 'buyer@example.com', amount: 445, currency: 'ILS', createdAt: '2026-03-15T10:00:00Z',
-    payments: [{ amount: 445, currency: 'ILS', processedAt: '2026-03-15T10:00:30Z', last4: '1944' }],
+    payments: [{ amount: 445, currency: 'ILS', processedAt: '2026-03-15T10:00:30Z', last4: '1944', merchantReference: 'payplus-1944' }],
   }]);
 
   assert.equal(store.exportOperationalState().orders.some((order) => order.tenantId === tenantId), false);

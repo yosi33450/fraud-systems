@@ -77,7 +77,10 @@ export function paymentFingerprintsFromShopify(
   transactions: Array<{ id?: string; payment_id?: string; gateway_reference?: string; gateway?: string; formatted_gateway?: string; account_number?: string; payment_details?: { number?: string | null } | null; authorization_code?: string; amount?: string | number; processed_at?: string; receipt?: unknown }>,
   fallbackCurrency?: string,
 ): OrderPaymentFingerprint[] {
-  return transactions.map((transaction) => ({
+  return transactions.flatMap((transaction) => {
+    const receiptReference = text(receiptValue(transaction.receipt, ["more_info", "moreInfo", "merchantReference", "merchant_reference", "reference"]));
+    const paymentId = text(transaction.payment_id);
+    const fingerprint: OrderPaymentFingerprint = {
     transactionId: text(transaction.id),
     paymentId: text(transaction.payment_id),
     gatewayReference: text(transaction.gateway_reference ?? receiptValue(transaction.receipt, ["payment_id", "paymentId", "uid", "transaction_uid", "transactionUid"])),
@@ -93,9 +96,15 @@ export function paymentFingerprintsFromShopify(
     // Shopify presents PayPlus' value as "Payment ID" on the order's payment
     // details.  PayPlus returns that exact opaque value as `more_info`.
     // It is the only Shopify value eligible for an automatic chargeback link.
-    merchantReference: text(transaction.payment_id)
-      ?? text(receiptValue(transaction.receipt, ["more_info", "moreInfo", "merchantReference", "merchant_reference", "reference"])),
-  })).filter((payment) => Object.values(payment).some(Boolean));
+    merchantReference: paymentId ?? receiptReference,
+    };
+    // A gateway can expose its merchant reference in the receipt even when
+    // Shopify's paymentId is a different identifier. Keep both as separate
+    // exact-match candidates; neither is inferred from amount or date.
+    return paymentId && receiptReference && paymentId !== receiptReference
+      ? [fingerprint, { ...fingerprint, merchantReference: receiptReference }]
+      : [fingerprint];
+  }).filter((payment) => Object.values(payment).some(Boolean));
 }
 
 export function shopifyChargebackSearchQuery(input: {
