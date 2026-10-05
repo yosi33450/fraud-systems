@@ -124,37 +124,42 @@ export function ChargebacksWorkspace({ tenantId, chargebacks, stores, onRefresh 
   };
 
   const reconcileAll = async () => {
-    const pending = chargebacks.filter((item) => item.match?.confidence !== "exact");
     setFullMatchState("loading");
-    let checked = 0;
-    let linkedNow = 0;
+    let scanned = 0;
+    const pending = chargebacks.filter((item) => item.match?.confidence !== "exact");
+    const times = pending.map((item) => Date.parse(item.dealTime ?? item.creationTime ?? item.receivedAt)).filter(Number.isFinite);
+    const now = Date.now();
+    const since = new Date(Math.max(Math.min(...times) - 36 * 86_400_000, now - 365 * 86_400_000)).toISOString();
+    const until = new Date(now).toISOString();
     try {
-      for (const item of pending) {
-        // The server stores a Shopify cursor between requests, so even large
-        // order histories are completed without one long browser request.
-        for (let part = 0; part < 100; part += 1) {
-          setFullMatchProgress(`בודק הכחשה ${checked + 1} מתוך ${pending.length}…`);
-          const response = await fetch(`/api/tenants/${tenantId}/credimatch/auto-reconcile`, {
+      setFullMatchProgress("משלים אסמכתאות מ־PayPlus…");
+      const payPlusResponse = await fetch(`/api/tenants/${tenantId}/payplus/reconcile`, { method: "POST" });
+      if (!payPlusResponse.ok) throw new Error("PAYPLUS_RECONCILIATION_FAILED");
+      for (const store of stores.filter((item) => item.status !== "disabled")) {
+        let after: string | null = null;
+        for (let page = 0; page < 2_000; page += 1) {
+          const response = await fetch(`/api/tenants/${tenantId}/credimatch/backfill`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ discrepancyId: item.discrepancyId }),
+            body: JSON.stringify({ storeId: store.id, since, until, after, scanned, exactReferenceScan: true }),
           });
-          const result = await response.json() as { linked?: boolean; complete?: boolean; error?: string };
+          const result = await response.json() as { scanned?: number; nextCursor?: string | null; complete?: boolean; error?: string };
           if (!response.ok) throw new Error(result.error ?? "RECONCILIATION_FAILED");
-          if (result.linked) linkedNow += 1;
-          if (result.linked || result.complete) break;
-          if (part === 99) throw new Error("RECONCILIATION_PAGE_LIMIT");
+          scanned = result.scanned ?? scanned;
+          setFullMatchProgress(`נבדקו ${scanned.toLocaleString("he-IL")} הזמנות מול כל ${pending.length} ההכחשות הפתוחות…`);
+          if (result.complete) break;
+          if (!result.nextCursor || result.nextCursor === after || page === 1_999) throw new Error("RECONCILIATION_PAGE_LIMIT");
+          after = result.nextCursor;
+          if (page % 5 === 4) await onRefresh();
         }
-        checked += 1;
-        if (checked % 5 === 0) await onRefresh();
       }
       await onRefresh();
       setFullMatchState("done");
-      setFullMatchProgress(`נבדקו ${checked} הכחשות. ${linkedNow} קושרו כעת לפי אסמכתה זהה; היתר נשארו ללא שיוך ודאי.`);
+      setFullMatchProgress(`הסריקה הסתיימה: נבדקו ${scanned.toLocaleString("he-IL")} הזמנות. קושרו רק הכחשות עם אסמכתה זהה.`);
     } catch {
       await onRefresh();
       setFullMatchState("error");
-      setFullMatchProgress(`הבדיקה נעצרה אחרי ${checked} הכחשות. ההתאמות והתקדמות הסריקה נשמרו; אפשר להמשיך.`);
+      setFullMatchProgress(`הסריקה נעצרה אחרי ${scanned.toLocaleString("he-IL")} הזמנות. התאמות שכבר נמצאו נשמרו; אפשר לנסות שוב.`);
     }
   };
 

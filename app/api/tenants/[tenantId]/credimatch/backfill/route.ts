@@ -21,6 +21,7 @@ export async function POST(request: Request, context: { params: Promise<{ tenant
       until?: string;
       after?: string | null;
       scanned?: number;
+      exactReferenceScan?: boolean;
     };
     const sinceTime = typeof body.since === "string" ? Date.parse(body.since) : NaN;
     const untilTime = typeof body.until === "string" ? Date.parse(body.until) : NaN;
@@ -38,7 +39,7 @@ export async function POST(request: Request, context: { params: Promise<{ tenant
 
     await hydrateOperationalState({ refresh: true });
     await hydrateCrediMatchChargebacks();
-    if (!body.after) {
+    if (!body.after && !body.exactReferenceScan) {
       const apiChargebacks = exportCrediMatchChargebacks().filter((chargeback) =>
         chargeback.tenantId === tenantId && chargeback.transactionId);
       for (let index = 0; index < apiChargebacks.length; index += 5) {
@@ -78,6 +79,9 @@ export async function POST(request: Request, context: { params: Promise<{ tenant
       until: new Date(untilTime).toISOString(),
       after: body.after ?? null,
       scanned,
+      searchQuery: body.exactReferenceScan
+        ? `created_at:>=${new Date(sinceTime).toISOString()} created_at:<=${new Date(untilTime).toISOString()}`
+        : undefined,
     });
     await persistCrediMatchChargebacks();
     return NextResponse.json(result, { headers: { "Cache-Control": "no-store" } });
