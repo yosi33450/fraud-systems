@@ -479,9 +479,16 @@ export function getDashboardSnapshot(tenantId: string): DashboardSnapshot {
     chargebackMatchOrders.set(`${order.storeId}:${order.shopifyOrderId}`, order);
   }
   // Prefer the live operational copy when the same order is present in both
-  // stores, while keeping historical candidates invisible everywhere else.
+  // stores, but retain the verified payment references found by a historical
+  // Shopify scan. Webhook order payloads can omit a gateway payment ID that
+  // the Admin GraphQL OrderTransaction does expose.
   for (const order of state.orders.filter((item) => item.tenantId === tenantId)) {
-    chargebackMatchOrders.set(`${order.storeId}:${order.shopifyOrderId}`, order);
+    const key = `${order.storeId}:${order.shopifyOrderId}`;
+    const historical = chargebackMatchOrders.get(key);
+    chargebackMatchOrders.set(key, {
+      ...order,
+      payments: [...(historical?.payments ?? []), ...(order.payments ?? [])],
+    });
   }
   return {
     tenantId,

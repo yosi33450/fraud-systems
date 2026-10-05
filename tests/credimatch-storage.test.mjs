@@ -42,3 +42,27 @@ test('historical match candidates stay out of the operational order ledger', () 
   assert.equal(snapshot.cases.length, 0);
   store.restoreOperationalState(initial);
 });
+
+test('a live order without gateway reference does not hide its verified historical payment', () => {
+  const tenantId = 'candidate-overlap-tenant';
+  const orderId = 'gid://shopify/Order/6111350292620';
+  const state = structuredClone(initial);
+  state.orders.push({
+    tenantId, storeId: 'store-1', shopifyOrderId: orderId, orderNumber: '542939',
+    email: 'buyer@example.com', amount: 357, currency: 'ILS', createdAt: '2026-09-07T15:49:27Z',
+    payments: [{ amount: 357, currency: 'ILS', processedAt: '2026-09-07T15:49:27Z' }],
+  });
+  store.restoreOperationalState(state);
+  store.restoreCrediMatchChargebacks([{
+    id: 'credimatch-overlap', tenantId, discrepancyId: '21961008', receivedAt: '2026-09-07T15:49:27Z',
+    dealTime: '2026-09-07T15:49:27Z', originalAmount: 357, currency: 'ILS', settlements: [],
+    payplus: { status: 'found', merchantReference: 'rqVcD866WVAX171kyKuDB0Qd2' },
+  }]);
+  store.restoreCrediMatchOrderCandidates([{
+    tenantId, storeId: 'store-1', shopifyOrderId: orderId, orderNumber: '542939',
+    email: 'buyer@example.com', amount: 357, currency: 'ILS', createdAt: '2026-09-07T15:49:27Z',
+    payments: [{ amount: 357, currency: 'ILS', merchantReference: 'rqVcD866WVAX171kyKuDB0Qd2' }],
+  }]);
+  assert.equal(store.getDashboardSnapshot(tenantId).chargebacks[0].match.orderNumber, '542939');
+  store.restoreOperationalState(initial);
+});
