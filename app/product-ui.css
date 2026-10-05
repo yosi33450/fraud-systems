@@ -671,6 +671,20 @@ svg { flex-shrink: 0; }
 .settlement-list article { display: grid; padding: 14px 16px; border: 1px solid var(--hairline); border-radius: 14px; }
 .settlement-list span, .settlement-list small { color: var(--slate); font-size: .8125rem; }
 .settlement-list strong { margin: 3px 0; font-size: 1rem; }
+.chargeback-related-count { color: var(--trust) !important; font-weight: 650; }
+.chargeback-customer-context { min-width: 0; padding: 20px; border: 1px solid var(--hairline); border-radius: 18px; background: var(--surface); }
+.chargeback-customer-stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.chargeback-customer-stats > div { display: grid; gap: 4px; padding: 15px 17px; border: 1px solid var(--hairline); border-radius: 14px; background: var(--surface-muted); }
+.chargeback-customer-stats strong { color: var(--ink); font-size: 1.5rem; font-variant-numeric: tabular-nums; }
+.chargeback-customer-stats span, .chargeback-customer-note { color: var(--slate); font-size: .8125rem; }
+.chargeback-customer-details { margin-top: 14px; border-top: 1px solid var(--hairline); }
+.chargeback-customer-details summary { padding: 14px 0; color: var(--trust); font-size: .875rem; font-weight: 650; cursor: pointer; }
+.chargeback-customer-list { display: grid; gap: 8px; max-height: 260px; overflow-y: auto; }
+.chargeback-customer-list > div { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 3px 12px; padding: 11px 14px; border: 1px solid var(--hairline); border-radius: 12px; }
+.chargeback-customer-list span { font-weight: 600; }
+.chargeback-customer-list strong { font-variant-numeric: tabular-nums; }
+.chargeback-customer-list small { grid-column: 1 / -1; color: var(--slate); }
+.chargeback-customer-note { margin: 12px 0 0; line-height: 1.5; }
 
 @media (max-width: 1180px) {
   .chargeback-summary { grid-template-columns: repeat(2, 1fr); }

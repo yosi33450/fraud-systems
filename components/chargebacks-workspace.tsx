@@ -1,9 +1,10 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ArrowLeftRight, CalendarClock, CheckCircle2, CircleDollarSign, CreditCard, ExternalLink, FileQuestion, RefreshCw, Search, ShieldCheck, X } from "lucide-react";
 import { CenteredDialog } from "@/components/centered-dialog";
 import { formatHebrewDateTime } from "@/lib/hebrew-date";
+import { relatedCustomerChargebacks } from "@/lib/chargeback-customer-context";
 import type { ChargebackMatchConfidence, CrediMatchChargeback, Store } from "@/lib/types";
 
 const confidenceCopy: Record<ChargebackMatchConfidence, { label: string; detail: string }> = {
@@ -147,19 +148,33 @@ export function ChargebacksWorkspace({ tenantId, chargebacks, stores, onRefresh 
             <span className="chargeback-id"><strong>#{item.discrepancyId}</strong><small>{item.type ?? "סוג הכחשה לא התקבל"}</small></span>
             <span><strong>{safeDate(item.dealTime)}</strong><small>{item.creditCompany ?? "חברת אשראי לא התקבלה"} · {masked(item.last4Digits)}</small></span>
             <span className="chargeback-amount"><strong>{money(item.originalAmount ?? item.grossAmount, item.currency)}</strong><small>{item.payments ? `${item.payments} תשלומים` : "תשלום אחד"}</small></span>
-            <span className="chargeback-order"><strong>{confidence === "ambiguous" ? `${item.match?.candidates?.length ?? 0} עסקאות אפשריות` : item.match?.orderNumber ?? "לא נמצאה הזמנה"}</strong><small>{item.match?.customer || item.match?.email || copy.detail}</small></span>
+            <span className="chargeback-order"><strong>{confidence === "ambiguous" ? `${item.match?.candidates?.length ?? 0} עסקאות אפשריות` : item.match?.orderNumber ?? "לא נמצאה הזמנה"}</strong><small>{item.match?.customer || item.match?.email || copy.detail}</small>{relatedCustomerChargebacks(item, chargebacks).length ? <small className="chargeback-related-count">עוד {relatedCustomerChargebacks(item, chargebacks).length} הכחשות מאותו מייל</small> : null}</span>
             <span className={`match-status match-${confidence}`}><i aria-hidden="true" />{copy.label}<ArrowLeftRight size={15} aria-hidden="true" /></span>
           </button>;
         })}
       </div> : <div className="empty-state chargeback-empty"><CreditCard size={26} /><strong>{chargebacks.length ? "אין תוצאות למסנן שבחרת" : "עדיין לא נקלטו הכחשות"}</strong><span>{chargebacks.length ? "נסה חיפוש אחר או הצג את כל ההתאמות." : "כאשר CrediMatch תשלח הכחשה, היא תופיע כאן ותיבדק מול Shopify."}</span></div>}
     </section>
 
-    {selected ? <ChargebackDialog item={selected} stores={stores} onClose={() => setSelected(null)} /> : null}
+    {selected ? <ChargebackDialog item={selected} allChargebacks={chargebacks} tenantId={tenantId} stores={stores} onClose={() => setSelected(null)} /> : null}
   </div>;
 }
 
-function ChargebackDialog({ item, stores, onClose }: { item: CrediMatchChargeback; stores: Store[]; onClose: () => void }) {
+type MonthOrder = { orderId: string; orderNumber: string; createdAt: string; amount: number; currency: string; disputed: boolean };
+
+function ChargebackDialog({ item, allChargebacks, tenantId, stores, onClose }: { item: CrediMatchChargeback; allChargebacks: CrediMatchChargeback[]; tenantId: string; stores: Store[]; onClose: () => void }) {
   const match = item.match;
+  const related = useMemo(() => relatedCustomerChargebacks(item, allChargebacks), [item, allChargebacks]);
+  const [monthHistory, setMonthHistory] = useState<{ orders: MonthOrder[]; month: string; truncated: boolean }>();
+  const [historyState, setHistoryState] = useState<"loading" | "ready" | "error">("loading");
+  useEffect(() => {
+    if (match?.confidence !== "exact" || !match.email || !match.storeId) return;
+    const controller = new AbortController();
+    fetch(`/api/tenants/${tenantId}/credimatch/customer-month?discrepancyId=${encodeURIComponent(item.discrepancyId)}`, { signal: controller.signal })
+      .then(async (response) => { if (!response.ok) throw new Error("HISTORY_UNAVAILABLE"); return response.json() as Promise<{ orders: MonthOrder[]; month: string; truncated: boolean }>; })
+      .then((result) => { setMonthHistory(result); setHistoryState("ready"); })
+      .catch(() => { if (!controller.signal.aborted) setHistoryState("error"); });
+    return () => controller.abort();
+  }, [tenantId, item.discrepancyId, match?.confidence, match?.email, match?.storeId]);
   const confidence = match?.confidence ?? "unmatched";
   const copy = copyFor(match, confidence);
   const store = stores.find((candidate) => candidate.id === match?.storeId);
@@ -210,6 +225,13 @@ function ChargebackDialog({ item, stores, onClose }: { item: CrediMatchChargebac
       {confidence === "ambiguous" && match?.candidates?.length ? <section className="settlement-section"><div className="chargeback-section-title"><h3>עסקאות אפשריות לבדיקה</h3><span>אותו סכום ואותו יום — בחר ידנית לאחר בדיקה</span></div><div className="settlement-list">{match.candidates.map((candidate) => <article key={candidate.orderId}><span>{candidate.orderNumber ?? "הזמנה"} · {candidate.customer || candidate.email || "לקוח לא התקבל"}</span><strong>{money(candidate.amount, candidate.currency)}</strong><small>{safeDate(candidate.createdAt)} · {candidate.storeName ?? "Shopify"}</small></article>)}</div></section> : null}
 
       {item.settlements.length ? <section className="settlement-section"><div className="chargeback-section-title"><h3>תנועות וזיכויים</h3><span>{item.settlements.length} רשומות כספיות</span></div><div className="settlement-list">{item.settlements.map((entry, index) => <article key={`${entry.invoiceNumber ?? "settlement"}-${index}`}><span>תשלום {entry.currentPaymentNumber ?? index + 1}</span><strong>{money(entry.netAmount ?? entry.expectedNetAmount, item.currency)}</strong><small>צפוי: {safeDate(entry.expectedPaymentTime)} · {entry.receptionStatus ?? "ללא סטטוס"}</small></article>)}</div></section> : null}
+      {match?.confidence === "exact" && match.email ? <section className="chargeback-customer-context">
+        <div className="chargeback-section-title"><h3>פעילות הלקוח</h3><span>לפי כתובת המייל בהזמנת Shopify, באותה חנות</span></div>
+        <div className="chargeback-customer-stats"><div><strong>{related.length + 1}</strong><span>הכחשות מקושרות לאותו מייל</span></div><div><strong>{historyState === "ready" ? monthHistory?.orders.length ?? 0 : "—"}</strong><span>רכישות בחודש ההזמנה</span></div></div>
+        {related.length ? <details className="chargeback-customer-details"><summary>הכחשות נוספות של אותו מייל ({related.length})</summary><div className="chargeback-customer-list">{related.map((other) => <div key={other.id}><span>#{other.discrepancyId} · {other.match?.orderNumber ?? "הזמנה"}</span><strong>{money(other.originalAmount ?? other.grossAmount, other.currency)}</strong><small>{safeDate(other.dealTime ?? other.creationTime)}</small></div>)}</div></details> : null}
+        {historyState === "loading" ? <p className="chargeback-customer-note">בודק רכישות נוספות ב־Shopify…</p> : historyState === "error" ? <p className="chargeback-customer-note">לא ניתן לטעון כרגע את רכישות החודש. נתוני ההכחשות הקיימים עדיין מוצגים.</p> : <details className="chargeback-customer-details"><summary>רכישות בחודש {monthHistory?.month} ({monthHistory?.orders.length ?? 0})</summary><div className="chargeback-customer-list">{monthHistory?.orders.map((order) => <div key={order.orderId}><span>{order.orderNumber}{order.disputed ? " · קיימת הכחשה" : ""}</span><strong>{money(order.amount, order.currency)}</strong><small>{safeDate(order.createdAt)}</small></div>)}</div>{monthHistory?.truncated ? <p className="chargeback-customer-note">יש הזמנות נוספות מעבר לתוצאות שנסרקו.</p> : null}</details>}
+        <p className="chargeback-customer-note">המייל משמש לקיבוץ פעילות בלבד; רק אסמכתת PayPlus מחברת הכחשה להזמנה בוודאות.</p>
+      </section> : null}
     </div>
   </CenteredDialog>;
 }

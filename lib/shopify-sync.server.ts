@@ -108,7 +108,7 @@ export const CREDIMATCH_TENDER_CANDIDATES_QUERY = `#graphql
   }
 `;
 
-const CREDIMATCH_ORDER_ACCESS_QUERY = `#graphql
+export const CREDIMATCH_ORDER_ACCESS_QUERY = `#graphql
   query CrediMatchOrderAccess {
     currentAppInstallation { accessScopes { handle } }
   }
@@ -506,6 +506,7 @@ export async function syncCrediMatchOrderCandidatesPage(input: {
   until: string;
   after?: string | null;
   scanned: number;
+  searchQuery?: string;
 }) {
   if (!input.after && Date.parse(input.since) < Date.now() - 60 * 86_400_000) {
     const access = await shopifyAdminRequest<{ currentAppInstallation: { accessScopes: Array<{ handle: string }> } }>({
@@ -527,7 +528,7 @@ export async function syncCrediMatchOrderCandidatesPage(input: {
     variables: {
       first: 200,
       after: input.after ?? null,
-      query: shopifyChargebackSearchQuery({
+      query: input.searchQuery ?? shopifyChargebackSearchQuery({
         since: input.since,
         until: input.until,
         chargebacks: exportCrediMatchChargebacks().filter((item) => item.tenantId === input.tenantId),

@@ -1,0 +1,5 @@
+{
+  "crons": [
+    { "path": "/api/cron/credimatch-reconcile", "schedule": "30 0 * * *" }
+  ]
+}
