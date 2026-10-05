@@ -5,7 +5,7 @@ import { getFreshStoreConnection } from "@/lib/shopify-connection.server";
 import { syncCrediMatchOrderCandidatesPage, syncCrediMatchTenderCandidatesPage } from "@/lib/shopify-sync.server";
 import { getCrediMatchTransaction } from "@/lib/credimatch.server";
 import { crediMatchTransactionTime, crediMatchTransactionTimeIsPrecise, crediMatchTransactionUid } from "@/lib/credimatch-matching";
-import { exportCrediMatchChargebacks, restoreCrediMatchChargebacks } from "@/lib/operational-store";
+import { exportCrediMatchChargebacks, getDashboardSnapshot, restoreCrediMatchChargebacks } from "@/lib/operational-store";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -23,6 +23,7 @@ export async function POST(request: Request, context: { params: Promise<{ tenant
       scanned?: number;
       exactReferenceScan?: boolean;
       tenderReferenceScan?: boolean;
+      referenceSearchDiscrepancyId?: string;
     };
     const sinceTime = typeof body.since === "string" ? Date.parse(body.since) : NaN;
     const untilTime = typeof body.until === "string" ? Date.parse(body.until) : NaN;
@@ -34,13 +35,23 @@ export async function POST(request: Request, context: { params: Promise<{ tenant
     if (body.after !== undefined && body.after !== null && (typeof body.after !== "string" || body.after.length > 2_048)) {
       return NextResponse.json({ error: "INVALID_BACKFILL_CURSOR" }, { status: 400 });
     }
+    if (body.referenceSearchDiscrepancyId && !/^\d{1,30}$/.test(body.referenceSearchDiscrepancyId)) {
+      return NextResponse.json({ error: "INVALID_DISCREPANCY_ID" }, { status: 400 });
+    }
     const scanned = Number.isSafeInteger(body.scanned) && Number(body.scanned) >= 0 && Number(body.scanned) <= 1_000_000
       ? Number(body.scanned)
       : 0;
 
     await hydrateOperationalState({ refresh: true });
     await hydrateCrediMatchChargebacks();
-    if (!body.after && !body.exactReferenceScan && !body.tenderReferenceScan) {
+    const referenceChargeback = body.referenceSearchDiscrepancyId
+      ? exportCrediMatchChargebacks().find((item) => item.tenantId === tenantId && item.discrepancyId === body.referenceSearchDiscrepancyId)
+      : undefined;
+    const merchantReference = referenceChargeback?.payplus?.status === "found" ? referenceChargeback.payplus.merchantReference : undefined;
+    if (body.referenceSearchDiscrepancyId && (!merchantReference || !/^[a-z0-9_-]{6,100}$/i.test(merchantReference))) {
+      return NextResponse.json({ error: "PAYPLUS_REFERENCE_UNAVAILABLE" }, { status: 400 });
+    }
+    if (!body.after && !body.exactReferenceScan && !body.tenderReferenceScan && !body.referenceSearchDiscrepancyId) {
       const apiChargebacks = exportCrediMatchChargebacks().filter((chargeback) =>
         chargeback.tenantId === tenantId && chargeback.transactionId);
       for (let index = 0; index < apiChargebacks.length; index += 5) {
@@ -83,12 +94,15 @@ export async function POST(request: Request, context: { params: Promise<{ tenant
     };
     const result = body.tenderReferenceScan ? await syncCrediMatchTenderCandidatesPage(range) : await syncCrediMatchOrderCandidatesPage({
       ...range,
-      searchQuery: body.exactReferenceScan
+      searchQuery: merchantReference ?? (body.exactReferenceScan
         ? `created_at:>=${new Date(sinceTime).toISOString()} created_at:<=${new Date(untilTime).toISOString()}`
-        : undefined,
+        : undefined),
     });
     await persistCrediMatchChargebacks();
-    return NextResponse.json(result, { headers: { "Cache-Control": "no-store" } });
+    const linked = body.referenceSearchDiscrepancyId
+      ? getDashboardSnapshot(tenantId).chargebacks.find((item) => item.discrepancyId === body.referenceSearchDiscrepancyId)?.match?.confidence === "exact"
+      : undefined;
+    return NextResponse.json({ ...result, linked }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     const message = error instanceof Error ? error.message : "CREDIMATCH_BACKFILL_FAILED";
     console.error("[credimatch-backfill] failed", { tenantId, code: message });

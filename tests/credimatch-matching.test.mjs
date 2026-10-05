@@ -135,6 +135,19 @@ test('accepts an exact Shopify receipt payment_id when the top-level payment ID 
   }), [order({ payments })]).confidence, 'exact');
 });
 
+test('matches PayPlus gateway receipt Payment when Shopify paymentId is empty', () => {
+  const payments = paymentFingerprintsFromShopify([{
+    gateway: 'payplus', receipt: { Payment: 'rqVcD866WVAX171kyKuDB0Qd2' }, amount: '357',
+  }], 'ILS');
+  assert.equal(payments[0].merchantReference, 'rqVcD866WVAX171kyKuDB0Qd2');
+  assert.equal(matchCrediMatchChargeback(chargeback({
+    payplus: { status: 'found', merchantReference: 'rqVcD866WVAX171kyKuDB0Qd2' },
+  }), [order({ payments })]).confidence, 'exact');
+  assert.equal(paymentFingerprintsFromShopify([{
+    gateway: 'other', receipt: { Payment: 'rqVcD866WVAX171kyKuDB0Qd2' }, amount: '357',
+  }], 'ILS')[0].merchantReference, undefined);
+});
+
 test('does not link identical amount, card, approval or date without PayPlus more_info', () => {
   const match = matchCrediMatchChargeback(chargeback(), [order()]);
   assert.equal(match.confidence, 'unmatched');

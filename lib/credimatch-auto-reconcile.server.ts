@@ -31,7 +31,7 @@ export async function reconcileChargebacksAutomatically(chargebacks: CrediMatchC
     const enriched = enrichChargebackFromPayPlus(latest, { ...payplus, checkedAt: new Date().toISOString() });
     restoreCrediMatchChargebacks([enriched]);
     const paymentTime = Date.parse(enriched.payplus?.paidAt ?? enriched.dealTime ?? "");
-    if (!enriched.payplus?.merchantReference || !Number.isFinite(paymentTime)) { deferred += 1; continue; }
+    if (enriched.payplus?.status !== "found" || !enriched.payplus.merchantReference || !Number.isFinite(paymentTime)) { deferred += 1; continue; }
     const stores = getDashboardSnapshot(enriched.tenantId).stores.filter((store) => store.status !== "disabled");
     let resumeStoreId = enriched.reconciliationCursor?.storeId;
     let linkedThisChargeback = false;
@@ -44,8 +44,9 @@ export async function reconcileChargebacksAutomatically(chargebacks: CrediMatchC
         const cardLast4 = enriched.last4Digits?.replace(/\D/g, "").slice(-4);
         const merchantReference = enriched.payplus.merchantReference;
         const disputedAmount = enriched.originalAmount ?? enriched.grossAmount;
-        const phases: Array<"payment" | "card" | "amount" | "date"> = [
-          ...(/^[a-z0-9_-]{6,100}$/i.test(merchantReference) ? ["payment" as const] : []),
+        const searchableReference = /^[a-z0-9_-]{6,100}$/i.test(merchantReference);
+        const phases: Array<"reference" | "payment" | "card" | "amount" | "date"> = [
+          ...(searchableReference ? ["reference" as const, "payment" as const] : []),
           ...(cardLast4?.length === 4 ? ["card" as const] : []),
           ...(Number.isFinite(disputedAmount) && disputedAmount !== 0 ? ["amount" as const] : []),
           "date",
@@ -54,10 +55,11 @@ export async function reconcileChargebacksAutomatically(chargebacks: CrediMatchC
         for (const phase of phases) {
           const saved = enriched.reconciliationCursor;
           const resumePhase = saved?.phase ?? "date";
-          if (resumeStoreId === store.id && saved && phase !== "payment" && phase !== "amount" && phases.indexOf(phase) < phases.indexOf(resumePhase)) continue;
+          if (resumeStoreId === store.id && saved && phase !== "reference" && phase !== "payment" && phase !== "amount" && phases.indexOf(phase) < phases.indexOf(resumePhase)) continue;
           let after: string | null = resumeStoreId === store.id && saved && phase === resumePhase ? saved.after : null;
           const dateQuery = `created_at:>=${since} created_at:<=${until}`;
-          const searchQuery = phase === "payment" ? `payment_id:${merchantReference}`
+          const searchQuery = phase === "reference" ? merchantReference
+            : phase === "payment" ? `payment_id:${merchantReference}`
             : phase === "card" ? `${dateQuery} credit_card_last4:${cardLast4}`
               : phase === "amount" ? `${dateQuery} current_total_price:${Math.abs(disputedAmount!).toFixed(2)}`
                 : dateQuery;

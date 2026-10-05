@@ -127,41 +127,46 @@ export function ChargebacksWorkspace({ tenantId, chargebacks, stores, onRefresh 
 
   const reconcileAll = async () => {
     setFullMatchState("loading");
-    let scanned = 0;
-    const pending = chargebacks.filter((item) => item.match?.confidence !== "exact");
-    const times = pending.map((item) => Date.parse(item.dealTime ?? item.creationTime ?? item.receivedAt)).filter(Number.isFinite);
-    const now = Date.now();
-    const since = new Date(Math.max(Math.min(...times) - 36 * 86_400_000, now - 365 * 86_400_000)).toISOString();
-    const until = new Date(now).toISOString();
+    let checked = 0;
+    let linked = 0;
+    const pending = chargebacks.filter((item) => item.match?.confidence !== "exact"
+      && item.payplus?.status === "found" && item.payplus.merchantReference);
     try {
-      setFullMatchProgress("משלים אסמכתאות מ־PayPlus…");
-      const payPlusResponse = await fetch(`/api/tenants/${tenantId}/payplus/reconcile`, { method: "POST" });
-      if (!payPlusResponse.ok) throw new Error("PAYPLUS_RECONCILIATION_FAILED");
-      for (const store of stores.filter((item) => item.status !== "disabled")) {
-        let after: string | null = null;
-        for (let page = 0; page < 2_000; page += 1) {
-          const response = await fetch(`/api/tenants/${tenantId}/credimatch/backfill`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ storeId: store.id, since, until, after, scanned, exactReferenceScan: true }),
-          });
-          const result = await response.json() as { scanned?: number; nextCursor?: string | null; complete?: boolean; error?: string };
-          if (!response.ok) throw new Error(result.error ?? "RECONCILIATION_FAILED");
-          scanned = result.scanned ?? scanned;
-          setFullMatchProgress(`נבדקו ${scanned.toLocaleString("he-IL")} הזמנות מול כל ${pending.length} ההכחשות הפתוחות…`);
-          if (result.complete) break;
-          if (!result.nextCursor || result.nextCursor === after || page === 1_999) throw new Error("RECONCILIATION_PAGE_LIMIT");
-          after = result.nextCursor;
-          if (page % 5 === 4) await onRefresh();
+      for (const item of pending) {
+        const time = Date.parse(item.dealTime ?? item.creationTime ?? item.receivedAt);
+        if (!Number.isFinite(time)) continue;
+        const since = new Date(Math.max(time - 36 * 86_400_000, Date.now() - 365 * 86_400_000)).toISOString();
+        const until = new Date(Math.min(time + 36 * 86_400_000, Date.now())).toISOString();
+        let itemLinked = false;
+        for (const store of stores.filter((entry) => entry.status !== "disabled")) {
+          let after: string | null = null;
+          for (let page = 0; page < 20; page += 1) {
+            const response = await fetch(`/api/tenants/${tenantId}/credimatch/backfill`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ storeId: store.id, since, until, after, referenceSearchDiscrepancyId: item.discrepancyId }),
+            });
+            const result = await response.json() as { nextCursor?: string | null; complete?: boolean; linked?: boolean; error?: string };
+            if (!response.ok) throw new Error(result.error ?? "REFERENCE_SEARCH_FAILED");
+            if (result.linked) { itemLinked = true; break; }
+            if (result.complete) break;
+            if (!result.nextCursor || result.nextCursor === after || page === 19) throw new Error("REFERENCE_SEARCH_PAGE_LIMIT");
+            after = result.nextCursor;
+          }
+          if (itemLinked) break;
         }
+        checked += 1;
+        if (itemLinked) linked += 1;
+        setFullMatchProgress(`נבדקו ${checked} מתוך ${pending.length} אסמכתאות; ${linked} קושרו להזמנות.`);
+        if (checked % 5 === 0) await onRefresh();
       }
       await onRefresh();
       setFullMatchState("done");
-      setFullMatchProgress(`הסריקה הסתיימה: נבדקו ${scanned.toLocaleString("he-IL")} הזמנות. קושרו רק הכחשות עם אסמכתה זהה.`);
+      setFullMatchProgress(`הבדיקה הסתיימה: ${linked} התאמות ודאיות חדשות מתוך ${checked} אסמכתאות שנבדקו.`);
     } catch {
       await onRefresh();
       setFullMatchState("error");
-      setFullMatchProgress(`הסריקה נעצרה אחרי ${scanned.toLocaleString("he-IL")} הזמנות. התאמות שכבר נמצאו נשמרו; אפשר לנסות שוב.`);
+      setFullMatchProgress(`הבדיקה נעצרה אחרי ${checked} אסמכתאות. התאמות שכבר נמצאו נשמרו; אפשר לנסות שוב.`);
     }
   };
 
@@ -212,7 +217,7 @@ export function ChargebacksWorkspace({ tenantId, chargebacks, stores, onRefresh 
   };
 
   return <div className="page-content product-page chargebacks-page">
-    <div className="page-heading"><div><h1>הכחשות אשראי</h1><p>CrediMatch → PayPlus → Shopify: לפי מספר אישור ואסמכתת PayPlus בלבד.</p></div>{chargebacks.length ? <div className="page-heading-actions">{stores.length && unresolved ? <button className="secondary-button" onClick={reconcileAll} disabled={fullMatchState === "loading" || tenderScanState === "loading"}><RefreshCw size={16} className={fullMatchState === "loading" ? "spin" : undefined} />{fullMatchState === "loading" ? "משלים התאמות…" : "בדוק את כל ההכחשות"}</button> : null}{stores.length && unresolved ? <button className="secondary-button" onClick={scanTenderReferences} disabled={tenderScanState === "loading" || fullMatchState === "loading"}><RefreshCw size={16} className={tenderScanState === "loading" ? "spin" : undefined} />{tenderScanState === "loading" ? "בודק תנועות…" : "בדיקת תנועות תשלום"}</button> : null}{stores.length ? <button className="secondary-button" onClick={backfillMatches} disabled={backfillState === "loading"}><RefreshCw size={16} className={backfillState === "loading" ? "spin" : undefined} />{backfillState === "loading" ? "מחפש התאמות…" : "חיפוש היסטורי"}</button> : null}<button className="secondary-button" onClick={enrichWithPayPlus} disabled={payPlusState === "loading"}><RefreshCw size={16} className={payPlusState === "loading" ? "spin" : undefined} />{payPlusState === "loading" ? "בודק PayPlus…" : "השלמת נתוני PayPlus"}</button></div> : null}</div>
+    <div className="page-heading"><div><h1>הכחשות אשראי</h1><p>CrediMatch → PayPlus → Shopify: לפי מספר אישור ואסמכתת PayPlus בלבד.</p></div>{chargebacks.length ? <div className="page-heading-actions">{stores.length && unresolved ? <button className="secondary-button" onClick={reconcileAll} disabled={fullMatchState === "loading" || tenderScanState === "loading"}><RefreshCw size={16} className={fullMatchState === "loading" ? "spin" : undefined} />{fullMatchState === "loading" ? "משלים התאמות…" : "התאם לפי אסמכתת חנות"}</button> : null}{stores.length && unresolved ? <button className="secondary-button" onClick={scanTenderReferences} disabled={tenderScanState === "loading" || fullMatchState === "loading"}><RefreshCw size={16} className={tenderScanState === "loading" ? "spin" : undefined} />{tenderScanState === "loading" ? "בודק תנועות…" : "בדיקת תנועות תשלום"}</button> : null}{stores.length ? <button className="secondary-button" onClick={backfillMatches} disabled={backfillState === "loading"}><RefreshCw size={16} className={backfillState === "loading" ? "spin" : undefined} />{backfillState === "loading" ? "מחפש התאמות…" : "חיפוש היסטורי"}</button> : null}<button className="secondary-button" onClick={enrichWithPayPlus} disabled={payPlusState === "loading"}><RefreshCw size={16} className={payPlusState === "loading" ? "spin" : undefined} />{payPlusState === "loading" ? "בודק PayPlus…" : "השלמת נתוני PayPlus"}</button></div> : null}</div>
     {fullMatchProgress ? <div className={`inline-notice ${fullMatchState === "error" ? "notice-warning" : ""}`} role="status">{fullMatchProgress}</div> : null}
     {tenderScanProgress ? <div className={`inline-notice ${tenderScanState === "error" ? "notice-warning" : ""}`} role="status">{tenderScanProgress}</div> : null}
     {backfillProgress ? <div className={`inline-notice ${backfillState === "error" || backfillState === "permission" ? "notice-warning" : ""}`} role="status">{backfillProgress}</div> : null}
