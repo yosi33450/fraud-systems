@@ -1,4 +1,4 @@
-import { completeHistoricalSync, exportCrediMatchChargebacks, failHistoricalSync, ingestShopifyOrder, openCaseOrderReferences, replaceGiftCardRegistry, restoreCrediMatchOrderCandidates, upsertGiftCardRegistry, type GiftCardRegistryInput, type ShopifyOrderPayload } from "@/lib/operational-store";
+import { completeHistoricalSync, exportCrediMatchChargebacks, exportCrediMatchOrderCandidates, failHistoricalSync, ingestShopifyOrder, openCaseOrderReferences, replaceGiftCardRegistry, restoreCrediMatchOrderCandidates, upsertGiftCardRegistry, type GiftCardRegistryInput, type ShopifyOrderPayload } from "@/lib/operational-store";
 import { matchCrediMatchChargeback } from "@/lib/credimatch-matching";
 import { paymentFingerprintsFromShopify, shopifyChargebackSearchQuery } from "@/lib/credimatch-matching";
 import type { CrediMatchOrderCandidate, Store } from "@/lib/types";
@@ -562,6 +562,8 @@ export async function syncCrediMatchTenderCandidatesPage(input: {
       amount: tender.amount.amount,
       processed_at: tender.processedAt ?? undefined,
     }], tender.amount.currencyCode);
+    const stored = exportCrediMatchOrderCandidates().find((item) => item.tenantId === input.tenantId
+      && item.storeId === input.storeId && item.shopifyOrderId === order.id);
     const candidate: CrediMatchOrderCandidate = {
       tenantId: input.tenantId,
       storeId: input.storeId,
@@ -572,7 +574,7 @@ export async function syncCrediMatchTenderCandidatesPage(input: {
       amount: Number(order.totalPriceSet.shopMoney.amount),
       currency: order.totalPriceSet.shopMoney.currencyCode,
       createdAt: order.createdAt,
-      payments: [...payments, tenderPayment],
+      payments: [...(stored?.payments ?? []), ...payments, tenderPayment],
     };
     const existing = candidates.find((item) => item.shopifyOrderId === order.id);
     if (existing) existing.payments = [...(existing.payments ?? []), tenderPayment];
