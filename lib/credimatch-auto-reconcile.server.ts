@@ -43,9 +43,11 @@ export async function reconcileChargebacksAutomatically(chargebacks: CrediMatchC
         const until = new Date(paymentTime + 36 * DAY).toISOString();
         const cardLast4 = enriched.last4Digits?.replace(/\D/g, "").slice(-4);
         const merchantReference = enriched.payplus.merchantReference;
-        const phases: Array<"payment" | "card" | "date"> = [
+        const disputedAmount = enriched.originalAmount ?? enriched.grossAmount;
+        const phases: Array<"payment" | "card" | "amount" | "date"> = [
           ...(/^[a-z0-9_-]{6,100}$/i.test(merchantReference) ? ["payment" as const] : []),
           ...(cardLast4?.length === 4 ? ["card" as const] : []),
+          ...(Number.isFinite(disputedAmount) && disputedAmount !== 0 ? ["amount" as const] : []),
           "date",
         ];
         let incomplete = false;
@@ -56,7 +58,9 @@ export async function reconcileChargebacksAutomatically(chargebacks: CrediMatchC
           let after: string | null = resumeStoreId === store.id && saved && phase === resumePhase ? saved.after : null;
           const dateQuery = `created_at:>=${since} created_at:<=${until}`;
           const searchQuery = phase === "payment" ? `payment_id:${merchantReference}`
-            : phase === "card" ? `${dateQuery} credit_card_last4:${cardLast4}` : dateQuery;
+            : phase === "card" ? `${dateQuery} credit_card_last4:${cardLast4}`
+              : phase === "amount" ? `${dateQuery} current_total_price:${Math.abs(disputedAmount!).toFixed(2)}`
+                : dateQuery;
           for (let page = 0; page < maxPages; page += 1) {
             const result = await syncCrediMatchOrderCandidatesPage({
               tenantId: enriched.tenantId,
