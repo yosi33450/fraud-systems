@@ -107,6 +107,16 @@ test('keeps a distinct receipt more_info as a second exact reference', () => {
   }), [order({ payments })]).confidence, 'exact');
 });
 
+test('accepts an exact Shopify receipt payment_id when the top-level payment ID differs', () => {
+  const payments = paymentFingerprintsFromShopify([{
+    payment_id: 'top-level-id', receipt: { payment_id: 'payplus-more-info' }, amount: '445',
+  }], 'ILS');
+  assert.deepEqual(payments.map((payment) => payment.merchantReference), ['top-level-id', 'payplus-more-info']);
+  assert.equal(matchCrediMatchChargeback(chargeback({
+    payplus: { status: 'found', merchantReference: 'payplus-more-info' },
+  }), [order({ payments })]).confidence, 'exact');
+});
+
 test('does not link identical amount, card, approval or date without PayPlus more_info', () => {
   const match = matchCrediMatchChargeback(chargeback(), [order()]);
   assert.equal(match.confidence, 'unmatched');

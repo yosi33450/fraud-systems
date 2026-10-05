@@ -79,6 +79,7 @@ export function paymentFingerprintsFromShopify(
 ): OrderPaymentFingerprint[] {
   return transactions.flatMap((transaction) => {
     const receiptReference = text(receiptValue(transaction.receipt, ["more_info", "moreInfo", "merchantReference", "merchant_reference", "reference"]));
+    const receiptPaymentId = text(receiptValue(transaction.receipt, ["payment_id", "paymentId"]));
     const paymentId = text(transaction.payment_id);
     const fingerprint: OrderPaymentFingerprint = {
     transactionId: text(transaction.id),
@@ -98,12 +99,11 @@ export function paymentFingerprintsFromShopify(
     // It is the only Shopify value eligible for an automatic chargeback link.
     merchantReference: paymentId ?? receiptReference,
     };
-    // A gateway can expose its merchant reference in the receipt even when
-    // Shopify's paymentId is a different identifier. Keep both as separate
-    // exact-match candidates; neither is inferred from amount or date.
-    return paymentId && receiptReference && paymentId !== receiptReference
-      ? [fingerprint, { ...fingerprint, merchantReference: receiptReference }]
-      : [fingerprint];
+    // Gateway receipts can carry a payment ID distinct from the top-level
+    // transaction paymentId. Every reference is checked for exact equality;
+    // amount, card suffix and date never become linking keys.
+    const references = [...new Set([paymentId, receiptReference, receiptPaymentId].filter((value): value is string => Boolean(value)))];
+    return references.length ? references.map((merchantReference) => ({ ...fingerprint, merchantReference })) : [fingerprint];
   }).filter((payment) => Object.values(payment).some(Boolean));
 }
 
