@@ -54,7 +54,7 @@ export async function reconcileChargebacksAutomatically(chargebacks: CrediMatchC
         for (const phase of phases) {
           const saved = enriched.reconciliationCursor;
           const resumePhase = saved?.phase ?? "date";
-          if (resumeStoreId === store.id && saved && phase !== "payment" && phases.indexOf(phase) < phases.indexOf(resumePhase)) continue;
+          if (resumeStoreId === store.id && saved && phase !== "payment" && phase !== "amount" && phases.indexOf(phase) < phases.indexOf(resumePhase)) continue;
           let after: string | null = resumeStoreId === store.id && saved && phase === resumePhase ? saved.after : null;
           const dateQuery = `created_at:>=${since} created_at:<=${until}`;
           const searchQuery = phase === "payment" ? `payment_id:${merchantReference}`
