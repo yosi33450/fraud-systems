@@ -216,7 +216,7 @@ export interface CrediMatchChargeback {
   settlements: CrediMatchSettlement[];
   payplus?: PayPlusPaymentEvidence;
   /** Resume an automatic Shopify scan across scheduled runs. */
-  reconciliationCursor?: { storeId: string; after: string; phase?: "card" | "date" };
+  reconciliationCursor?: { storeId: string; after: string; phase?: "payment" | "card" | "date" };
   match?: ChargebackOrderMatch;
 }
 

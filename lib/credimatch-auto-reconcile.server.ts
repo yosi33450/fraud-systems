@@ -42,15 +42,21 @@ export async function reconcileChargebacksAutomatically(chargebacks: CrediMatchC
         const since = new Date(paymentTime - 36 * DAY).toISOString();
         const until = new Date(paymentTime + 36 * DAY).toISOString();
         const cardLast4 = enriched.last4Digits?.replace(/\D/g, "").slice(-4);
-        const phases: Array<"card" | "date"> = cardLast4?.length === 4 ? ["card", "date"] : ["date"];
+        const merchantReference = enriched.payplus.merchantReference;
+        const phases: Array<"payment" | "card" | "date"> = [
+          ...(/^[a-z0-9_-]{6,100}$/i.test(merchantReference) ? ["payment" as const] : []),
+          ...(cardLast4?.length === 4 ? ["card" as const] : []),
+          "date",
+        ];
         let incomplete = false;
         for (const phase of phases) {
           const saved = enriched.reconciliationCursor;
           const resumePhase = saved?.phase ?? "date";
-          if (resumeStoreId === store.id && saved && phases.indexOf(phase) < phases.indexOf(resumePhase)) continue;
+          if (resumeStoreId === store.id && saved && phase !== "payment" && phases.indexOf(phase) < phases.indexOf(resumePhase)) continue;
           let after: string | null = resumeStoreId === store.id && saved && phase === resumePhase ? saved.after : null;
           const dateQuery = `created_at:>=${since} created_at:<=${until}`;
-          const searchQuery = phase === "card" ? `${dateQuery} credit_card_last4:${cardLast4}` : dateQuery;
+          const searchQuery = phase === "payment" ? `payment_id:${merchantReference}`
+            : phase === "card" ? `${dateQuery} credit_card_last4:${cardLast4}` : dateQuery;
           for (let page = 0; page < maxPages; page += 1) {
             const result = await syncCrediMatchOrderCandidatesPage({
               tenantId: enriched.tenantId,
