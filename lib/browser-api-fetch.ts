@@ -8,12 +8,16 @@ export const browserApiFetch: typeof fetch = async (input, init) => {
   const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined));
   const token = await bridge.idToken();
   headers.set("Authorization", `Bearer ${token}`);
-  const response = await window.fetch(input, { ...init, headers, credentials: "omit" });
-  if (response.status === 401) {
-    try {
-      const claims = JSON.parse(atob(token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")));
-      console.warn("Embedded request rejected", { path: url.pathname, expiresIn: claims.exp - Date.now() / 1000, lifetime: claims.exp - claims.iat, retryHeader: response.headers.get("X-Shopify-Retry-Invalid-Session-Request") });
-    } catch { console.warn("Embedded request rejected: invalid token format"); }
+  const request = new Request(input instanceof Request ? input : url, { ...init, headers, credentials: "omit" });
+  const response = await window.fetch(request.clone());
+  // Retry only when our authentication gate rejected the request BEFORE its
+  // handler ran. This cannot duplicate a mutation. Shopify can cache a token
+  // right up to its expiry; give that cache one second to roll over.
+  if (response.status === 401 && response.headers.get("X-Shopify-Retry-Invalid-Session-Request") === "1") {
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    request.signal.throwIfAborted();
+    request.headers.set("Authorization", `Bearer ${await bridge.idToken()}`);
+    return window.fetch(request);
   }
   return response;
 };
