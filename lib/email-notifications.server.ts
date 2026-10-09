@@ -8,7 +8,7 @@ const escapeHtml = (value: string) => value.replace(/[&<>"]/g, (character) => ({
 const emailHtml = (item: FraudCase) => `
   <div dir="rtl" style="font-family:Arial,sans-serif;background:#f4f6f4;padding:32px;color:#17211d">
     <div style="max-width:600px;margin:auto;background:white;border:1px solid #dfe5e1;border-radius:16px;padding:28px">
-      <div style="font-size:12px;color:#007a5a;font-weight:700">SHIELD LEDGER · התראת סיכון</div>
+      <div style="font-size:12px;color:#007a5a;font-weight:700">ShopShield · התראת סיכון</div>
       <h1 style="font-size:24px;margin:12px 0">נדרשת החלטה לגבי ${escapeHtml(item.orderNumber)}</h1>
       <p style="line-height:1.7;color:#4e5b55">המערכת זיהתה: <strong>${escapeHtml(item.reason)}</strong>. ההזמנה לא תסומן כהונאה אוטומטית — בעל החנות צריך לבדוק ולקבל החלטה.</p>
       <table style="width:100%;border-collapse:collapse;margin:20px 0"><tr><td style="padding:10px;border-bottom:1px solid #eee">חנות</td><td style="padding:10px;border-bottom:1px solid #eee;font-weight:700">${escapeHtml(item.storeName)}</td></tr><tr><td style="padding:10px;border-bottom:1px solid #eee">לקוח</td><td style="padding:10px;border-bottom:1px solid #eee;font-weight:700">${escapeHtml(item.customer)}</td></tr><tr><td style="padding:10px">סכום</td><td style="padding:10px;font-weight:700">₪${item.amount.toLocaleString("he-IL")}</td></tr></table>
@@ -32,7 +32,7 @@ export async function notifyStoreOwners(item: FraudCase, options: { force?: bool
     if (resend) {
       try {
         const result = await resend.emails.send({
-          from: process.env.EMAIL_FROM ?? "Shield Ledger <alerts@shieldledger.app>",
+          from: process.env.EMAIL_FROM ?? "ShopShield <alerts@shopshield.click>",
           to: [recipient],
           subject: `${options.test ? "בדיקה — " : ""}נדרשת בדיקה: ${item.orderNumber} · ${item.storeName}`,
           html: emailHtml(item),

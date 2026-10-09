@@ -31,7 +31,7 @@ export default function LoginPage() {
   return (
     <main className="login-shell">
       <section className="login-card" aria-labelledby="login-title">
-        <div className="login-brand"><ShieldCheck size={25} /><span>Shield Ledger</span></div>
+        <div className="login-brand"><ShieldCheck size={25} /><span>ShopShield</span></div>
         <div className="login-icon"><LockKeyhole size={27} /></div>
         <h1 id="login-title">כניסה מאובטחת</h1>
         <p>מרכז ההתראות והחקירות של החנות שלך.</p>

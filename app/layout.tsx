@@ -6,7 +6,7 @@ import "./globals.css";
 import "./product-ui.css";
 
 export const metadata: Metadata = {
-  title: "Shield Ledger — מרכז מניעת הונאות",
+  title: "ShopShield — מרכז מניעת הונאות",
   description: "מרכז חקירות והתראות לחנויות Shopify",
 };
 

@@ -383,7 +383,7 @@ export function FraudCommandCenter() {
       <aside className={`sidebar ${mobileNav ? "sidebar-open" : ""}`} id="primary-navigation" aria-label="ניווט ראשי">
         <div className="brand-block">
           <div className="brand-mark" aria-hidden="true"><Shield size={21} /></div>
-          <div className="brand-copy"><strong>Shield Ledger</strong></div>
+          <div className="brand-copy"><strong>ShopShield</strong></div>
           <button className="icon-button mobile-only" onClick={() => setMobileNav(false)} aria-label="סגירת תפריט"><X size={18} /></button>
         </div>
         <button className="tenant-switcher" onClick={() => { setView("stores"); setMobileNav(false); }} aria-label="ניהול החנויות שלי" title="ניהול החנויות שלי">
