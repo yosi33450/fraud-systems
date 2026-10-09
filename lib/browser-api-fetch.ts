@@ -6,6 +6,14 @@ export const browserApiFetch: typeof fetch = async (input, init) => {
   const bridge = (window as unknown as { shopify?: { idToken(): Promise<string> } }).shopify;
   if (window.self === window.top || !bridge || url.origin !== window.location.origin || !url.pathname.startsWith("/api/")) return window.fetch(input, init);
   const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined));
-  headers.set("Authorization", `Bearer ${await bridge.idToken()}`);
-  return window.fetch(input, { ...init, headers, credentials: "omit" });
+  const token = await bridge.idToken();
+  headers.set("Authorization", `Bearer ${token}`);
+  const response = await window.fetch(input, { ...init, headers, credentials: "omit" });
+  if (response.status === 401) {
+    try {
+      const claims = JSON.parse(atob(token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")));
+      console.warn("Embedded request rejected", { path: url.pathname, expiresIn: claims.exp - Date.now() / 1000, lifetime: claims.exp - claims.iat, retryHeader: response.headers.get("X-Shopify-Retry-Invalid-Session-Request") });
+    } catch { console.warn("Embedded request rejected: invalid token format"); }
+  }
+  return response;
 };
