@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="he" dir="rtl"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="/app/globals.css"><link rel="stylesheet" href="/app/product-ui.css"><link rel="stylesheet" href="/app/host-safe-area.css">
+<body><script>
+const query = new URLSearchParams(location.search);
+if (!query.has('inset')) {
+  document.body.style.cssText = 'display:flex;flex-wrap:wrap;gap:20px;padding:20px';
+  for (const [width,height,inset] of [[390,700,120],[390,700,0],[844,390,80],[1280,900,64]]) {
+    const section = document.createElement('section');
+    const label = document.createElement('p'); label.textContent = `${width}×${height}, host inset ${inset}px: testing`;
+    const frame = document.createElement('iframe'); frame.width = width; frame.height = height;
+    frame.src = `?inset=${inset}`; section.append(label,frame); document.body.append(section);
+    window.addEventListener('message', event => { if (event.source === frame.contentWindow) label.textContent = `${width}×${height}, host inset ${inset}px: ${event.data}`; });
+  }
+} else {
+  const inset = Number(query.get('inset'));
+  document.body.style.setProperty('--shopify-safe-area-inset-bottom', `${inset}px`);
+  document.body.innerHTML = `<dialog class="centered-dialog order-investigation" dir="rtl"><header class="drawer-header"><div><span>תיק חקירה</span><h2>548058</h2></div><button class="icon-button">×</button></header><div class="drawer-body">${'<p>פרטי הזמנה — תוכן לבדיקה</p>'.repeat(30)}</div><footer class="decision-bar"><div>מצב</div><div class="decision-actions"><button>העבר לבדיקה</button><button>לא חשוד</button><button>סגור כטופל</button><button class="danger-button">אשר הונאה והוסף לחסימה</button></div></footer></dialog>`;
+  const dialog = document.querySelector('dialog'); dialog.showModal();
+  requestAnimationFrame(() => {
+    // In short landscape views the whole dialog can scroll to the actions.
+    dialog.scrollTop = dialog.scrollHeight;
+    const bounds = dialog.getBoundingClientRect();
+    const buttons = [...dialog.querySelectorAll('.decision-actions button')];
+    const valid = bounds.top >= 0 && bounds.bottom <= innerHeight - inset && buttons.every(button => {
+      const rect = button.getBoundingClientRect(); return rect.top >= bounds.top && rect.bottom <= bounds.bottom && rect.left >= bounds.left && rect.right <= bounds.right;
+    });
+    parent.postMessage(valid ? 'PASS — all actions above host navigation' : 'FAIL — action outside safe viewport', location.origin);
+  });
+}
+</script></body></html>

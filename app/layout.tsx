@@ -4,6 +4,7 @@ import { EMBEDDED_CLIENT_ID } from "@/lib/shopify-embedded-auth";
 import "@fontsource-variable/heebo";
 import "./globals.css";
 import "./product-ui.css";
+import "./host-safe-area.css";
 
 export const metadata: Metadata = {
   title: "ShopShield — מרכז מניעת הונאות",

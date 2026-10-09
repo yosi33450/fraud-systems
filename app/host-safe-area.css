@@ -1,0 +1,33 @@
+/* App Bridge supplies the host overlay height on mobile and desktop.
+   Native dialogs live in the top layer, outside the body's automatic padding. */
+:root .centered-dialog[open] {
+  --dialog-edge-gap: 24px;
+  --dialog-bottom-inset: max(env(safe-area-inset-bottom, 0px), var(--shopify-safe-area-inset-bottom, 0px));
+  position: fixed;
+  top: var(--dialog-edge-gap);
+  bottom: calc(var(--dialog-edge-gap) + var(--dialog-bottom-inset));
+  margin-block: auto;
+  height: fit-content;
+  max-height: min(860px, calc(100dvh - var(--dialog-edge-gap) * 2 - var(--dialog-bottom-inset)));
+}
+
+/* Keep actions reachable even in landscape or with enlarged text. */
+:root .centered-dialog .decision-bar {
+  max-height: 45dvh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+:root .sidebar {
+  bottom: max(env(safe-area-inset-bottom, 0px), var(--shopify-safe-area-inset-bottom, 0px));
+}
+
+@media (max-width: 700px) {
+  :root .centered-dialog[open] { --dialog-edge-gap: 8px; }
+}
+
+@media (max-height: 500px) {
+  :root .centered-dialog[open] { overflow-y: auto; }
+  :root .centered-dialog .drawer-body { flex: 0 0 auto; overflow-y: visible; }
+  :root .centered-dialog .decision-bar { max-height: none; overflow-y: visible; }
+}
