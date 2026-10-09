@@ -1,4 +1,5 @@
 "use client";
+import { browserApiFetch as fetch } from "@/lib/browser-api-fetch";
 
 import {
   Activity,

@@ -2,21 +2,11 @@
 
 import { useEffect, useState } from "react";
 import { FraudCommandCenter } from "@/components/fraud-command-center";
+import { browserApiFetch as fetch } from "@/lib/browser-api-fetch";
 
 export function ShopifyEmbeddedEntry() {
   const [state, setState] = useState<"loading" | "ready" | "error">("loading");
   useEffect(() => {
-    const originalFetch = window.fetch;
-    const authenticatedFetch: typeof fetch = async (input, init) => {
-      const url = new URL(input instanceof Request ? input.url : String(input), window.location.href);
-      if (url.origin !== window.location.origin || !url.pathname.startsWith("/api/")) return originalFetch(input, init);
-      const bridge = (window as unknown as { shopify?: { idToken(): Promise<string> } }).shopify;
-      if (!bridge) throw new Error("SHOPIFY_BRIDGE_UNAVAILABLE");
-      const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined));
-      headers.set("Authorization", `Bearer ${await bridge.idToken()}`);
-      return originalFetch(input, { ...init, headers, credentials: "omit" });
-    };
-    window.fetch = authenticatedFetch;
     const authenticate = async () => {
     try {
       if (window.self === window.top) throw new Error("NOT_EMBEDDED");
@@ -27,7 +17,6 @@ export function ShopifyEmbeddedEntry() {
       setState("ready");
     } catch { setState("error"); }
   }; void authenticate();
-    return () => { if (window.fetch === authenticatedFetch) window.fetch = originalFetch; };
   }, []);
   return <>
     {state === "ready" ? <FraudCommandCenter /> : <main style={{ minHeight: "100vh", display: "grid", placeItems: "center", padding: 24 }}>

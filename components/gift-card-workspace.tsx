@@ -1,4 +1,5 @@
 "use client";
+import { browserApiFetch as fetch } from "@/lib/browser-api-fetch";
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, ChevronDown, ExternalLink, Gift, Link2, RefreshCcw, Search, ShieldCheck, X } from "lucide-react";
