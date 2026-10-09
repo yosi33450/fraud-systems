@@ -25,8 +25,23 @@ export async function proxy(request: NextRequest) {
   if (authorization || pathname === "/api/auth/shopify") {
     const identity = authorization?.startsWith("Bearer ")
       ? verifyShopifyIdToken(authorization.slice(7), process.env.SHOPIFY_EMBEDDED_CLIENT_SECRET) : null;
-    if (!identity) return NextResponse.json({ error: "UNAUTHORIZED" }, { status: 401,
+    if (!identity) {
+      // Log only validation booleans/timing, never tokens or personal data.
+      try {
+        const claims = JSON.parse(Buffer.from((authorization ?? "").split(".")[1] ?? "", "base64url").toString());
+        console.warn("SHOPIFY_EMBEDDED_AUTH_REJECTED", {
+          path: pathname, hasSecret: !!process.env.SHOPIFY_EMBEDDED_CLIENT_SECRET,
+          expiresIn: claims.exp - Date.now() / 1000, notBeforeIn: claims.nbf - Date.now() / 1000,
+          issuedIn: claims.iat - Date.now() / 1000, lifetime: claims.exp - claims.iat,
+          audience: claims.aud === "594764d5141fa6d79d1dc989d3064e80",
+          issuer: claims.iss === `https://${EMBEDDED_SHOP}/admin`,
+          destination: claims.dest === `https://${EMBEDDED_SHOP}`,
+          userType: typeof claims.sub,
+        });
+      } catch { console.warn("SHOPIFY_EMBEDDED_AUTH_REJECTED", { path: pathname, missingOrMalformed: true }); }
+      return NextResponse.json({ error: "UNAUTHORIZED" }, { status: 401,
       headers: { "Cache-Control": "no-store", "X-Shopify-Retry-Invalid-Session-Request": "1" } });
+    }
     if (!embeddedPathAllowed(pathname, request.method)) return NextResponse.json({ error: "FORBIDDEN" }, { status: 403 });
     const response = NextResponse.next();
     response.headers.set("Cache-Control", "no-store");
