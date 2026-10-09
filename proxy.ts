@@ -12,7 +12,9 @@ const publicPath = (pathname: string) =>
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   if (pathname === "/shopify") {
-    const response = NextResponse.next();
+    const headers = new Headers(request.headers);
+    headers.set("x-shopshield-embedded", "1");
+    const response = NextResponse.next({ request: { headers } });
     response.headers.set("Content-Security-Policy", `frame-ancestors https://admin.shopify.com https://${EMBEDDED_SHOP}`);
     response.headers.set("Cache-Control", "no-store");
     return response;
