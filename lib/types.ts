@@ -344,6 +344,7 @@ export interface EmployeeDiscountUse {
 }
 
 export interface EmployeeDiscountActivity {
+  employeeCodeOrders?: number;
   employeeSummaries?: Array<{ employeeId: string; orders: number; lastUsedAt: string }>;
   period: "30d" | "all";
   earliestOrderAt?: string;

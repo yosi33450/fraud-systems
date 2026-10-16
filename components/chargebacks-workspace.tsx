@@ -227,7 +227,7 @@ export function ChargebacksWorkspace({ tenantId, chargebacks, stores, onRefresh 
     {backfillProgress ? <div className={`inline-notice ${backfillState === "error" || backfillState === "permission" ? "notice-warning" : ""}`} role="status">{backfillProgress}</div> : null}
     {payPlusProgress ? <div className={`inline-notice ${payPlusState === "error" || payPlusState === "configuration" ? "notice-warning" : ""}`} role="status">{payPlusProgress}</div> : null}
 
-    <div className="gift-ledger-tabs" role="group" aria-label="תקופת הכחשות"><button aria-pressed={!archive} onClick={() => setArchive(false)}>7 ימים אחרונים</button><button aria-pressed={archive} onClick={() => setArchive(true)}>ארכיון</button><span>לפי תאריך פתיחת ההכחשה · החדש ביותר קודם</span></div>
+    <div className="gift-ledger-tabs" role="group" aria-label="תקופת הכחשות"><button aria-pressed={!archive} onClick={() => setArchive(false)}>7 ימים אחרונים</button><button aria-pressed={archive} onClick={() => setArchive(true)}>ארכיון ({chargebacks.filter((item) => !inLastWeek(chargebackDate(item))).length})</button><span>לפי תאריך פתיחת ההכחשה · החדש ביותר קודם</span></div>
     <section className="chargeback-summary" aria-label="סיכום הכחשות">
       <div className="chargeback-summary-primary"><span><FileQuestion size={18} /> הכחשות שנקלטו</span><strong>{scoped.length.toLocaleString("he-IL")}</strong><small>המידע מגיע ישירות מ־CrediMatch</small></div>
       <div><span><CircleDollarSign size={17} /> סכום במחלוקת</span><strong>{money(total)}</strong><small>לפני זיכויים ועמלות</small></div>
@@ -254,7 +254,7 @@ export function ChargebacksWorkspace({ tenantId, chargebacks, stores, onRefresh 
             <span className={`match-status match-${confidence}`}><i aria-hidden="true" />{copy.label}<ArrowLeftRight size={15} aria-hidden="true" /></span>
           </button>;
         })}
-      </div> : <div className="empty-state chargeback-empty"><CreditCard size={26} /><strong>{chargebacks.length ? "אין תוצאות למסנן שבחרת" : "עדיין לא נקלטו הכחשות"}</strong><span>{chargebacks.length ? "נסה חיפוש אחר או הצג את כל ההתאמות." : "כאשר CrediMatch תשלח הכחשה, היא תופיע כאן ותיבדק מול Shopify."}</span></div>}
+      </div> : <div className="empty-state chargeback-empty"><CreditCard size={26} /><strong>{!scoped.length && !archive && chargebacks.length ? "אין הכחשות שנפתחו ב־7 הימים האחרונים" : chargebacks.length ? "אין תוצאות למסנן שבחרת" : "עדיין לא נקלטו הכחשות"}</strong><span>{!scoped.length && !archive && chargebacks.length ? `כל ${chargebacks.length} ההכחשות הקודמות שמורות בארכיון, כולל ההתאמות להזמנות.` : chargebacks.length ? "נסה חיפוש אחר או החלף בין השבוע האחרון לארכיון." : "כאשר CrediMatch תשלח הכחשה, היא תופיע כאן ותיבדק מול Shopify."}</span></div>}
     </section>
 
     {selected ? <ChargebackDialog item={selected} allChargebacks={chargebacks} tenantId={tenantId} stores={stores} onClose={() => setSelected(null)} /> : null}

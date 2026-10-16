@@ -862,6 +862,7 @@ export function getEmployeeDiscountActivity(tenantId: string, period: "30d" | "a
     return { employeeId: employee.id, orders: new Set(employeeUses.map((use) => `${use.storeId}:${use.orderId}`)).size, lastUsedAt: employeeUses.map((use) => use.createdAt).sort((a, b) => Date.parse(b) - Date.parse(a))[0] ?? "" };
   });
   return {
+    employeeCodeOrders: new Set(uses.filter((use) => isEmployeeCode(use.code, prefix)).map((use) => `${use.storeId}:${use.orderId}`)).size,
     employeeSummaries, period, earliestOrderAt, prefix, ordersChecked, ordersWithAnyDiscountCode, totalOrders: uniqueOrders.size, totalAmount: [...uniqueOrders.values()].reduce((sum, amount) => sum + amount, 0),
     codes: [...byCode.values()].sort((a, b) => b.orders - a.orders || a.code.localeCompare(b.code)),
     recentUses: uses.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt)).slice(0, 100),
