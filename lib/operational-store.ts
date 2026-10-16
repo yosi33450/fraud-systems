@@ -1,7 +1,8 @@
+import { customerHistory } from "@/lib/customer-history";
 import { employeeAddressMismatch, employeeIdentityMatches, identifyEmployee, isEmployeeCode } from "@/lib/employee-identity";
 import { createHmac, randomUUID } from "node:crypto";
 import { cases as seedCases, employees as seedEmployees, rules as seedRules, stores as seedStores } from "@/lib/initial-state";
-import { evaluateRisk, type OrderSignals } from "@/lib/risk-engine";
+import { applyCombinedRisk, evaluateRisk, type OrderSignals } from "@/lib/risk-engine";
 import { computeVelocitySignals, createVelocityLookup } from "@/lib/order-velocity";
 import { isSharedServiceEmail } from "@/lib/customer-identity";
 import { buildGiftLedger, hasFlaggedGiftSource, receiptGiftCard, type GiftCardOrderEvidence } from "@/lib/gift-card-evidence";
@@ -503,7 +504,18 @@ export function getDashboardSnapshot(tenantId: string): DashboardSnapshot {
       }))),
     })).sort((left, right) => Date.parse(right.creationTime ?? right.receivedAt) - Date.parse(left.creationTime ?? left.receivedAt))),
     giftCardLedger: buildGiftLedger(clone((state.giftCardOrders ?? []).filter((item) => item.tenantId === tenantId))),
-    cases: clone(state.cases.filter((item) => item.tenantId === tenantId)),
+    cases: clone(state.cases.filter((item) => item.tenantId === tenantId)).map((item) => {
+      if (!["new", "review", "action"].includes(item.status)) return item;
+      // Enrich legacy evidence with independent signal keys without changing any merchant decision.
+      if (item.signals) {
+        const evaluated = evaluateRisk(item.signals, new Date(item.occurredAt || now), state.rulesByTenant.get(tenantId) ?? []);
+        item.evidence = item.evidence.map((entry) => {
+          const fresh = evaluated.evidence.find((candidate) => candidate.label === entry.label && candidate.source === entry.source);
+          return fresh ? { ...entry, riskSeverity: fresh.riskSeverity, riskKeys: fresh.riskKeys, description: fresh.description } : entry;
+        });
+      }
+      return applyCombinedRisk(item);
+    }),
     stores: clone(tenantStores),
     employees: clone(state.employees.filter((item) => item.tenantId === tenantId)),
     employeeSettings: getEmployeeSettings(tenantId),
@@ -680,11 +692,12 @@ export function reevaluateOpenCases(tenantId: string) {
   const preserveEmployeeEvidence = (item: FraudCase, result: ReturnType<typeof evaluateRisk>) => {
     const evidence = item.evidence.filter((entry) => entry.source === "employee" && (
       (employeeSettings.zeroAmount && entry.description.includes("סכום ₪0"))
-      || (employeeSettings.giftCardAddressChange && entry.description.includes("כתובת אחרת"))
+      || (employeeSettings.giftCardAddressChange && (entry.description.includes("כתובת אחרת") || entry.description.includes("מהכתובות המאושרות")))
       || (employeeSettings.repeatGiftCardUses && entry.description.includes("מימושי Gift Card"))
+      || (employeeSettings.couponRepeatUses && entry.description.includes("קוד עובד נוצל"))
     ));
     if (evidence.length) { result.evidence.unshift(...evidence); result.score = Math.max(72, result.score); if (["low", "medium"].includes(result.severity)) result.severity = "high"; }
-    return result;
+    return applyCombinedRisk(result);
   };
   let resolved = 0;
   let updated = 0;
@@ -1341,10 +1354,11 @@ export function ingestShopifyOrder(input: { storeId: string; webhookId: string; 
     if (employeeCouponUses > employeeSettings.couponRepeatThreshold) employeeFindings.push(`קוד עובד נוצל ${employeeCouponUses} פעמים עבור ${matchedEmployee?.name ?? (email || "אותו רוכש")} בחלון הבדיקה.`);
   }
   if (employeeFindings.length) {
-    result.evidence.unshift({ id: `employee-${shopifyOrderId}`, label: "ניטור עובדים", description: employeeFindings.join(" "), source: "employee", delta: 72, timestamp: createdAt });
+    result.evidence.unshift(...employeeFindings.map((description, index) => ({ id: `employee-${shopifyOrderId}-${index}`, label: "ניטור עובדים", description, source: "employee" as const, riskSeverity: "high" as const, riskKeys: [`employee:${description.startsWith("הזמנה בסכום") ? "zero" : description.startsWith("ההזמנה או") ? "address" : description.startsWith("קוד עובד") ? "coupon" : "gift-uses"}`], delta: 72, timestamp: createdAt })));
     result.score = Math.max(result.score, 72);
     if (result.severity === "low" || result.severity === "medium") result.severity = "high";
   }
+  applyCombinedRisk(result);
   for (const ruleId of result.matchedRuleIds) {
     const matchedRule = state.rulesByTenant.get(store.tenantId)?.find((rule) => rule.id === ruleId);
     if (matchedRule && (!existingOrder || !existingCaseBeforeEvaluation?.evidence.some((evidence) => evidence.label === matchedRule.label))) matchedRule.matches += 1;
@@ -1430,3 +1444,25 @@ export function recordCrediMatchDiscrepancy(discrepancyId: string, payload: unkn
 export function assertStoreTenant(tenantId: string, storeId: string) {
   tenantStore(tenantId, storeId);
 }
+
+/** History is independent of the dashboard's week/status filters. */
+export function getCaseCustomerHistory(tenantId: string, caseId: string) {
+  const item = state.cases.find((entry) => entry.tenantId === tenantId && entry.id === caseId);
+  if (!item) return null;
+  const source = {
+    tenantId, storeId: item.storeId, shopifyOrderId: item.context?.shopifyOrderId ?? item.id,
+    customerId: /general customer payplus/i.test(item.customer) ? undefined : item.context?.customerId,
+    email: item.email, phone: item.context?.phone, createdAt: item.occurredAt ?? "", amount: item.amount,
+  };
+  const caseOrders = state.cases.filter((entry) => entry.tenantId === tenantId && entry.storeId === item.storeId).map((entry) => ({
+    tenantId, storeId: entry.storeId, shopifyOrderId: entry.context?.shopifyOrderId ?? entry.id,
+    orderNumber: entry.orderNumber, customerId: /general customer payplus/i.test(entry.customer) ? undefined : entry.context?.customerId,
+    email: entry.email, phone: entry.context?.phone, createdAt: entry.occurredAt ?? "", amount: entry.amount,
+  }));
+  return customerHistory(source, [...caseOrders, ...state.orders]).map((order) => ({
+    orderId: order.shopifyOrderId, orderNumber: order.orderNumber ?? order.shopifyOrderId,
+    createdAt: order.createdAt, amount: order.amount, currency: order.currency ?? "ILS",
+    status: state.cases.find((entry) => entry.tenantId === tenantId && entry.storeId === item.storeId && (entry.context?.shopifyOrderId ?? entry.id) === order.shopifyOrderId)?.status,
+  }));
+}
+

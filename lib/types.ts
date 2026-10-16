@@ -21,6 +21,8 @@ export interface Store {
 }
 
 export interface Evidence {
+  riskSeverity?: Severity;
+  riskKeys?: string[];
   id: string;
   label: string;
   description: string;

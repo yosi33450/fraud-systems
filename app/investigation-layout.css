@@ -1,0 +1,17 @@
+.case-evidence-facts { border:1px solid var(--hairline,#dce3df); border-radius:12px; padding:16px; margin:0 0 16px; }
+.case-evidence-facts h3 { margin:0 0 12px; font-size:15px; }
+.case-evidence-facts ul { list-style:none; margin:0; padding:0; }
+.case-evidence-facts li + li { margin-top:12px; padding-top:12px; border-top:1px solid #e4e9e6; }
+.case-evidence-facts p { margin:4px 0; line-height:1.6; font-size:14px; }
+.case-evidence-facts small { color:#68776e; font-size:12px; }
+.combined-risk-note { margin:0 0 12px; color:#a82c2c; font-weight:600; }
+.customer-order-history,.chargeback-decision-details { border:1px solid #dce3df; border-radius:12px; padding:16px; min-width:0; }
+.customer-order-history summary,.chargeback-decision-details summary,.payplus-evidence > summary { cursor:pointer; font-weight:700; padding:4px 0; }
+.customer-order-history > p { font-size:13px; color:#68776e; }
+.customer-history-list article { display:grid; grid-template-columns:1fr 1fr auto auto; align-items:center; gap:12px; border-top:1px solid #e4e9e6; padding:12px 0; font-size:13px; }
+.customer-history-list small { display:block; color:#68776e; }
+.customer-history-list a { color:#256b4b; font-weight:600; }
+.chargeback-person-group { border-bottom:1px solid #dce3df; }
+.chargeback-person-group > summary { padding:18px 20px; cursor:pointer; font-weight:600; display:flex; flex-wrap:wrap; gap:8px 20px; align-items:center; background:#f5f8f6; }
+.chargeback-person-group > summary small { font-weight:400; }
+@media(max-width:600px) { .customer-history-list article { grid-template-columns:1fr 1fr; } .customer-history-list time { font-size:13px; } }

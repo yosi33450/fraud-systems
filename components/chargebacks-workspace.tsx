@@ -6,6 +6,7 @@ import { ArrowLeftRight, CalendarClock, CheckCircle2, CircleDollarSign, CreditCa
 import { CenteredDialog } from "@/components/centered-dialog";
 import { formatHebrewDateTime } from "@/lib/hebrew-date";
 import { chargebackDate, inLastWeek, timestamp } from "@/lib/activity-scope";
+import { groupChargebacks } from "@/lib/chargeback-groups";
 import { relatedCustomerChargebacks } from "@/lib/chargeback-customer-context";
 import type { ChargebackMatchConfidence, CrediMatchChargeback, Store } from "@/lib/types";
 
@@ -54,6 +55,9 @@ export function ChargebacksWorkspace({ tenantId, chargebacks, stores, onRefresh 
       return (!search || searchable.some((value) => value?.toLowerCase().includes(search))) && (filter === "all" || (match?.confidence ?? "unmatched") === filter);
     }).sort((a, b) => timestamp(chargebackDate(b)) - timestamp(chargebackDate(a)));
   }, [scoped, filter, query]);
+  const visibleIds = new Set(visible.map((item) => item.id));
+  const grouped = groupChargebacks(chargebacks).filter((group) => group.some((item) => visibleIds.has(item.id)))
+    .sort((a, b) => timestamp(chargebackDate(b.find((item) => visibleIds.has(item.id))!)) - timestamp(chargebackDate(a.find((item) => visibleIds.has(item.id))!)));
   const linked = scoped.filter((item) => ["exact", "strong"].includes(item.match?.confidence ?? "")).length;
   const unresolved = chargebacks.filter((item) => !["exact", "strong"].includes(item.match?.confidence ?? "")).length;
   const total = scoped.reduce((sum, item) => sum + (item.originalAmount ?? item.grossAmount ?? 0), 0);
@@ -243,7 +247,8 @@ export function ChargebacksWorkspace({ tenantId, chargebacks, stores, onRefresh 
       </div>
       {visible.length ? <div className="chargeback-table" role="table" aria-label="הכחשות אשראי">
         <div className="chargeback-table-head" role="row"><span>הכחשה</span><span>עסקה</span><span>סכום</span><span>התאמה ל־Shopify</span><span>מצב</span></div>
-        {visible.map((item) => {
+        {grouped.map((group) => {
+          const rows = group.map((item) => {
           const confidence = item.match?.confidence ?? "unmatched";
           const copy = copyFor(item.match, confidence);
           return <button key={item.id} className="chargeback-row" role="row" onClick={() => setSelected(item)}>
@@ -253,6 +258,12 @@ export function ChargebacksWorkspace({ tenantId, chargebacks, stores, onRefresh 
             <span className="chargeback-order"><strong>{confidence === "ambiguous" ? `${item.match?.candidates?.length ?? 0} עסקאות אפשריות` : item.match?.orderNumber ?? "טרם קושרה הזמנה"}</strong><small>{item.match?.customer || item.match?.email || copy.detail}</small>{relatedCustomerChargebacks(item, chargebacks).length ? <small className="chargeback-related-count">עוד {relatedCustomerChargebacks(item, chargebacks).length} הכחשות מאותו מייל</small> : null}</span>
             <span className={`match-status match-${confidence}`}><i aria-hidden="true" />{copy.label}<ArrowLeftRight size={15} aria-hidden="true" /></span>
           </button>;
+
+          });
+          if (group.length === 1) return rows;
+          const first = group.find((item) => visibleIds.has(item.id))!;
+          const currentCount = group.filter((item) => visibleIds.has(item.id)).length;
+          return <details className="chargeback-person-group" key={group.map((item) => item.id).sort().join(":")}><summary><strong>{first.match?.customer || first.payplus?.customerName || first.match?.email || first.payplus?.email || "לקוח מקושר"}</strong><span>{group.length} הכחשות</span><small>{currentCount} בתצוגה שנבחרה · פתיחה מציגה את כל ההיסטוריה</small></summary>{rows}</details>;
         })}
       </div> : <div className="empty-state chargeback-empty"><CreditCard size={26} /><strong>{!scoped.length && !archive && chargebacks.length ? "אין הכחשות שנפתחו ב־7 הימים האחרונים" : chargebacks.length ? "אין תוצאות למסנן שבחרת" : "עדיין לא נקלטו הכחשות"}</strong><span>{!scoped.length && !archive && chargebacks.length ? `כל ${chargebacks.length} ההכחשות הקודמות שמורות בארכיון, כולל ההתאמות להזמנות.` : chargebacks.length ? "נסה חיפוש אחר או החלף בין השבוע האחרון לארכיון." : "כאשר CrediMatch תשלח הכחשה, היא תופיע כאן ותיבדק מול Shopify."}</span></div>}
     </section>
@@ -285,14 +296,6 @@ function ChargebackDialog({ item, allChargebacks, tenantId, stores, onClose }: {
   return <CenteredDialog label={`הכחשה ${item.discrepancyId}`} onClose={onClose} className="chargeback-dialog">
     <header className="drawer-header"><div><span className="eyebrow">CrediMatch · הכחשה #{item.discrepancyId}</span><h2>{item.type ?? "הכחשת אשראי"}</h2><p>{safeDate(item.creationTime ?? item.receivedAt)} · {item.status ?? "סטטוס לא התקבל"}</p></div><button className="icon-button" onClick={onClose} aria-label="סגירת פרטי הכחשה"><X size={19} /></button></header>
     <div className="chargeback-dialog-body">
-      <section className={`chargeback-match-hero match-${confidence}`}>
-        <div className="match-hero-icon">{["exact", "strong"].includes(confidence) ? <CheckCircle2 /> : <FileQuestion />}</div>
-        <div><span>תוצאת ההצלבה</span><h3>{copy.label}</h3><p>{copy.detail}</p></div>
-        {match?.score ? <strong>{match.score}<small>/100</small></strong> : null}
-      </section>
-
-      {match?.comparisons.length ? <section className="match-comparison"><div className="chargeback-section-title"><h3>איך התקבלה ההחלטה?</h3><span>רק שדות שקיימים בשני המקורות מסומנים כתואמים או שונים</span></div><div className="comparison-grid">{match.comparisons.map((comparison) => <div key={comparison.key} className={!comparison.compared ? "comparison-unavailable" : comparison.matched ? "comparison-match" : "comparison-miss"}><span>{comparison.label}</span><strong>{!comparison.compared ? "לא ניתן להשוות" : comparison.matched ? "תואם" : "שונה"}</strong><small className="comparison-values"><span className="comparison-side"><em>CrediMatch</em><bdi>{comparison.crediMatchValue ?? "לא התקבל"}</bdi></span><ArrowLeftRight size={13} aria-hidden="true" /><span className="comparison-side"><em>Shopify</em><bdi>{comparison.shopifyValue ?? "לא התקבל"}</bdi></span></small></div>)}</div></section> : null}
-
       <div className="chargeback-split">
         <section className="chargeback-facts"><div className="chargeback-section-title"><h3>ההכחשה מ־CrediMatch</h3><span>נתוני חברת האשראי</span></div><dl>
           <div><dt>סכום מקורי</dt><dd>{money(item.originalAmount ?? item.grossAmount, item.currency)}</dd></div>
@@ -308,10 +311,10 @@ function ChargebackDialog({ item, allChargebacks, tenantId, stores, onClose }: {
           <div><dt>אימייל</dt><dd><bdi>{match.email || "לא התקבל"}</bdi></dd></div>
           <div><dt>מועד הזמנה</dt><dd>{safeDate(match.createdAt)}</dd></div>
           <div><dt>רמת התאמה</dt><dd>{copy.label}</dd></div>
-        </dl>{shopifyUrl ? <a className="secondary-button shopify-order-link" href={shopifyUrl} target="_blank" rel="noreferrer">פתיחת ההזמנה ב־Shopify <ExternalLink size={15} /></a> : null}</> : <div className="unmatched-guidance"><CalendarClock size={24} /><strong>ההכחשה נשמרה</strong><p>כאשר יש התאמה יחידה של סכום ויום, היא תוצג כ״דורש אימות״ בלבד. התאמה ודאית עדיין דורשת פרט תשלום נוסף.</p></div>}</section>
+        </dl>{shopifyUrl ? <a className="secondary-button shopify-order-link" href={shopifyUrl} target="_blank" rel="noreferrer">פתיחת ההזמנה ב־Shopify <ExternalLink size={15} /></a> : null}</> : <div className="unmatched-guidance"><CalendarClock size={24} /><strong>ההכחשה נשמרה</strong><p>החיבור יתבצע כאשר אסמכתת החנות מ־PayPlus תימצא בעסקת Shopify.</p></div>}</section>
       </div>
 
-      {item.payplus ? <section className="chargeback-facts payplus-evidence"><div className="chargeback-section-title"><h3>פרטי תשלום מ־PayPlus</h3><span>{item.payplus.status === "found" ? "נמצאה עסקה תואמת" : item.payplus.status === "conflict" ? "נדרשת בדיקה" : "לא נמצאה עסקה"}</span></div><dl>
+      {item.payplus ? <details className="chargeback-facts payplus-evidence"><summary>פרטי תשלום מ־PayPlus</summary><div className="chargeback-section-title"><span>{item.payplus.status === "found" ? "נמצאה עסקה תואמת" : item.payplus.status === "conflict" ? "נדרשת בדיקה" : "לא נמצאה עסקה"}</span></div><dl>
         <div><dt>מספר אישור</dt><dd><bdi>{item.payplus.approvalNumber || "לא התקבל"}</bdi></dd></div>
         <div><dt>מזהה עסקה</dt><dd><bdi>{item.payplus.transactionUid ?? "לא התקבל"}</bdi></dd></div>
         <div><dt>מספר שובר</dt><dd><bdi>{item.payplus.voucherNumber ?? "לא התקבל"}</bdi></dd></div>
@@ -322,7 +325,7 @@ function ChargebackDialog({ item, allChargebacks, tenantId, stores, onClose }: {
         <div><dt>אימייל</dt><dd><bdi>{item.payplus.email ?? "לא התקבל"}</bdi></dd></div>
         <div><dt>טלפון</dt><dd><bdi>{item.payplus.phone ?? "לא התקבל"}</bdi></dd></div>
         {item.payplus.merchantReference ? <div><dt>אסמכתת חנות</dt><dd><bdi>{item.payplus.merchantReference}</bdi></dd></div> : null}
-      </dl>{item.payplus.details && Object.keys(item.payplus.details).length ? <details className="payplus-details"><summary>כל הפרטים שחזרו מ־PayPlus ({Object.keys(item.payplus.details).length})</summary><dl>{Object.entries(item.payplus.details).map(([key, value]) => <div key={key}><dt><bdi>{key}</bdi></dt><dd><bdi>{value}</bdi></dd></div>)}</dl></details> : null}{item.payplus.message ? <p className="payplus-message">{item.payplus.message}</p> : null}</section> : null}
+      </dl>{item.payplus.details && Object.keys(item.payplus.details).length ? <details className="payplus-details"><summary>כל הפרטים שחזרו מ־PayPlus ({Object.keys(item.payplus.details).length})</summary><dl>{Object.entries(item.payplus.details).map(([key, value]) => <div key={key}><dt><bdi>{key}</bdi></dt><dd><bdi>{value}</bdi></dd></div>)}</dl></details> : null}{item.payplus.message ? <p className="payplus-message">{item.payplus.message}</p> : null}</details> : null}
 
       {confidence === "ambiguous" && match?.candidates?.length ? <section className="settlement-section"><div className="chargeback-section-title"><h3>עסקאות אפשריות לבדיקה</h3><span>אותו סכום ואותו יום — בחר ידנית לאחר בדיקה</span></div><div className="settlement-list">{match.candidates.map((candidate) => <article key={candidate.orderId}><span>{candidate.orderNumber ?? "הזמנה"} · {candidate.customer || candidate.email || "לקוח לא התקבל"}</span><strong>{money(candidate.amount, candidate.currency)}</strong><small>{safeDate(candidate.createdAt)} · {candidate.storeName ?? "Shopify"}</small></article>)}</div></section> : null}
 
@@ -334,6 +337,10 @@ function ChargebackDialog({ item, allChargebacks, tenantId, stores, onClose }: {
         {historyState === "loading" ? <p className="chargeback-customer-note">בודק רכישות נוספות ב־Shopify…</p> : historyState === "error" ? <p className="chargeback-customer-note">לא ניתן לטעון כרגע את רכישות החודש. נתוני ההכחשות הקיימים עדיין מוצגים.</p> : <details className="chargeback-customer-details"><summary>רכישות בחודש {monthHistory?.month} ({monthHistory?.orders.length ?? 0})</summary><div className="chargeback-customer-list">{monthHistory?.orders.map((order) => <div key={order.orderId}><span>{order.orderNumber}{order.disputed ? " · קיימת הכחשה" : ""}</span><strong>{money(order.amount, order.currency)}</strong><small>{safeDate(order.createdAt)}</small></div>)}</div>{monthHistory?.truncated ? <p className="chargeback-customer-note">יש הזמנות נוספות מעבר לתוצאות שנסרקו.</p> : null}</details>}
         <p className="chargeback-customer-note">המייל משמש לקיבוץ פעילות בלבד; רק אסמכתת PayPlus מחברת הכחשה להזמנה בוודאות.</p>
       </section> : null}
+      <details className="chargeback-decision-details"><summary>איך התקבלה ההחלטה? · {copy.label}</summary><p>{copy.detail}</p>
+      {match?.comparisons.length ? <section className="match-comparison"><div className="chargeback-section-title"><h3>איך התקבלה ההחלטה?</h3><span>רק שדות שקיימים בשני המקורות מסומנים כתואמים או שונים</span></div><div className="comparison-grid">{match.comparisons.map((comparison) => <div key={comparison.key} className={!comparison.compared ? "comparison-unavailable" : comparison.matched ? "comparison-match" : "comparison-miss"}><span>{comparison.label}</span><strong>{!comparison.compared ? "לא ניתן להשוות" : comparison.matched ? "תואם" : "שונה"}</strong><small className="comparison-values"><span className="comparison-side"><em>CrediMatch</em><bdi>{comparison.crediMatchValue ?? "לא התקבל"}</bdi></span><ArrowLeftRight size={13} aria-hidden="true" /><span className="comparison-side"><em>Shopify</em><bdi>{comparison.shopifyValue ?? "לא התקבל"}</bdi></span></small></div>)}</div></section> : null}
+
+      </details>
     </div>
   </CenteredDialog>;
 }

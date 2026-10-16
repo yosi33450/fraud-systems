@@ -1,5 +1,7 @@
 "use client";
 import { caseDate, chargebackDate, inLastWeek, isCurrentCase, timestamp } from "@/lib/activity-scope";
+import { CustomerOrderHistory } from "@/components/customer-order-history";
+import { combinedHighRiskCount } from "@/lib/risk-engine";
 import { browserApiFetch as fetch } from "@/lib/browser-api-fetch";
 
 import {
@@ -458,7 +460,7 @@ export function FraudCommandCenter() {
         {view === "platform" ? <PlatformScreen /> : null}
       </main>
 
-      {selectedCase ? <InvestigationDrawer item={selectedCase} storeDomain={storeData.find((store) => store.id === selectedCase.storeId)?.domain} notice={decisionNotice} relatedCount={relatedCaseCount(caseData, selectedCase)} onClose={() => setSelectedCase(null)} onDecide={decideCase} /> : null}
+      {selectedCase ? <InvestigationDrawer key={selectedCase.id} item={selectedCase} storeDomain={storeData.find((store) => store.id === selectedCase.storeId)?.domain} notice={decisionNotice} relatedCount={relatedCaseCount(caseData, selectedCase)} onClose={() => setSelectedCase(null)} onDecide={decideCase} /> : null}
       {connectOpen ? <ConnectStoreDialog onClose={() => setConnectOpen(false)} onConnect={connectShopifyStore} /> : null}
     </div>
   );
@@ -690,7 +692,6 @@ function InvestigationDrawer({ item, storeDomain, notice, relatedCount, onClose,
   const closedByRules = isAutomaticallyResolved(item);
   const numericOrderId = item.context?.shopifyOrderId?.match(/\d+$/)?.[0];
   const shopifyUrl = storeDomain && numericOrderId ? `https://${storeDomain}/admin/orders/${numericOrderId}` : null;
-  const missingBuyerIdentity = isPayPlusPlaceholder(item) || ["ללא שם", "לקוח Shopify", ""].includes(item.customer.trim());
   const formatEvidenceTime = (value: string) => {
     const date = new Date(value);
     return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat("he-IL", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }).format(date);
@@ -699,9 +700,19 @@ function InvestigationDrawer({ item, storeDomain, notice, relatedCount, onClose,
       <header className="drawer-header"><div><span className="case-kicker">תיק חקירה</span><div className="drawer-title"><h2>{item.orderNumber}</h2>{closedByRules ? <span className="closed-by-rules"><CheckCircle2 size={15} /> נסגר לפי החוקים</span> : <SeverityBadge severity={item.severity} score={item.score} />}</div><p>{item.storeName} · נפתח {item.createdAt}</p></div><button autoFocus className="icon-button" onClick={onClose} aria-label="סגירת תיק"><X size={20} /></button></header>
       <div className="drawer-body">
         <section className={`case-summary-strip ${closedByRules ? "case-summary-resolved" : ""}`}><div><span>{closedByRules ? "מצב התראה" : "סיבת ההתראה"}</span><h3>{closedByRules ? "ההתראה אינה פעילה" : item.reason}</h3><p>{closedByRules ? item.resolution?.note ?? "ההזמנה אינה עומדת כרגע באף חוק סיכון פעיל. לא התקבלה החלטה אנושית לגביה." : "המערכת מציגה את העובדות שנמצאו. ההחלטה נשארת בידי בעל החנות."}</p></div><dl><div><dt>ציון</dt><dd>{item.score}</dd></div><div><dt>תנאים</dt><dd>{item.evidence.length}</dd></div><div><dt>סכום</dt><dd>{formatCurrency(item.amount)}</dd></div></dl></section>
+        {combinedHighRiskCount(item.evidence) >= 2 ? <p className="combined-risk-note">סיכון קריטי: התקיימו {combinedHighRiskCount(item.evidence)} תנאי סיכון גבוהים שונים.</p> : null}
+        <section className="case-evidence-facts" aria-label="הראיות לסיבת ההתראה">
+          <h3>מה נמצא בפועל</h3>
+          {item.evidence.length ? <ul>{item.evidence.map((evidence) => <li key={evidence.id}><strong>{evidence.label}</strong><p>{evidence.description}</p><small>{sourceLabels[evidence.source]} · {formatEvidenceTime(evidence.timestamp)}</small></li>)}</ul> : <p>אין תנאי סיכון פעילים.</p>}
+        </section>
         <div className="drawer-grid">
-          <details className="evidence-section"><summary>ספר הראיות <span>{item.evidence.length} תנאים</span><ChevronDown size={16} /></summary><div className="evidence-ledger">{item.evidence.map((evidence) => <article key={evidence.id} className="evidence-node"><span className={`evidence-source source-${evidence.source}`}>{sourceLabels[evidence.source]}</span><div className="evidence-finding"><h4>{evidence.label}</h4><p>{evidence.description}</p></div><time className="evidence-time mono">{formatEvidenceTime(evidence.timestamp)}</time></article>)}</div></details>
-          <details className="order-context" open><summary>פרטי ההזמנה והקשר ללקוח <ChevronDown size={17} /></summary><div className="order-context-details"><h3>זהות והקשר להזמנה</h3><p className="context-note">הפרטים עוזרים לחבר בין עסקאות. כתובת IP לבדה אינה מזהה אדם בוודאות.</p>{missingBuyerIdentity ? <div className="identity-data-notice"><Info size={18} /><div><strong>{isPayPlusPlaceholder(item) ? "PayPlus העבירה ל-Shopify לקוח טכני, לא את זהות הקונה" : "Shopify לא החזירה שם לקוח להזמנה"}</strong><span>{item.context?.phone ? "קיים מספר טלפון ולכן אפשר לזהות ולקשר לפי הטלפון." : "לא התקבלו מספיק פרטי קשר כדי לזהות את האדם או לקשר אותו להזמנות אחרות."}</span></div></div> : null}<div className="identity-grid"><div><span><Wifi size={15} /> כתובת IP</span><strong className="mono">{item.context?.ip || "לא התקבלה מ־Shopify"}</strong></div><div><span><CreditCard size={15} /> אמצעי תשלום</span><strong>{item.context?.paymentGateways.join(", ") || "לא התקבל"}</strong></div><div><span><MapPin size={15} /> כתובת משלוח</span><strong>{item.context?.address || "לא התקבלה מ־Shopify"}</strong></div><div><span><Phone size={15} /> טלפון</span><strong className="mono">{item.context?.phone || "לא התקבל מ־Shopify"}</strong></div></div>{item.context?.ip ? <p className="context-note">ב־2 השעות האחרונות זוהו מה־IP הזה <strong>{item.context.ipOrderCountLastTwoHours ?? 1} הזמנות</strong>, מתוכן <strong>{item.context.ipGiftCardOrderCountLastTwoHours ?? 0} רכישות Gift Card</strong>, באמצעות <strong>{item.context.ipDistinctEmailsLastTwoHours ?? 1} אימיילים שונים</strong>.</p> : null}{item.context?.riskFacts.length ? <div className="shopify-risk-facts"><strong>אותות סיכון מ־Shopify</strong><ul>{item.context.riskFacts.map((fact) => <li key={fact}>{fact}</li>)}</ul></div> : null}<GiftCardTrail item={item} /><h3>פרטי ההזמנה</h3><dl><div><dt>לקוח</dt><dd>{customerDisplayName(item)}</dd></div><div><dt>אימייל</dt><dd className="mono">{isRealEmail(item.email) ? item.email : "לא התקבל מ־Shopify"}</dd></div><div><dt>סכום</dt><dd className="mono">{formatCurrency(item.amount)}</dd></div><div><dt>חנות</dt><dd>{item.storeName}</dd></div></dl><h4>פריטים</h4><ul>{item.items.map((product) => <li key={product.name}><span>{product.quantity}× {product.name}</span><strong className="mono">{formatCurrency(product.quantity * product.price)}</strong></li>)}</ul>{shopifyUrl ? <a className="secondary-button full-button" href={shopifyUrl} target="_blank" rel="noopener noreferrer">פתח ב-Shopify <ExternalLink size={14} /></a> : <span className="context-note">קישור Shopify אינו זמין: מזהה ההזמנה או דומיין החנות חסרים.</span>}</div></details>
+          <details className="order-context" open><summary>פרטי ההזמנה <ChevronDown size={17} /></summary><div className="order-context-details">
+            <dl><div><dt>לקוח</dt><dd>{customerDisplayName(item)}</dd></div><div><dt>אימייל</dt><dd className="mono">{isRealEmail(item.email) ? item.email : "לא התקבל מ־Shopify"}</dd></div><div><dt>טלפון</dt><dd className="mono">{item.context?.phone || "לא התקבל"}</dd></div><div><dt>כתובת משלוח</dt><dd>{item.context?.address || "לא התקבלה"}</dd></div><div><dt>סכום</dt><dd className="mono">{formatCurrency(item.amount)}</dd></div><div><dt>חנות</dt><dd>{item.storeName}</dd></div><div><dt>כתובת IP</dt><dd className="mono">{item.context?.ip || "לא התקבלה"}</dd></div><div><dt>אמצעי תשלום</dt><dd>{item.context?.paymentGateways.join(", ") || "לא התקבל"}</dd></div></dl>
+            <h4>פריטים</h4><ul>{item.items.map((product) => <li key={product.name}><span>{product.quantity}× {product.name}</span><strong className="mono">{formatCurrency(product.quantity * product.price)}</strong></li>)}</ul>
+            {shopifyUrl ? <a className="secondary-button full-button" href={shopifyUrl} target="_blank" rel="noopener noreferrer">פתח ב-Shopify <ExternalLink size={14} /></a> : <span className="context-note">קישור Shopify אינו זמין: מזהה ההזמנה או דומיין החנות חסרים.</span>}
+            <GiftCardTrail item={item} />
+          </div></details>
+          <CustomerOrderHistory key={item.id} tenantId={item.tenantId} caseId={item.id} storeDomain={storeDomain} />
         </div>
       </div>
       {notice ? <p className="case-decision-notice" role="status">{notice}</p> : null}

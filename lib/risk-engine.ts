@@ -83,13 +83,29 @@ const ruleMatches = (rule: RiskRule, signals: OrderSignals) => {
 
 const sourceFor = (rule: RiskRule): Evidence["source"] => rule.category === "network" ? "network" : rule.category === "employee" ? "employee" : "behavior";
 
+/** Count independent fulfilled high-risk signals, never repeated copies of a rule. */
+export function combinedHighRiskCount(evidence: Evidence[]): number {
+  return new Set(evidence.filter((entry) => entry.riskSeverity === "high" || (!entry.riskSeverity && entry.delta === 72))
+    .flatMap((entry) => entry.riskKeys ?? [`${entry.source}:${entry.label}`])).size;
+}
+
+export function applyCombinedRisk<T extends { score: number; severity: Severity; evidence: Evidence[] }>(result: T): T {
+  if (combinedHighRiskCount(result.evidence) >= 2) {
+    result.severity = "critical";
+    result.score = Math.max(92, result.score);
+  }
+  return result;
+}
+
 export function evaluateRisk(signals: OrderSignals, now = new Date(), rules: RiskRule[] = defaultRules): RiskResult {
   const matched = rules.filter((rule) => rule.enabled && rule.conditions.length > 0 && ruleMatches(rule, signals));
   const alertRules = matched.filter((rule) => rule.action.openCase);
   const evidence: Evidence[] = alertRules.map((rule, index) => ({
     id: `${index + 1}`,
     label: rule.label,
-    description: rule.conditions.map((condition) => {
+    riskSeverity: rule.action.severity,
+    riskKeys: rule.conditions.filter((condition) => conditionMatches(condition, signals)).map((condition) => `${condition.field}:${condition.windowMinutes ?? velocityDefaults[condition.field] ?? ""}:${condition.minGiftCardValue ?? ""}`),
+    description: rule.conditions.filter((condition) => conditionMatches(condition, signals)).map((condition) => {
       const actual = signalValue(condition, signals);
       if (condition.field in velocityDefaults) {
         const minutes = condition.windowMinutes ?? velocityDefaults[condition.field];
@@ -127,5 +143,5 @@ export function evaluateRisk(signals: OrderSignals, now = new Date(), rules: Ris
     ? Math.min(100, baseScore[severity] + Math.max(0, evidence.length - 1) * 2 + bonus + (highShopifyRiskIsCorroborated ? 12 : 0))
     : Math.min(24, bonus + (signals.billingShippingMismatch ? 2 : 0));
 
-  return { score, severity, evidence, matchedRuleIds: matched.map((rule) => rule.id), version: "2026.09-v3" };
+  return applyCombinedRisk({ score, severity, evidence, matchedRuleIds: matched.map((rule) => rule.id), version: "2026.09-v3" });
 }
