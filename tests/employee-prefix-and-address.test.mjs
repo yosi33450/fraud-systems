@@ -1,0 +1,36 @@
+import './register-ts-alias.mjs';
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { employeeAddressMismatch, identifyEmployee, isEmployeeCode } from '../lib/employee-identity.ts';
+const api = await import('../lib/operational-store.ts');
+const initial = api.exportOperationalState();
+test('both addresses are allowed, missing address is not a mismatch, ambiguous address is not identity', () => {
+  const employee = { id: 'a', email: 'a@test.com', address: 'One 1', secondaryAddress: 'Two 2' };
+  for (const value of ['one 1', ' TWO  2 ', '']) assert.equal(employeeAddressMismatch(employee, value), false);
+  assert.equal(employeeAddressMismatch(employee, 'Three 3'), true);
+  assert.equal(employeeAddressMismatch({ ...employee, address: '', secondaryAddress: '' }, 'Three 3'), false);
+  assert.equal(identifyEmployee([employee], { address: 'Two 2' }).id, 'a');
+  assert.equal(identifyEmployee([employee, { ...employee, id: 'b', email: 'b@test.com' }], { address: 'Two 2' }), undefined);
+  assert.equal(isEmployeeCode('oVeD30', ' OVED '), true);
+  assert.equal(isEmployeeCode('summer', ''), false);
+});
+test('global prefix counts each buyer separately and supports secondary addresses', () => {
+  api.restoreOperationalState(initial);
+  const tenantId = 'employee-global-test';
+  const store = api.connectShopifyStore({ tenantId, name: 'Test', domain: 'test.myshopify.com', accessToken: 'test', clientId: 'test', clientSecret: 'test', expiresIn: 1000 });
+  api.saveEmployeeSettings(tenantId, { ...api.getEmployeeSettings(tenantId), couponPrefix: 'OVED', couponRepeatThreshold: 3 });
+  const employee = api.addEmployee(tenantId, { name: 'A', email: 'a@test.com', department: 'Test', address: 'One 1', secondaryAddress: 'Two 2', couponCodes: ['oved30'] });
+  const ingest = (id, email, street = 'Two 2') => api.ingestShopifyOrder({ storeId: store.id, webhookId: `test-${id}`, topic: 'HISTORICAL_SYNC', payload: { id: String(id), name: `#${id}`, created_at: new Date().toISOString(), email, total_price: '100', discount_codes: ['oVeD30'], shipping_address: { address1: street } } });
+  const findings = (result) => result.risk?.evidence.filter((entry) => entry.source === 'employee').map((entry) => entry.description).join(' ') ?? '';
+  assert.equal(findings(ingest(1, 'a@test.com')), '');
+  ingest(2, 'b@test.com', 'Other 4');
+  ingest(3, 'a@test.com');
+  assert.equal(findings(ingest(4, 'a@test.com')), '');
+  assert.match(findings(ingest(5, 'a@test.com')), /4 פעמים/);
+  assert.match(findings(ingest(6, 'a@test.com', 'Other 4')), /כתובת/);
+  const activity = api.getEmployeeDiscountActivity(tenantId);
+  assert.equal(activity.employeeSummaries.find((entry) => entry.employeeId === employee.id).orders, 5);
+  assert.equal(activity.recentUses.find((entry) => entry.orderNumber === '#2').assignedEmployeeId, undefined);
+  const saved = api.exportOperationalState(); api.restoreOperationalState(saved);
+  assert.equal(api.getDashboardSnapshot(tenantId).employees[0].secondaryAddress, 'Two 2');
+});

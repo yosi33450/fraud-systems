@@ -1,3 +1,4 @@
+import { employeeAddressMismatch, employeeIdentityMatches, identifyEmployee, isEmployeeCode } from "@/lib/employee-identity";
 import { createHmac, randomUUID } from "node:crypto";
 import { cases as seedCases, employees as seedEmployees, rules as seedRules, stores as seedStores } from "@/lib/initial-state";
 import { evaluateRisk, type OrderSignals } from "@/lib/risk-engine";
@@ -820,13 +821,6 @@ export function getEmployeeSettings(tenantId: string): EmployeeMonitoringSetting
 export function getEmployeeDiscountActivity(tenantId: string, period: "30d" | "all" = "30d"): EmployeeDiscountActivity {
   const prefix = getEmployeeSettings(tenantId).couponPrefix.trim().toLowerCase();
   const cutoff = period === "30d" ? Date.now() - 30 * 86_400_000 : Number.NEGATIVE_INFINITY;
-  const owners = new Map<string, Employee[]>();
-  for (const employee of state.employees.filter((item) => item.tenantId === tenantId)) {
-    for (const code of new Set(employee.couponCodes ?? [])) {
-      const key = code.trim().toLowerCase();
-      owners.set(key, [...(owners.get(key) ?? []), employee]);
-    }
-  }
   const uses: EmployeeDiscountActivity["recentUses"] = [];
   const uniqueOrders = new Map<string, number>();
   let ordersChecked = 0;
@@ -842,24 +836,14 @@ export function getEmployeeDiscountActivity(tenantId: string, period: "30d" | "a
     if (!codes.length) continue;
     uniqueOrders.set(`${order.storeId}:${order.shopifyOrderId}`, order.amount);
     for (const code of codes) {
-      const assigned = owners.get(code) ?? [];
-      const identityMatches = prefix && code.startsWith(prefix)
-        ? state.employees.filter((employee) => employee.tenantId === tenantId && (
-          (order.email && [employee.email, employee.privateEmail].some((value) => value && normalizeEmail(value) === order.email))
-          || (order.address && employee.address && normalizeAddress(employee.address) === normalizeAddress(order.address))
-        ))
-        : [];
-      const candidates = assigned.length ? assigned : identityMatches;
-      const employee = candidates.length === 1 ? candidates[0] : undefined;
+      const candidates = isEmployeeCode(code, prefix) ? state.employees.filter((employee) => employee.tenantId === tenantId && employeeIdentityMatches(employee, order)) : [];
+      const employee = identifyEmployee(candidates, order);
       uses.push({
         storeId: order.storeId, orderId: order.shopifyOrderId, orderNumber: order.orderNumber,
         code, amount: order.amount, email: order.email, createdAt: order.createdAt,
-        assignedEmployeeId: employee?.id, assignmentConflict: candidates.length > 1,
+        assignedEmployeeId: employee?.id, assignmentConflict: !employee && candidates.length > 1,
         buyerIdentityAvailable: Boolean(order.email || order.address),
-        buyerMatchesEmployee: Boolean(employee && (
-          (order.email && [employee.email, employee.privateEmail].some((value) => value && normalizeEmail(value) === order.email))
-          || (order.address && employee.address && normalizeAddress(employee.address) === normalizeAddress(order.address))
-        )),
+        buyerMatchesEmployee: Boolean(employee && employeeIdentityMatches(employee, order)),
       });
     }
   }
@@ -867,13 +851,18 @@ export function getEmployeeDiscountActivity(tenantId: string, period: "30d" | "a
   for (const use of uses) {
     const key = `${use.storeId}:${use.code}`;
     const item = byCode.get(key) ?? { storeId: use.storeId, code: use.code, orders: 0, amount: 0, assignedEmployeeId: use.assignedEmployeeId, assignmentConflict: use.assignmentConflict, lastUsedAt: use.createdAt };
+    if (item.assignedEmployeeId !== use.assignedEmployeeId) item.assignedEmployeeId = undefined;
     item.orders += 1;
     item.amount += use.amount;
     if (Date.parse(use.createdAt) > Date.parse(item.lastUsedAt)) item.lastUsedAt = use.createdAt;
     byCode.set(key, item);
   }
+  const employeeSummaries = state.employees.filter((employee) => employee.tenantId === tenantId).map((employee) => {
+    const employeeUses = uses.filter((use) => use.assignedEmployeeId === employee.id);
+    return { employeeId: employee.id, orders: new Set(employeeUses.map((use) => `${use.storeId}:${use.orderId}`)).size, lastUsedAt: employeeUses.map((use) => use.createdAt).sort((a, b) => Date.parse(b) - Date.parse(a))[0] ?? "" };
+  });
   return {
-    period, earliestOrderAt, prefix, ordersChecked, ordersWithAnyDiscountCode, totalOrders: uniqueOrders.size, totalAmount: [...uniqueOrders.values()].reduce((sum, amount) => sum + amount, 0),
+    employeeSummaries, period, earliestOrderAt, prefix, ordersChecked, ordersWithAnyDiscountCode, totalOrders: uniqueOrders.size, totalAmount: [...uniqueOrders.values()].reduce((sum, amount) => sum + amount, 0),
     codes: [...byCode.values()].sort((a, b) => b.orders - a.orders || a.code.localeCompare(b.code)),
     recentUses: uses.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt)).slice(0, 100),
   };
@@ -898,18 +887,17 @@ export function saveEmployeeSettings(tenantId: string, input: EmployeeMonitoring
   return clone(settings);
 }
 
-export function addEmployee(tenantId: string, input: Pick<Employee, "name" | "email" | "department"> & Partial<Pick<Employee, "privateEmail" | "address" | "couponCodes">>) {
+export function addEmployee(tenantId: string, input: Pick<Employee, "name" | "email" | "department"> & Partial<Pick<Employee, "privateEmail" | "address" | "secondaryAddress" | "couponCodes">>) {
   const email = normalizeEmail(input.email);
   if (state.employees.some((employee) => employee.tenantId === tenantId && normalizeEmail(employee.email) === email)) {
     throw new Error("EMPLOYEE_ALREADY_EXISTS");
   }
   const employee: Employee = {
-    id: randomUUID(), tenantId, name: input.name.trim(), email, privateEmail: normalizeEmail(input.privateEmail ?? ""), address: input.address?.trim() ?? "", couponCodes: input.couponCodes?.map((code) => code.trim().toLowerCase()).filter(Boolean) ?? [], department: input.department.trim(),
+    id: randomUUID(), tenantId, name: input.name.trim(), email, privateEmail: normalizeEmail(input.privateEmail ?? ""), address: input.address?.trim() ?? "", secondaryAddress: input.secondaryAddress?.trim() ?? "", couponCodes: input.couponCodes?.map((code) => code.trim().toLowerCase()).filter(Boolean) ?? [], department: input.department.trim(),
     purchases: 0, refunded: 0, risk: "low",
   };
   employee.purchases = state.orders.filter((order) => order.tenantId === tenantId && (
-    [employee.email, employee.privateEmail].includes(order.email) || Boolean(employee.address && order.address && normalizeAddress(employee.address) === normalizeAddress(order.address))
-    || Boolean(order.couponCodes?.some((code) => employee.couponCodes?.includes(code)))
+    employeeIdentityMatches(employee, order)
   )).length;
   state.employees.unshift(employee);
   state.audit.unshift({
@@ -919,15 +907,14 @@ export function addEmployee(tenantId: string, input: Pick<Employee, "name" | "em
   return clone(employee);
 }
 
-export function updateEmployee(tenantId: string, employeeId: string, input: Pick<Employee, "name" | "email" | "department"> & Partial<Pick<Employee, "privateEmail" | "address" | "couponCodes">>) {
+export function updateEmployee(tenantId: string, employeeId: string, input: Pick<Employee, "name" | "email" | "department"> & Partial<Pick<Employee, "privateEmail" | "address" | "secondaryAddress" | "couponCodes">>) {
   const employee = state.employees.find((candidate) => candidate.tenantId === tenantId && candidate.id === employeeId);
   if (!employee) throw new Error("EMPLOYEE_NOT_FOUND");
   const email = normalizeEmail(input.email);
   if (state.employees.some((candidate) => candidate.tenantId === tenantId && candidate.id !== employeeId && normalizeEmail(candidate.email) === email)) throw new Error("EMPLOYEE_ALREADY_EXISTS");
-  Object.assign(employee, { name: input.name.trim(), email, privateEmail: normalizeEmail(input.privateEmail ?? ""), address: input.address?.trim() ?? "", couponCodes: input.couponCodes?.map((code) => code.trim().toLowerCase()).filter(Boolean) ?? [], department: input.department.trim() });
+  Object.assign(employee, { name: input.name.trim(), email, privateEmail: normalizeEmail(input.privateEmail ?? ""), address: input.address?.trim() ?? "", secondaryAddress: input.secondaryAddress?.trim() ?? employee.secondaryAddress ?? "", department: input.department.trim() });
   employee.purchases = state.orders.filter((order) => order.tenantId === tenantId && (
-    [employee.email, employee.privateEmail].includes(order.email) || Boolean(employee.address && order.address && normalizeAddress(employee.address) === normalizeAddress(order.address))
-    || Boolean(order.couponCodes?.some((code) => employee.couponCodes?.includes(code)))
+    employeeIdentityMatches(employee, order)
   )).length;
   state.audit.unshift({ id: randomUUID(), tenantId, action: "employee.updated", resourceType: "employee", resourceId: employeeId, createdAt: new Date().toISOString(), metadata: {} });
   return clone(employee);
@@ -1261,11 +1248,7 @@ export function ingestShopifyOrder(input: { storeId: string; webhookId: string; 
   const { ordersByIpLastTwoHours: sameIp, giftCardOrdersByIpLastTwoHours: giftCardOrdersByIp, emailsByIpLastTwoHours: emailsByIp } = velocity;
   const averageOrderValue = recentOrders.length ? recentOrders.reduce((sum, order) => sum + order.amount, 0) / recentOrders.length : amount;
   const giftCardBaseline = recentOrders.length ? recentOrders.reduce((sum, order) => sum + order.giftCardValue, 0) / Math.max(1, recentOrders.length) : giftCardValue;
-  const employeeFor = (candidate: { email: string; address: string; couponCodes?: string[] }) => state.employees.find((employee) => employee.tenantId === store.tenantId && (
-    Boolean(candidate.email && [employee.email, employee.privateEmail].some((value) => value && normalizeEmail(value) === candidate.email))
-    || Boolean(candidate.address && employee.address && normalizeAddress(employee.address) === normalizeAddress(candidate.address))
-    || Boolean(candidate.couponCodes?.some((code) => employee.couponCodes?.includes(code)))
-  ));
+  const employeeFor = (candidate: { email: string; address: string; couponCodes?: string[] }) => identifyEmployee(state.employees.filter((employee) => employee.tenantId === store.tenantId), candidate);
   const matchedEmployee = employeeFor({ email, address, couponCodes });
   const employeeMatch = Boolean(matchedEmployee);
 
@@ -1329,8 +1312,8 @@ export function ingestShopifyOrder(input: { storeId: string; webhookId: string; 
     const sourceEmployee = purchase ? employeeFor(purchase) : undefined;
     return sourceEmployee && purchase ? [{ redemption, card, purchase, sourceEmployee }] : [];
   });
-  if (employeeSettings.giftCardAddressChange && employeeRedemptions.some(({ purchase }) => purchase.address && address && normalizeAddress(purchase.address) !== normalizeAddress(address))) {
-    employeeFindings.push("Gift Card שנרכש באמצעות פרטי עובד מומש בהזמנה עם כתובת אחרת.");
+  if (employeeSettings.giftCardAddressChange && ((matchedEmployee && employeeAddressMismatch(matchedEmployee, address)) || employeeRedemptions.some(({ sourceEmployee }) => employeeAddressMismatch(sourceEmployee, address)))) {
+    employeeFindings.push("ההזמנה או מימוש הגיפטקארד קשורים לעובד ונשלחים לכתובת שאינה אחת מהכתובות המאושרות שלו.");
   }
   if (employeeSettings.repeatGiftCardUses) {
     const end = Date.parse(createdAt);
@@ -1343,19 +1326,18 @@ export function ingestShopifyOrder(input: { storeId: string; webhookId: string; 
     }).map((redemption) => redemption.transactionId ?? `${redemption.giftCardId}:${redemption.orderId}`))));
     if (uses.size >= employeeSettings.repeatUsesThreshold) employeeFindings.push(`${uses.size} מימושי Gift Card הקשורים לעובד בתוך ${employeeSettings.windowMinutes} דקות.`);
   }
-  if (matchedEmployee && employeeSettings.couponRepeatUses && employeeSettings.couponPrefix && couponCodes.some((code) => code.startsWith(employeeSettings.couponPrefix))) {
+  if (employeeSettings.couponRepeatUses && couponCodes.some((code) => isEmployeeCode(code, employeeSettings.couponPrefix))) {
     const end = Date.parse(createdAt);
     const employeeCouponUses = state.orders.filter((candidate) => {
       const time = Date.parse(candidate.createdAt);
-      const hasEmployeeCoupon = candidate.couponCodes?.some((code) => code.startsWith(employeeSettings.couponPrefix));
-      const matchesEmployee = Boolean(
-        (candidate.email && [matchedEmployee.email, matchedEmployee.privateEmail].some((value) => value && normalizeEmail(value) === candidate.email))
-        || (candidate.address && matchedEmployee.address && normalizeAddress(candidate.address) === normalizeAddress(matchedEmployee.address))
-        || candidate.couponCodes?.some((code) => matchedEmployee.couponCodes?.includes(code))
+      const hasEmployeeCoupon = candidate.couponCodes?.some((code) => isEmployeeCode(code, employeeSettings.couponPrefix));
+      const candidateEmployee = employeeFor(candidate);
+      const matchesEmployee = matchedEmployee ? candidateEmployee?.id === matchedEmployee.id : Boolean(
+        (customerId && candidate.customerId === customerId) || (email && candidate.email === email) || (phone && candidate.phone === phone)
       );
-      return Boolean(hasEmployeeCoupon && matchesEmployee && Number.isFinite(time) && time <= end && time > end - employeeSettings.couponRepeatWindowMinutes * 60_000);
+      return Boolean(candidate.tenantId === store.tenantId && candidate.storeId === store.id && hasEmployeeCoupon && matchesEmployee && Number.isFinite(time) && time <= end && time > end - employeeSettings.couponRepeatWindowMinutes * 60_000);
     }).length;
-    if (employeeCouponUses > employeeSettings.couponRepeatThreshold) employeeFindings.push(`קוד עובד נוצל ${employeeCouponUses} פעמים עבור ${matchedEmployee.name} בחלון הבדיקה.`);
+    if (employeeCouponUses > employeeSettings.couponRepeatThreshold) employeeFindings.push(`קוד עובד נוצל ${employeeCouponUses} פעמים עבור ${matchedEmployee?.name ?? (email || "אותו רוכש")} בחלון הבדיקה.`);
   }
   if (employeeFindings.length) {
     result.evidence.unshift({ id: `employee-${shopifyOrderId}`, label: "ניטור עובדים", description: employeeFindings.join(" "), source: "employee", delta: 72, timestamp: createdAt });

@@ -92,14 +92,14 @@ test('employee zero-value purchase is investigated separately from general veloc
   assert.equal(zero.case?.evidence[0].source, 'employee');
 });
 
-test('employee coupon matching and a fulfilled refund remain attached to the same order', () => {
+test('employee identity and a fulfilled refund remain attached to the same order', () => {
   const store = setup();
   const employee = api.addEmployee('rules-test', { name: 'Worker', email: 'worker@example.com', couponCodes: ['oved30'], department: 'Sales' });
-  const created = order(store, 1, '2026-09-25T12:00:00Z', { email: 'buyer@example.com', discount_codes: ['oved30'] });
+  const created = order(store, 1, '2026-09-25T12:00:00Z', { email: 'worker@example.com', discount_codes: ['oved30'] });
   assert.equal(created.case, null);
   assert.equal(api.exportOperationalState().employees.find((entry) => entry.id === employee.id).purchases, 1);
   api.ingestShopifyOrder({ storeId: store.id, webhookId: 'refund-1', topic: 'refunds/create', payload: {
-    id: '1', name: '#1', created_at: '2026-09-25T12:00:00Z', email: 'buyer@example.com', discount_codes: ['oved30'], total_price: 150, refund_after_fulfillment: true,
+    id: '1', name: '#1', created_at: '2026-09-25T12:00:00Z', email: 'worker@example.com', discount_codes: ['oved30'], total_price: 150, refund_after_fulfillment: true,
   } });
   const state = api.exportOperationalState();
   assert.equal(state.orders.length, 1);
@@ -124,7 +124,7 @@ test('repeat employee coupon use is counted per employee, not across employees',
 test('live Shopify discount-code objects are normalized like historical codes', () => {
   const store = setup();
   const employee = api.addEmployee('rules-test', { name: 'Worker', email: 'worker@example.com', couponCodes: ['oved30'], department: 'Sales' });
-  order(store, 1, '2026-09-25T12:00:00Z', { discount_codes: [{ code: 'OVED30', amount: '30.00', type: 'percentage' }] });
+  order(store, 1, '2026-09-25T12:00:00Z', { email: 'worker@example.com', discount_codes: [{ code: 'OVED30', amount: '30.00', type: 'percentage' }] });
   assert.deepEqual(api.exportOperationalState().orders[0].couponCodes, ['oved30']);
   assert.equal(api.exportOperationalState().employees.find((entry) => entry.id === employee.id).purchases, 1);
 });

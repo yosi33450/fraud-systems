@@ -307,6 +307,7 @@ export interface Employee {
   email: string;
   privateEmail?: string;
   address?: string;
+  secondaryAddress?: string;
   couponCodes?: string[];
   department: string;
   purchases: number;
@@ -343,6 +344,7 @@ export interface EmployeeDiscountUse {
 }
 
 export interface EmployeeDiscountActivity {
+  employeeSummaries?: Array<{ employeeId: string; orders: number; lastUsedAt: string }>;
   period: "30d" | "all";
   earliestOrderAt?: string;
   prefix: string;

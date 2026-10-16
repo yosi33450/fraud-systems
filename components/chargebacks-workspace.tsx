@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ArrowLeftRight, CalendarClock, CheckCircle2, CircleDollarSign, CreditCard, ExternalLink, FileQuestion, RefreshCw, Search, ShieldCheck, X } from "lucide-react";
 import { CenteredDialog } from "@/components/centered-dialog";
 import { formatHebrewDateTime } from "@/lib/hebrew-date";
+import { chargebackDate, inLastWeek, timestamp } from "@/lib/activity-scope";
 import { relatedCustomerChargebacks } from "@/lib/chargeback-customer-context";
 import type { ChargebackMatchConfidence, CrediMatchChargeback, Store } from "@/lib/types";
 
@@ -33,6 +34,8 @@ export function ChargebacksWorkspace({ tenantId, chargebacks, stores, onRefresh 
   onRefresh: () => Promise<void>;
 }) {
   const [selected, setSelected] = useState<CrediMatchChargeback | null>(null);
+  const [archive, setArchive] = useState(false);
+  const scoped = chargebacks.filter((item) => inLastWeek(chargebackDate(item)) !== archive);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<ChargebackMatchConfidence | "all">("all");
   const [backfillState, setBackfillState] = useState<"idle" | "loading" | "done" | "error" | "permission">("idle");
@@ -45,15 +48,15 @@ export function ChargebacksWorkspace({ tenantId, chargebacks, stores, onRefresh 
   const [tenderScanProgress, setTenderScanProgress] = useState<string>();
   const visible = useMemo(() => {
     const search = query.trim().toLowerCase();
-    return chargebacks.filter((item) => {
+    return scoped.filter((item) => {
       const match = item.match;
       const searchable = [item.discrepancyId, item.confirmationNumber, item.creditCompany, item.type, item.status, match?.orderNumber, match?.customer, match?.email];
       return (!search || searchable.some((value) => value?.toLowerCase().includes(search))) && (filter === "all" || (match?.confidence ?? "unmatched") === filter);
-    });
-  }, [chargebacks, filter, query]);
-  const linked = chargebacks.filter((item) => ["exact", "strong"].includes(item.match?.confidence ?? "")).length;
+    }).sort((a, b) => timestamp(chargebackDate(b)) - timestamp(chargebackDate(a)));
+  }, [scoped, filter, query]);
+  const linked = scoped.filter((item) => ["exact", "strong"].includes(item.match?.confidence ?? "")).length;
   const unresolved = chargebacks.filter((item) => !["exact", "strong"].includes(item.match?.confidence ?? "")).length;
-  const total = chargebacks.reduce((sum, item) => sum + (item.originalAmount ?? item.grossAmount ?? 0), 0);
+  const total = scoped.reduce((sum, item) => sum + (item.originalAmount ?? item.grossAmount ?? 0), 0);
 
   const backfillMatches = async () => {
     setBackfillState("loading");
@@ -224,15 +227,16 @@ export function ChargebacksWorkspace({ tenantId, chargebacks, stores, onRefresh 
     {backfillProgress ? <div className={`inline-notice ${backfillState === "error" || backfillState === "permission" ? "notice-warning" : ""}`} role="status">{backfillProgress}</div> : null}
     {payPlusProgress ? <div className={`inline-notice ${payPlusState === "error" || payPlusState === "configuration" ? "notice-warning" : ""}`} role="status">{payPlusProgress}</div> : null}
 
+    <div className="gift-ledger-tabs" role="group" aria-label="תקופת הכחשות"><button aria-pressed={!archive} onClick={() => setArchive(false)}>7 ימים אחרונים</button><button aria-pressed={archive} onClick={() => setArchive(true)}>ארכיון</button><span>לפי תאריך פתיחת ההכחשה · החדש ביותר קודם</span></div>
     <section className="chargeback-summary" aria-label="סיכום הכחשות">
-      <div className="chargeback-summary-primary"><span><FileQuestion size={18} /> הכחשות שנקלטו</span><strong>{chargebacks.length.toLocaleString("he-IL")}</strong><small>המידע מגיע ישירות מ־CrediMatch</small></div>
+      <div className="chargeback-summary-primary"><span><FileQuestion size={18} /> הכחשות שנקלטו</span><strong>{scoped.length.toLocaleString("he-IL")}</strong><small>המידע מגיע ישירות מ־CrediMatch</small></div>
       <div><span><CircleDollarSign size={17} /> סכום במחלוקת</span><strong>{money(total)}</strong><small>לפני זיכויים ועמלות</small></div>
-      <div><span><ShieldCheck size={17} /> חוברו להזמנה</span><strong>{linked.toLocaleString("he-IL")}</strong><small>{chargebacks.length ? `${Math.round(linked / chargebacks.length * 100)}% מההכחשות` : "אין עדיין נתונים"}</small></div>
-      <div><span><FileQuestion size={17} /> דורשות בדיקה</span><strong>{unresolved.toLocaleString("he-IL")}</strong><small>ללא חיבור אוטומטי ודאי</small></div>
+      <div><span><ShieldCheck size={17} /> חוברו להזמנה</span><strong>{linked.toLocaleString("he-IL")}</strong><small>{scoped.length ? `${Math.round(linked / scoped.length * 100)}% מההכחשות` : "אין עדיין נתונים"}</small></div>
+      <div><span><FileQuestion size={17} /> דורשות בדיקה</span><strong>{scoped.filter((item) => !["exact", "strong"].includes(item.match?.confidence ?? "")).length.toLocaleString("he-IL")}</strong><small>ללא חיבור אוטומטי ודאי</small></div>
     </section>
 
     <section className="chargeback-ledger">
-      <div className="section-heading"><div><h2>יומן התאמות</h2><span>{visible.length} מתוך {chargebacks.length} הכחשות</span></div></div>
+      <div className="section-heading"><div><h2>יומן התאמות</h2><span>{visible.length} מתוך {scoped.length} הכחשות</span></div></div>
       <div className="chargeback-toolbar">
         <label className="search-box"><Search size={17} /><span className="sr-only">חיפוש הכחשה</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="חיפוש לפי הכחשה, הזמנה או לקוח" /></label>
         <label><span className="sr-only">סינון לפי התאמה</span><select value={filter} onChange={(event) => setFilter(event.target.value as typeof filter)}><option value="all">כל ההתאמות</option><option value="exact">התאמה ודאית</option><option value="strong">התאמה חזקה</option><option value="possible">דורש אימות</option><option value="ambiguous">כמה עסקאות אפשריות</option><option value="unmatched">ללא הזמנה</option></select></label>
@@ -243,7 +247,7 @@ export function ChargebacksWorkspace({ tenantId, chargebacks, stores, onRefresh 
           const confidence = item.match?.confidence ?? "unmatched";
           const copy = copyFor(item.match, confidence);
           return <button key={item.id} className="chargeback-row" role="row" onClick={() => setSelected(item)}>
-            <span className="chargeback-id"><strong>#{item.discrepancyId}</strong><small>{item.type ?? "סוג הכחשה לא התקבל"}</small></span>
+            <span className="chargeback-id"><strong>#{item.discrepancyId}</strong><small>פתיחת הכחשה: {safeDate(chargebackDate(item))}</small><small>{item.type ?? "סוג הכחשה לא התקבל"}</small></span>
             <span><strong>{safeDate(item.dealTime)}</strong><small>{item.creditCompany ?? "חברת אשראי לא התקבלה"} · {masked(item.last4Digits)}</small></span>
             <span className="chargeback-amount"><strong>{money(item.originalAmount ?? item.grossAmount, item.currency)}</strong><small>{item.payments ? `${item.payments} תשלומים` : "תשלום אחד"}</small></span>
             <span className="chargeback-order"><strong>{confidence === "ambiguous" ? `${item.match?.candidates?.length ?? 0} עסקאות אפשריות` : item.match?.orderNumber ?? "טרם קושרה הזמנה"}</strong><small>{item.match?.customer || item.match?.email || copy.detail}</small>{relatedCustomerChargebacks(item, chargebacks).length ? <small className="chargeback-related-count">עוד {relatedCustomerChargebacks(item, chargebacks).length} הכחשות מאותו מייל</small> : null}</span>

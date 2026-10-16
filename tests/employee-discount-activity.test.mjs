@@ -32,7 +32,7 @@ test('all used coupon codes appear by default, while OVED remains the employee p
   assert.equal(activity.recentUses.filter((use) => use.code === 'summer').length, 2);
 });
 
-test('code ownership is distinct from buyer identity and unassigned codes remain visible', () => {
+test('legacy code assignment is ignored; prefix uses match the buyer identity', () => {
   const store = setup('coupon-test', 'strongful.myshopify.com');
   const employee = api.addEmployee('coupon-test', { name: 'Mika', email: 'mika@example.com', department: 'Sales', couponCodes: ['OVEDMIKA'] });
   order(store, 1, ['ovedmika']);
@@ -40,10 +40,10 @@ test('code ownership is distinct from buyer identity and unassigned codes remain
   const activity = api.getEmployeeDiscountActivity('coupon-test');
   const owned = activity.recentUses.find((use) => use.code === 'ovedmika');
   const unassigned = activity.recentUses.find((use) => use.code === 'ovedguest');
-  assert.equal(owned.assignedEmployeeId, employee.id);
+  assert.equal(owned.assignedEmployeeId, undefined);
   assert.equal(owned.buyerMatchesEmployee, false);
-  assert.equal(unassigned.assignedEmployeeId, undefined);
-  assert.equal(unassigned.buyerMatchesEmployee, false);
+  assert.equal(unassigned.assignedEmployeeId, employee.id);
+  assert.equal(unassigned.buyerMatchesEmployee, true);
 });
 
 test('coupon usage is visible without an employee prefix and other tenants stay isolated', () => {

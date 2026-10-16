@@ -1,4 +1,5 @@
 "use client";
+import { timestamp } from "@/lib/activity-scope";
 import { browserApiFetch as fetch } from "@/lib/browser-api-fetch";
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -49,7 +50,7 @@ export function GiftCardWorkspace({ ledger = empty, stores, cases, onOpenCase, o
   const orders = ledger.orders.filter((order) => storeId === "all" || order.storeId === storeId);
   const needle = query.trim().toLowerCase();
   const cards = scoped.filter((card) => !needle || [card.giftCardId, card.lastCharacters, card.purchase?.orderNumber, card.purchase?.customer, card.purchase?.email,
-    ...card.uses.flatMap((use) => [use.order.orderNumber, use.order.customer, use.order.email])].some((value) => value?.toLowerCase().includes(needle)));
+    ...card.uses.flatMap((use) => [use.order.orderNumber, use.order.customer, use.order.email])].some((value) => value?.toLowerCase().includes(needle))).sort((a, b) => Math.max(timestamp(b.purchase?.createdAt), ...b.uses.map((use) => timestamp(use.order.createdAt))) - Math.max(timestamp(a.purchase?.createdAt), ...a.uses.map((use) => timestamp(use.order.createdAt))));
   const routes = useMemo(() => {
     const grouped = new Map<string, Route>();
     for (const card of cards) for (const use of card.uses.filter((entry) => entry.kind !== "REFUND")) {
@@ -59,7 +60,7 @@ export function GiftCardWorkspace({ ledger = empty, stores, cases, onOpenCase, o
       route.amount += use.amount;
       if (!route.cards.some((entry) => entry.key === card.key)) route.cards.push(card);
     }
-    return [...grouped.values()].sort((a, b) => b.cards.length - a.cards.length);
+    return [...grouped.values()].sort((a, b) => timestamp(b.order.createdAt) - timestamp(a.order.createdAt));
   }, [cards]);
   const exactCount = scoped.filter((card) => card.purchase && !card.purchaseConflict && card.uses.some((use) => use.kind !== "REFUND")).length;
   const missing = scoped.filter((card) => !card.purchase || card.purchaseConflict).length;
