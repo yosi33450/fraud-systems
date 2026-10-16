@@ -59,6 +59,7 @@ export type ShopifyOrderPayload = {
 };
 
 type StoredOrder = {
+  items?: FraudCase["items"];
   tenantId: string;
   storeId: string;
   shopifyOrderId: string;
@@ -1301,6 +1302,7 @@ export function ingestShopifyOrder(input: { storeId: string; webhookId: string; 
     tenantId: store.tenantId, storeId: store.id,
     shopifyOrderId, orderNumber: payload.name ?? existingOrder?.orderNumber, customer: customer || existingOrder?.customer,
     email, phone, address, couponCodes, amount, currency: payload.currency?.toUpperCase() ?? existingOrder?.currency,
+    items: payload.line_items ? lineItems.map((item) => ({ name: item.title ?? item.name ?? "פריט", quantity: Number(item.quantity ?? 1), price: Number(item.price ?? 0) })) : existingOrder?.items,
     payments: paymentFingerprints.length ? paymentFingerprints : existingOrder?.payments, giftCardValue, ip, customerId, createdAt,
   };
   if (existingOrder) Object.assign(existingOrder, order);
@@ -1465,4 +1467,25 @@ export function getCaseCustomerHistory(tenantId: string, caseId: string) {
     status: state.cases.find((entry) => entry.tenantId === tenantId && entry.storeId === item.storeId && (entry.context?.shopifyOrderId ?? entry.id) === order.shopifyOrderId)?.status,
   }));
 }
+/** All saved purchases, independent of coupons, alert status and week filters. */
+export function getEmployeeOrderHistory(tenantId: string, employeeId: string) {
+  const employees = state.employees.filter((employee) => employee.tenantId === tenantId);
+  if (!employees.some((employee) => employee.id === employeeId)) return null;
+  const cases = new Map(state.cases.filter((item) => item.tenantId === tenantId).map((item) => [`${item.storeId}:${item.context?.shopifyOrderId}`, item]));
+  return state.orders.filter((order) => order.tenantId === tenantId && identifyEmployee(employees, order)?.id === employeeId)
+    .sort((a, b) => (Date.parse(b.createdAt) || 0) - (Date.parse(a.createdAt) || 0))
+    .map((order) => {
+      const related = cases.get(`${order.storeId}:${order.shopifyOrderId}`);
+      const store = state.stores.find((item) => item.tenantId === tenantId && item.id === order.storeId);
+      return {
+        orderId: order.shopifyOrderId, storeId: order.storeId, storeName: store?.name, storeDomain: store?.domain,
+        orderNumber: order.orderNumber ?? order.shopifyOrderId, createdAt: order.createdAt,
+        amount: order.amount, currency: order.currency ?? "ILS", customer: order.customer,
+        email: order.email, phone: order.phone, address: order.address, ip: order.ip,
+        couponCodes: order.couponCodes ?? [], giftCardValue: order.giftCardValue,
+        items: order.items ?? related?.items, status: related?.status, reason: related?.reason,
+      };
+    });
+}
+
 

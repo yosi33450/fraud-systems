@@ -1,0 +1,21 @@
+import './register-ts-alias.mjs';
+import test from 'node:test';
+import assert from 'node:assert/strict';
+const api = await import('../lib/operational-store.ts');
+const initial = api.exportOperationalState();
+test('employee history includes clean historical orders without coupons and isolates tenant', () => {
+  api.restoreOperationalState(initial);
+  const store = api.connectShopifyStore({ tenantId: 'employee-history', name: 'Test', domain: 'history.myshopify.com', accessToken: 'test', clientSecret: 'test', expiresIn: 10000 });
+  const employee = api.addEmployee('employee-history', { name: 'Employee', email: 'worker@example.com', privateEmail: 'private@example.com', address: 'One 1', secondaryAddress: 'Two 2', department: 'Sales' });
+  const ingest = (id, email, extra = {}) => api.ingestShopifyOrder({ storeId: store.id, webhookId: `history-${id}`, topic: 'HISTORICAL_SYNC', payload: { id, name: `#${id}`, created_at: '2026-01-01T12:00:00Z', email, total_price: 100, line_items: [{ title: 'Shirt', quantity: 2, price: 50 }], ...extra } });
+  assert.equal(ingest('1', 'worker@example.com').case, null);
+  ingest('2', 'private@example.com');
+  ingest('3', 'other@example.com');
+  ingest('4', 'worker@example.com', { tags: ['external-order'] });
+  const rows = api.getEmployeeOrderHistory('employee-history', employee.id);
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].status, undefined);
+  assert.deepEqual(rows[0].items, [{ name: 'Shirt', quantity: 2, price: 50 }]);
+  assert.equal(api.getEmployeeOrderHistory('different-tenant', employee.id), null);
+  assert.equal(api.getEmployeeOrderHistory('employee-history', 'missing'), null);
+});
