@@ -34,3 +34,23 @@
 .employee-history-pagination { display:flex; justify-content:space-between; align-items:center; gap:8px; margin-top:16px; font-size:13px; }
 @media(max-width:600px) { .employee-profile-content { padding:16px; } .employee-history-order > summary { grid-template-columns:1fr 1fr; } .employee-history-order > summary time { grid-column:1/-1; grid-row:2; } .customer-activity-card > summary { flex-wrap:wrap; } }
 
+/* Navigation follows the host page, without a nested scroll region. */
+@media (min-width: 821px) {
+  .app-shell { display: grid; grid-template-columns: var(--sidebar-width) minmax(0, 1fr); align-items: start; }
+  :root .app-shell .sidebar { position: sticky; top: 0; bottom: auto; inset-inline-end: auto; height: auto; min-height: 100dvh; overflow: visible; grid-column: 1; grid-row: 1; }
+  .app-shell .main-content { grid-column: 2; grid-row: 1; min-width: 0; margin-right: 0; }
+}
+.app-shell .nav-list { flex: none; overflow: visible; margin-block: 8px; gap: 8px; }
+.app-shell .brand-block { padding-bottom: 8px; }
+.app-shell .sidebar-footer { margin-top: auto; }
+@media (max-width: 820px) {
+  .app-shell .sidebar { overflow-y: auto; overscroll-behavior: contain; }
+}
+.order-investigation .case-evidence-facts { border: 1px solid var(--hairline); border-radius: 16px; padding: 0; overflow: hidden; }
+.case-evidence-facts > summary { display: flex; align-items: center; justify-content: space-between; padding: 18px 20px; min-height: 56px; cursor: pointer; list-style: none; font-weight: 600; }
+.case-evidence-facts > summary::-webkit-details-marker { display: none; }
+.case-evidence-facts[open] > summary { border-bottom: 1px solid var(--hairline); }
+.case-evidence-facts[open] > summary svg { transform: rotate(180deg); }
+.order-investigation .case-evidence-facts > ul, .order-investigation .case-evidence-facts > p { margin: 0; padding: 16px 20px; }
+.order-investigation details > summary:focus-visible { outline: 2px solid var(--trust); outline-offset: -3px; border-radius: 12px; }
+.employee-order-history .gift-ledger-tabs { margin-block: 12px; }

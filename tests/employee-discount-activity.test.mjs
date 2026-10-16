@@ -93,3 +93,13 @@ test('legacy blank Strongful setting migrates, but an explicitly cleared prefix 
   api.restoreOperationalState(explicitlyCleared);
   assert.equal(api.getEmployeeSettings('coupon-test').couponPrefix, '');
 });
+test('employee prefix totals count distinct purchases across all history, not other codes or buyers', () => {
+  const store = setup('coupon-test', 'strongful.myshopify.com');
+  const employee = api.addEmployee('coupon-test', { name: 'Mika', email: 'mika@example.com', department: 'Sales' });
+  order(store, 10, ['OVED30', 'ovedTX'], { email: employee.email, created_at: new Date(Date.now() - 75 * 86_400_000).toISOString() });
+  order(store, 11, ['oved30'], { email: employee.email });
+  order(store, 12, ['summer'], { email: employee.email });
+  order(store, 13, ['oved30']);
+  assert.equal(api.getEmployeeDiscountActivity('coupon-test').employeeSummaries.find((entry) => entry.employeeId === employee.id).orders, 1);
+  assert.equal(api.getEmployeeDiscountActivity('coupon-test', 'all').employeeSummaries.find((entry) => entry.employeeId === employee.id).orders, 2);
+});

@@ -17,7 +17,7 @@ export function CustomerOrderHistory({ tenantId, caseId, storeDomain }: { tenant
       .catch(() => { if (!controller.signal.aborted) setError(true); });
     return () => controller.abort();
   }, [tenantId, caseId]);
-  return <details className="customer-order-history" open><summary>היסטוריית רכישות הלקוח {orders ? `(${orders.length})` : ""}</summary>
+  return <details className="customer-order-history"><summary>היסטוריית רכישות הלקוח {orders ? `(${orders.length})` : ""}</summary>
     <p>כל ההזמנות שנשמרו במערכת, גם מהארכיון וגם ללא התראה.</p>
     {error ? <p role="status">לא ניתן לטעון את ההיסטוריה כרגע. סגור ופתח את הכרטיס לניסיון נוסף.</p> : !orders ? <p role="status">טוען היסטוריה…</p> : <>
       <div className="customer-history-list">{orders.slice(0, limit).map((order) => {
