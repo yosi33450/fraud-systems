@@ -36,3 +36,9 @@ test('chargebacks group verified email case-insensitively but never card suffix 
   const groups = groupChargebacks([chargeback('a', 'Buyer@example.com'), chargeback('b', 'buyer@example.com'), chargeback('c', 'other@example.com'), chargeback('d', 'buyer@example.com', { tenantId: 'other' })]);
   assert.deepEqual(groups.map((group) => group.length).sort(), [1, 1, 2]);
 });
+test('technical PayPlus emails never group different customers', () => {
+  assert.equal(groupChargebacks([chargeback('a', 'general-customer@payplus.co.il'), chargeback('b', 'general-customer@payplus.co.il')]).length, 2);
+  const source = { tenantId: 't', storeId: 's', shopifyOrderId: '1', email: 'general-customer@payplus.co.il', createdAt: '2026-10-15', amount: 5 };
+  assert.equal(customerHistory(source, [source, { ...source, shopifyOrderId: '2' }]).length, 1);
+});
+

@@ -1,3 +1,4 @@
+import { isSharedServiceEmail } from "@/lib/customer-identity";
 import type { CrediMatchChargeback } from "@/lib/types";
 
 function identityKeys(item: CrediMatchChargeback): string[] {
@@ -5,7 +6,7 @@ function identityKeys(item: CrediMatchChargeback): string[] {
   const emails = [item.match?.confidence === "exact" ? item.match.email : undefined, item.payplus?.status === "found" ? item.payplus.email : undefined];
   const keys = emails.flatMap((value) => {
     const email = value?.trim().toLowerCase();
-    return email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) && !/^(general|unknown|no-?reply|test)@/.test(email) ? [`${scope}:email:${email}`] : [];
+    return email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) && !isSharedServiceEmail(email) && !/^(general|unknown|no-?reply|test)@/.test(email) ? [`${scope}:email:${email}`] : [];
   });
   const phone = item.payplus?.status === "found" ? item.payplus.phone?.replace(/\D/g, "").replace(/^972/, "0") : undefined;
   if (phone && phone.length >= 9) keys.push(`${scope}:phone:${phone}`);

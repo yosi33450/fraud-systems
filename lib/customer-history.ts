@@ -1,10 +1,11 @@
+import { isSharedServiceEmail } from "@/lib/customer-identity";
 export interface CustomerHistoryOrder {
   tenantId: string; storeId: string; shopifyOrderId: string; orderNumber?: string;
   customerId?: string; email?: string; phone?: string; createdAt: string; amount: number; currency?: string;
 }
 const emailKey = (value?: string) => {
   const email = value?.trim().toLowerCase() ?? "";
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) && !/^(general|unknown|no-?reply|test)@/.test(email) ? email : "";
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) && !isSharedServiceEmail(email) && !/^(general|unknown|no-?reply|test)@/.test(email) ? email : "";
 };
 const phoneKey = (value?: string) => {
   const digits = (value ?? "").replace(/\D/g, "").replace(/^972/, "0");

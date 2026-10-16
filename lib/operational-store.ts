@@ -508,7 +508,7 @@ export function getDashboardSnapshot(tenantId: string): DashboardSnapshot {
       if (!["new", "review", "action"].includes(item.status)) return item;
       // Enrich legacy evidence with independent signal keys without changing any merchant decision.
       if (item.signals) {
-        const evaluated = evaluateRisk(item.signals, new Date(item.occurredAt || now), state.rulesByTenant.get(tenantId) ?? []);
+        const evaluated = evaluateRisk(item.signals, new Date(Number.isFinite(Date.parse(item.occurredAt ?? "")) ? item.occurredAt! : now), state.rulesByTenant.get(tenantId) ?? []);
         item.evidence = item.evidence.map((entry) => {
           const fresh = evaluated.evidence.find((candidate) => candidate.label === entry.label && candidate.source === entry.source);
           return fresh ? { ...entry, riskSeverity: fresh.riskSeverity, riskKeys: fresh.riskKeys, description: fresh.description } : entry;
