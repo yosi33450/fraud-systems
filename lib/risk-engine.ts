@@ -109,7 +109,7 @@ export function evaluateRisk(signals: OrderSignals, now = new Date(), rules: Ris
       const actual = signalValue(condition, signals);
       if (condition.field in velocityDefaults) {
         const minutes = condition.windowMinutes ?? velocityDefaults[condition.field];
-        const duration = minutes % 10080 === 0 ? `${minutes / 10080} שבועות` : minutes % 1440 === 0 ? `${minutes / 1440} ימים` : minutes % 60 === 0 && minutes !== 60 ? `${minutes / 60} שעות` : `${minutes} דקות`;
+        const duration = minutes === 10080 ? "שבוע" : minutes === 1440 ? "24 שעות" : minutes % 10080 === 0 ? `${minutes / 10080} שבועות` : minutes % 1440 === 0 ? `${minutes / 1440} ימים` : minutes % 60 === 0 && minutes !== 60 ? `${minutes / 60} שעות` : `${minutes} דקות`;
         const subject = condition.field === "orders_by_email" ? "הזמנות מאותו אימייל" : condition.field === "orders_by_ip" ? "הזמנות מאותה כתובת IP" : condition.field === "orders_by_phone" ? "הזמנות מאותו טלפון" : condition.field === "gift_card_orders_by_ip" ? "רכישות גיפטקארד מאותה כתובת IP" : condition.field === "gift_card_orders_by_email" ? "רכישות גיפטקארד מאותו אימייל" : condition.field === "gift_card_orders_by_phone" ? "רכישות גיפטקארד מאותו טלפון" : condition.field === "emails_by_ip" ? "אימיילים שונים מאותה כתובת IP" : "אימיילים שונים לאותו טלפון";
         return `נמצאו ${actual} ${subject} ב־${duration} שעד ההזמנה (כולל ההזמנה הזו). הסף: ${condition.operator === "gt" ? "יותר מ־" : condition.operator === "eq" ? "בדיוק " : "לפחות "}${condition.value}.`;
       }
