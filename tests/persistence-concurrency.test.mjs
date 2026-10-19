@@ -27,5 +27,7 @@ test('CAS collision retries and keeps records written by another server',async()
   assert.equal(patches,2);
   assert.equal(decryptPrivateData(remote).employees[0].id,'other-server');
   assert.equal(decryptPrivateData(remote).orders[0].shopifyOrderId,'order-1');
+  await persistOperationalState();
+  assert.equal(patches,2,'a queued duplicate must not rewrite the snapshot');
  }finally{globalThis.fetch=originalFetch;}
 });

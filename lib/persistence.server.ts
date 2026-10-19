@@ -280,6 +280,9 @@ export async function persistOperationalState() {
     const local = exportOperationalState();
     const base = globalThis.__shieldLedgerBaseline;
     if (!base) throw new Error("PERSISTENCE_HYDRATION_REQUIRED");
+    // Concurrent requests can already have been included in the previous save.
+    // Do not rewrite the full document for duplicate webhooks / queued no-ops.
+    if (JSON.stringify(base) === JSON.stringify(local)) return;
     if (persistenceBackend() !== "supabase") {
       await saveEncryptedState(encryptPrivateData(local));
       globalThis.__shieldLedgerBaseline = local;
