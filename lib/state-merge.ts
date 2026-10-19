@@ -5,6 +5,7 @@ const object = (v: unknown): v is Record<string, unknown> => Boolean(v) && typeo
 function key(v: unknown): string | undefined {
   if (typeof v === "string") return `s:${v}`;
   if (Array.isArray(v) && typeof v[0] === "string") return `t:${v[0]}`;
+  if (object(v) && typeof v.storeId === "string" && typeof v.orderNumber === "string" && Array.isArray(v.evidence)) return `case:${v.tenantId}:${v.storeId}:${v.orderNumber.replace(/^#/, "")}`;
   if (object(v) && typeof v.id === "string") return `i:${v.id}`;
   if (object(v) && typeof v.shopifyOrderId === "string") return `o:${v.tenantId}:${v.storeId}:${v.shopifyOrderId}`;
   if (object(v) && typeof v.giftCardId === "string") return `g:${v.tenantId}:${v.storeId}:${v.giftCardId}`;
@@ -15,6 +16,7 @@ function key(v: unknown): string | undefined {
 export function mergeStateChanges<T>(base: T, local: T, remote: T, path = ""): T {
   if (same(base, local)) return structuredClone(remote);
   if (same(base, remote) || same(local, remote)) return structuredClone(local);
+  if (base === undefined && /^\.cases\.\*$/.test(path) && remote !== undefined) return structuredClone(remote);
   if (object(base) && object(local) && object(remote)) {
     const result: Record<string, unknown> = {};
     for (const field of new Set([...Object.keys(base), ...Object.keys(local), ...Object.keys(remote)])) {

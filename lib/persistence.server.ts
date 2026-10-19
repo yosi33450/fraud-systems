@@ -28,6 +28,7 @@ declare global {
   // The baseline belongs to this instance, not to other concurrent writers.
   var __shieldLedgerBaseline: PersistedOperationalState | undefined;
   var __shieldLedgerRevision: string | undefined;
+  var __shieldLedgerBackupDay: string | undefined;
 }
 
 // The dashboard asks for a fresh snapshot in the background.  Keep a warm
@@ -187,6 +188,26 @@ async function saveEncryptedState(payload: EncryptedState) {
   await rename(temporaryFile, localFile);
 }
 
+async function preserveDailyRecoveryCopy(payload: EncryptedState) {
+  const day = new Date().toISOString().slice(0, 10);
+  if (globalThis.__shieldLedgerBackupDay === day) return;
+  const config = supabaseConfiguration()!;
+  const slot = Math.floor(Date.now() / 86400000) % 7;
+  const id = `recovery-global-${slot}`;
+  const endpoint = `${config.url}/rest/v1/shield_ledger_state`;
+  const check = await fetchWithTimeout(`${endpoint}?id=eq.${id}&select=iv,updated_at`,{headers:supabaseHeaders(config),cache:"no-store"});
+  if (!check.ok) throw new Error(`PERSISTENCE_BACKUP_READ_FAILED_${check.status}`);
+  const row = (await check.json() as Array<{iv:string;updated_at:string}>)[0];
+  if (!row || row.updated_at.slice(0,10) !== day) {
+    const response = await fetchWithTimeout(row ? `${endpoint}?id=eq.${id}&iv=eq.${encodeURIComponent(row.iv)}` : endpoint, {
+      method: row ? "PATCH" : "POST", headers:{...supabaseHeaders(config),Prefer:"return=minimal"},
+      body:JSON.stringify({id,...payload,updated_at:new Date().toISOString()}),
+    });
+    if (!response.ok && response.status !== 409) throw new Error(`PERSISTENCE_BACKUP_WRITE_FAILED_${response.status}`);
+  }
+  globalThis.__shieldLedgerBackupDay = day;
+}
+
 export async function hydrateOperationalState(options: { refresh?: boolean; force?: boolean } = {}) {
   const isFresh = Boolean(globalThis.__shieldLedgerLastHydratedAt)
     && Date.now() - globalThis.__shieldLedgerLastHydratedAt! < refreshIntervalMs;
@@ -265,10 +286,12 @@ export async function persistOperationalState() {
       return;
     }
     const supabase = supabaseConfiguration()!;
-    for (let attempt = 0; attempt < 5; attempt++) {
+    for (let attempt = 0; attempt < 8; attempt++) {
+      if (attempt) await new Promise(resolve => setTimeout(resolve, 100 + Math.floor(Math.random() * Math.min(1200, 150 * 2 ** attempt))));
       const current = await loadEncryptedState();
       // Never recreate a missing production row from a warm/empty snapshot.
       if (!current) throw new Error("PERSISTENCE_STATE_MISSING");
+      await preserveDailyRecoveryCopy(current);
       const merged = mergeStateChanges(base, local, decryptPrivateData(current));
       const payload = encryptPrivateData(merged);
       const response = await fetchWithTimeout(`${supabase.url}/rest/v1/shield_ledger_state?id=eq.${stateId}&iv=eq.${encodeURIComponent(current.iv)}&select=id`, {

@@ -25,3 +25,12 @@ test('independent Shopify orders survive simultaneous syncs',()=>{
  const a={tenantId:'t',storeId:'s',shopifyOrderId:'1'},b={...a,shopifyOrderId:'2'};
  assert.deepEqual(merge([], [a], [b]),[b,a]);
 });
+test('simultaneous cases for one order keep the existing durable case id',()=>{
+ const a={id:'local',tenantId:'t',storeId:'s',orderNumber:'123',evidence:[]};
+ const b={...a,id:'remote'};
+ assert.deepEqual(merge({cases:[]},{cases:[a]},{cases:[b]}),{cases:[b]});
+});
+test('live store observations do not block a historical replay',()=>{
+ const b={stores:[{id:'s',ordersToday:10}]};
+ assert.deepEqual(merge(b,{stores:[{id:'s',ordersToday:12}]},{stores:[{id:'s',ordersToday:13}]}),{stores:[{id:'s',ordersToday:13}]});
+});

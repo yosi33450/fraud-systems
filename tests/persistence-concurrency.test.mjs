@@ -11,6 +11,7 @@ test('CAS collision retries and keeps records written by another server',async()
  const originalFetch=globalThis.fetch;
  let remote=encryptPrivateData(exportOperationalState()),patches=0;
  globalThis.fetch=async(url,options)=>{
+  if(String(url).includes('recovery-global')) return Response.json([{iv:'backup',updated_at:new Date().toISOString()}]);
   if(options.method==='PATCH'){
    patches++;
    if(patches===1){const s=decryptPrivateData(remote);s.employees.push({id:'other-server',tenantId:'t',name:'Test'});remote=encryptPrivateData(s);return Response.json([]);}
