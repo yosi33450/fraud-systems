@@ -390,6 +390,28 @@ export async function syncOrdersLast30Days(input: { tenantId: string; storeId: s
 }
 
 /** A bounded replay for the dashboard's manual refresh. Each page is persisted by the route. */
+export async function replayCustomerOrders(input: {storeId:string; shopDomain:string; accessToken:string; orderNumber:string}) {
+  if (!/^\d{1,12}$/.test(input.orderNumber)) throw new Error("INVALID_ORDER_NUMBER");
+  const found = await shopifyAdminRequest<OrdersBackfillResponse>({shopDomain:input.shopDomain,accessToken:input.accessToken,
+    query:ORDERS_BACKFILL_QUERY,variables:{first:10,after:null,query:`name:${input.orderNumber}`}});
+  const targets = found.orders.nodes.filter(o => o.name.replace(/^#/, "") === input.orderNumber);
+  if (targets.length !== 1) throw new Error("ORDER_NOT_UNIQUE");
+  const target = targets[0];
+  const customerId = target.customer?.id?.split("/").at(-1);
+  if (!customerId || !/^\d+$/.test(customerId)) throw new Error("CUSTOMER_ID_UNAVAILABLE");
+  const since = new Date(Date.parse(target.createdAt) - 8 * 86400000).toISOString();
+  const result = await shopifyAdminRequest<OrdersBackfillResponse>({shopDomain:input.shopDomain,accessToken:input.accessToken,
+    query:ORDERS_BACKFILL_QUERY.replace("reverse: true", "reverse: false"),variables:{first:50,after:null,query:`customer_id:${customerId} created_at:>=${since} created_at:<=${target.createdAt}`}});
+  if (result.orders.pageInfo.hasNextPage) throw new Error("CUSTOMER_HISTORY_REQUIRES_PAGINATION");
+  const cases = [];
+  for (const order of result.orders.nodes) {
+    if (order.customer?.id !== target.customer?.id) throw new Error("CUSTOMER_SEARCH_MISMATCH");
+    const r=ingestShopifyOrder({storeId:input.storeId,webhookId:`historical:${order.id}`,topic:"HISTORICAL_SYNC",payload:toPayload(order)});
+    if(r.case)cases.push({order:r.case.orderNumber,reason:r.case.reason});
+  }
+  return {scanned:result.orders.nodes.length,cases};
+}
+
 export async function syncOrdersPage(input: { tenantId: string; storeId: string; shopDomain: string; accessToken: string; since: string; after?: string | null; scanned: number }) {
   const data: OrdersBackfillResponse = await shopifyAdminRequest<OrdersBackfillResponse>({
     shopDomain: input.shopDomain,

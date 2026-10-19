@@ -27,12 +27,13 @@ declare global {
   var __shieldLedgerLastHydratedAt: number | undefined;
   // The baseline belongs to this instance, not to other concurrent writers.
   var __shieldLedgerBaseline: PersistedOperationalState | undefined;
+  var __shieldLedgerRevision: string | undefined;
 }
 
 // The dashboard asks for a fresh snapshot in the background.  Keep a warm
 // server instance from downloading the complete encrypted state on each of
 // those checks; writes update this timestamp immediately below.
-const refreshIntervalMs = 5 * 60 * 1000;
+const refreshIntervalMs = 15 * 1000;
 
 const encryptionKey = () => {
   const secret = process.env.STATE_ENCRYPTION_KEY;
@@ -193,6 +194,16 @@ export async function hydrateOperationalState(options: { refresh?: boolean; forc
     // A Vercel deployment can have several warm function instances. Their
     // in-memory snapshots must not hide newer writes made by another instance.
     await waitForPendingWrite();
+    if (!options.force && persistenceBackend() === "supabase" && globalThis.__shieldLedgerRevision) {
+      const config = supabaseConfiguration()!;
+      const response = await fetchWithTimeout(`${config.url}/rest/v1/shield_ledger_state?id=eq.${stateId}&select=iv&limit=1`, {headers:supabaseHeaders(config),cache:"no-store"});
+      if (!response.ok) throw new Error(`PERSISTENCE_READ_FAILED_${response.status}`);
+      const rows = await response.json() as Array<{iv:string}>;
+      if (rows[0]?.iv === globalThis.__shieldLedgerRevision) {
+        globalThis.__shieldLedgerLastHydratedAt = Date.now();
+        return;
+      }
+    }
     const before = exportOperationalState();
     const payload = await loadEncryptedState();
     if (JSON.stringify(before) !== JSON.stringify(exportOperationalState())) return;
@@ -200,6 +211,7 @@ export async function hydrateOperationalState(options: { refresh?: boolean; forc
       const remote = decryptPrivateData(payload);
       restoreOperationalState(globalThis.__shieldLedgerBaseline ? mergeStateChanges(globalThis.__shieldLedgerBaseline, before, remote) : remote);
       globalThis.__shieldLedgerBaseline = remote;
+      globalThis.__shieldLedgerRevision = payload.iv;
     }
     globalThis.__shieldLedgerHydration = Promise.resolve();
     globalThis.__shieldLedgerLastHydratedAt = Date.now();
@@ -210,6 +222,7 @@ export async function hydrateOperationalState(options: { refresh?: boolean; forc
     const payload = await loadEncryptedState();
     if (payload) restoreOperationalState(decryptPrivateData(payload));
     globalThis.__shieldLedgerBaseline = exportOperationalState();
+    globalThis.__shieldLedgerRevision = payload?.iv;
     globalThis.__shieldLedgerLastHydratedAt = Date.now();
     })();
     // A short database outage must not poison a warm serverless instance forever.
@@ -258,7 +271,7 @@ export async function persistOperationalState() {
       if (!current) throw new Error("PERSISTENCE_STATE_MISSING");
       const merged = mergeStateChanges(base, local, decryptPrivateData(current));
       const payload = encryptPrivateData(merged);
-      const response = await fetchWithTimeout(`${supabase.url}/rest/v1/shield_ledger_state?id=eq.${stateId}&iv=eq.${encodeURIComponent(current.iv)}`, {
+      const response = await fetchWithTimeout(`${supabase.url}/rest/v1/shield_ledger_state?id=eq.${stateId}&iv=eq.${encodeURIComponent(current.iv)}&select=id`, {
         method: "PATCH",
         headers: { ...supabaseHeaders(supabase), Prefer: "return=representation" },
         body: JSON.stringify({ ...payload, updated_at: new Date().toISOString() }),
@@ -268,6 +281,9 @@ export async function persistOperationalState() {
       if (rows.length === 1) {
         // Do not replace in-flight requests' local changes with the remote state.
         globalThis.__shieldLedgerBaseline = local;
+        // A local snapshot may not contain other instances' merged records.
+        // Force the next read to compare/load the durable version.
+        globalThis.__shieldLedgerRevision = undefined;
         return;
       }
     }
