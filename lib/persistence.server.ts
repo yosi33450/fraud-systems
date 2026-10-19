@@ -4,6 +4,7 @@ import path from "node:path";
 import { gunzipSync, gzipSync } from "node:zlib";
 import { get, put } from "@vercel/blob";
 import { exportOperationalState, restoreOperationalState, type PersistedOperationalState } from "@/lib/operational-store";
+import { mergeStateChanges } from "@/lib/state-merge";
 
 type EncryptedState = {
   ciphertext: string;
@@ -24,6 +25,8 @@ declare global {
   var __shieldLedgerPersistenceQueue: Promise<void> | undefined;
   // eslint-disable-next-line no-var
   var __shieldLedgerLastHydratedAt: number | undefined;
+  // The baseline belongs to this instance, not to other concurrent writers.
+  var __shieldLedgerBaseline: PersistedOperationalState | undefined;
 }
 
 // The dashboard asks for a fresh snapshot in the background.  Keep a warm
@@ -99,15 +102,10 @@ async function loadBlobState(): Promise<EncryptedState | null> {
   return JSON.parse(await new Response(result.stream).text()) as EncryptedState;
 }
 
-async function waitForPendingWrite(timeoutMs = 1_000) {
+async function waitForPendingWrite() {
   const pending = globalThis.__shieldLedgerPersistenceQueue;
   if (!pending) return;
-  // A save can be retried later. Reading the last durable snapshot is always
-  // safer than holding the entire dashboard hostage to one stalled write.
-  await Promise.race([
-    pending.catch(() => undefined),
-    new Promise<void>((resolve) => setTimeout(resolve, timeoutMs)),
-  ]);
+  await pending;
 }
 
 type PersistenceBackend = "blob" | "supabase" | "local";
@@ -142,7 +140,6 @@ async function loadEncryptedState(): Promise<EncryptedState | null> {
   }
   if (backend === "supabase") {
     const supabase = supabaseConfiguration()!;
-    try {
       const response = await fetchWithTimeout(`${supabase.url}/rest/v1/shield_ledger_state?id=eq.${stateId}&select=ciphertext,iv,auth_tag&limit=1`, {
         headers: supabaseHeaders(supabase),
         cache: "no-store",
@@ -150,20 +147,6 @@ async function loadEncryptedState(): Promise<EncryptedState | null> {
       if (!response.ok) throw new Error(`PERSISTENCE_READ_FAILED_${response.status}`);
       const rows = await response.json() as EncryptedState[];
       return rows[0] ?? null;
-    } catch (error) {
-      // The former Blob snapshot is retained as a read-only recovery copy.
-      // It keeps stores visible during a transient Supabase incident; all new
-      // writes still go to Supabase once it responds again.
-      if (blobConfigured()) {
-        try {
-          const backup = await loadBlobState();
-          if (backup) return backup;
-        } catch {
-          // Preserve the original database error below when the backup is unavailable.
-        }
-      }
-      throw error;
-    }
   }
   try {
     return JSON.parse(await readFile(localFile, "utf8")) as EncryptedState;
@@ -210,8 +193,14 @@ export async function hydrateOperationalState(options: { refresh?: boolean; forc
     // A Vercel deployment can have several warm function instances. Their
     // in-memory snapshots must not hide newer writes made by another instance.
     await waitForPendingWrite();
+    const before = exportOperationalState();
     const payload = await loadEncryptedState();
-    if (payload) restoreOperationalState(decryptPrivateData(payload));
+    if (JSON.stringify(before) !== JSON.stringify(exportOperationalState())) return;
+    if (payload) {
+      const remote = decryptPrivateData(payload);
+      restoreOperationalState(globalThis.__shieldLedgerBaseline ? mergeStateChanges(globalThis.__shieldLedgerBaseline, before, remote) : remote);
+      globalThis.__shieldLedgerBaseline = remote;
+    }
     globalThis.__shieldLedgerHydration = Promise.resolve();
     globalThis.__shieldLedgerLastHydratedAt = Date.now();
     return;
@@ -220,6 +209,7 @@ export async function hydrateOperationalState(options: { refresh?: boolean; forc
     const hydration = (async () => {
     const payload = await loadEncryptedState();
     if (payload) restoreOperationalState(decryptPrivateData(payload));
+    globalThis.__shieldLedgerBaseline = exportOperationalState();
     globalThis.__shieldLedgerLastHydratedAt = Date.now();
     })();
     // A short database outage must not poison a warm serverless instance forever.
@@ -232,8 +222,57 @@ export async function hydrateOperationalState(options: { refresh?: boolean; forc
   return globalThis.__shieldLedgerHydration;
 }
 
+// Admin-only recovery inspection. Encrypted exports never expose connection tokens.
+export async function inspectRecoveryState() {
+  const sources: Array<{source: string; payload: EncryptedState; summary: unknown}> = [];
+  const add = (source: string, payload: EncryptedState) => {
+    try {
+      const s = decryptPrivateData(payload);
+      sources.push({source, payload, summary: {employees: s.employees, cases: s.cases?.length, orders: s.orders?.length,
+        latestOrder: s.orders?.reduce((latest, order) => order.createdAt > latest ? order.createdAt : latest, ""),
+        targets: s.cases?.filter(c => ["558020", "558026", "558034"].includes(String(c.orderNumber)))}});
+    } catch { sources.push({source, payload, summary: {decryptable: false}}); }
+  };
+  const current = await loadEncryptedState();
+  if (current) add("active", current);
+  if (blobConfigured() && persistenceBackend() !== "blob") {
+    try { const blob = await loadBlobState(); if (blob) add("legacy-blob", blob); } catch { /* optional recovery source */ }
+  }
+  return {backend: persistenceBackend(), sources};
+}
+
 export async function persistOperationalState() {
-  const persist = async () => saveEncryptedState(encryptPrivateData(exportOperationalState()));
+  const persist = async () => {
+    const local = exportOperationalState();
+    const base = globalThis.__shieldLedgerBaseline;
+    if (!base) throw new Error("PERSISTENCE_HYDRATION_REQUIRED");
+    if (persistenceBackend() !== "supabase") {
+      await saveEncryptedState(encryptPrivateData(local));
+      globalThis.__shieldLedgerBaseline = local;
+      return;
+    }
+    const supabase = supabaseConfiguration()!;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const current = await loadEncryptedState();
+      // Never recreate a missing production row from a warm/empty snapshot.
+      if (!current) throw new Error("PERSISTENCE_STATE_MISSING");
+      const merged = mergeStateChanges(base, local, decryptPrivateData(current));
+      const payload = encryptPrivateData(merged);
+      const response = await fetchWithTimeout(`${supabase.url}/rest/v1/shield_ledger_state?id=eq.${stateId}&iv=eq.${encodeURIComponent(current.iv)}`, {
+        method: "PATCH",
+        headers: { ...supabaseHeaders(supabase), Prefer: "return=representation" },
+        body: JSON.stringify({ ...payload, updated_at: new Date().toISOString() }),
+      });
+      if (!response.ok) throw new Error(`PERSISTENCE_WRITE_FAILED_${response.status}`);
+      const rows = await response.json() as EncryptedState[];
+      if (rows.length === 1) {
+        // Do not replace in-flight requests' local changes with the remote state.
+        globalThis.__shieldLedgerBaseline = local;
+        return;
+      }
+    }
+    throw new Error("PERSISTENCE_CONCURRENT_WRITE_RETRY");
+  };
   globalThis.__shieldLedgerPersistenceQueue = (globalThis.__shieldLedgerPersistenceQueue ?? Promise.resolve()).then(persist, persist);
   await globalThis.__shieldLedgerPersistenceQueue;
   globalThis.__shieldLedgerLastHydratedAt = Date.now();

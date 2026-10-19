@@ -24,12 +24,10 @@ export async function POST(request: Request, context: { params: Promise<{ storeI
   try {
     await hydrateOperationalState();
   } catch (error) {
-    // Shopify removes a subscription after repeated non-2xx responses. During a
-    // short persistence outage, keep the subscription alive; the normal recent
-    // orders reconciliation catches up any event that could not be analysed.
+    // Unstored events must be retried by Shopify, never acknowledged as saved.
     if (isTransientPersistenceFailure(error)) {
       console.error("[shopify-webhook] persistence temporarily unavailable; recovery sync required", { storeId, code: error.message });
-      return NextResponse.json({ accepted: true, deferred: true, storeId }, { status: 202 });
+      return NextResponse.json({ accepted: false, retry: true, storeId }, { status: 503 });
     }
     throw error;
   }
@@ -82,14 +80,16 @@ export async function POST(request: Request, context: { params: Promise<{ storeI
     } else {
       result = ingestShopifyOrder({ storeId, webhookId, topic, payload: payload as Parameters<typeof ingestShopifyOrder>[0]["payload"] });
     }
-    const deliveries = result.case ? await notifyStoreOwners(result.case) : [];
     await persistOperationalState();
+    // An email must never promise an alert that has not been durably saved.
+    const deliveries = result.case ? await notifyStoreOwners(result.case) : [];
+    if (deliveries.length) await persistOperationalState();
     return NextResponse.json({ accepted: true, storeId, webhookId, topic, duplicate: result.duplicate, caseId: result.case?.id ?? null, notificationsQueued: deliveries.length }, { status: 202 });
   } catch (error) {
     const message = error instanceof Error ? error.message : "WEBHOOK_PROCESSING_FAILED";
     if (isTransientPersistenceFailure(error)) {
       console.error("[shopify-webhook] persistence temporarily unavailable after processing; recovery sync required", { storeId, topic, code: message });
-      return NextResponse.json({ accepted: true, deferred: true, storeId, topic }, { status: 202 });
+      return NextResponse.json({ accepted: false, retry: true, storeId, topic }, { status: 503 });
     }
     console.error("[shopify-webhook] processing failed", { storeId, topic, code: message });
     return NextResponse.json({ error: message }, { status: 500 });
