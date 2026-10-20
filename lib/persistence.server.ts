@@ -164,6 +164,15 @@ export async function initializePartitionedState() {
   throw new Error("MIGRATION_BUSY_RETRY");
 }
 
+export async function verifyPartitionedState() {
+  if (!await usesPartitions()) throw new Error("PARTITIONS_NOT_READY");
+  const original=await loadEncryptedState();
+  if(!original)throw new Error("PERSISTENCE_STATE_MISSING");
+  const source=decryptPrivateData(original), current=await partitions().load();
+  const counts=(state:PersistedOperationalState)=>Object.fromEntries(Object.entries(state).filter(([,v])=>Array.isArray(v)).map(([k,v])=>[k,(v as unknown[]).length]));
+  return {identical:stateFingerprint(source)===stateFingerprint(current),source:counts(source),current:counts(current)};
+}
+
 type PersistenceBackend = "blob" | "supabase" | "local";
 
 function persistenceBackend(): PersistenceBackend {

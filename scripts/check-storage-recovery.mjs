@@ -21,6 +21,8 @@ if(process.argv.includes('--backup')){
   await writeFile(file,JSON.stringify(source.payload),{mode:0o600});
   console.log(JSON.stringify({saved:file,source:source.source,orders:source.summary.orders,cases:source.summary.cases,employees:source.summary.employees?.length,decryptable:source.summary.decryptable!==false}));
  }
+}else if(process.argv.includes('--verify')){
+ console.log(JSON.stringify(await request('/api/admin/recovery',{action:'verify-partitions'})));
 }else if(process.argv.includes('--migrate')){
  console.log(JSON.stringify(await request('/api/admin/recovery',{action:'initialize-partitions'})));
 }else{
