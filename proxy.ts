@@ -11,6 +11,13 @@ const publicPath = (pathname: string) =>
 
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
+  const maintenanceUntil=Date.parse(process.env.STORAGE_MAINTENANCE_UNTIL ?? "");
+  if (Date.now()<maintenanceUntil && pathname.startsWith("/api/")
+      && !pathname.startsWith("/api/auth/") && pathname!=="/api/admin/recovery"
+      && pathname!=="/api/diagnostics/persistence") {
+    // Bounded maintenance window: no false acknowledgement of Shopify events.
+    return NextResponse.json({error:"STORAGE_MAINTENANCE",retry:true},{status:503,headers:{"Retry-After":"60","Cache-Control":"no-store"}});
+  }
   if (pathname === "/shopify") {
     const headers = new Headers(request.headers);
     headers.set("x-shopshield-embedded", "1");

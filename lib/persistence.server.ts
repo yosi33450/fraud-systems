@@ -108,14 +108,6 @@ async function loadBlobState(): Promise<EncryptedState | null> {
   return JSON.parse(await new Response(result.stream).text()) as EncryptedState;
 }
 
-async function waitForPendingWrite() {
-  const pending = globalThis.__shieldLedgerPersistenceQueue;
-  if (!pending) return;
-  // A rejected save must not permanently poison every subsequent dashboard
-  // read in the same warm instance. Its unsaved local delta is still merged.
-  await pending.catch(() => undefined);
-}
-
 async function partitionRpc(name: string, args: unknown) {
   const config = supabaseConfiguration()!;
   const response = await fetchWithTimeout(`${config.url}/rest/v1/rpc/${name}`, {
@@ -277,9 +269,12 @@ export async function hydrateOperationalState(options: { refresh?: boolean; forc
   if (options.refresh && (options.force || !isFresh)) {
     // A Vercel deployment can have several warm function instances. Their
     // in-memory snapshots must not hide newer writes made by another instance.
-    await waitForPendingWrite();
+    // Reads must not wait behind the webhook write queue. Capture its baseline
+    // and discard a raced read if a save completes while the read is in flight.
+    const baselineBeforeRead=globalThis.__shieldLedgerBaseline;
     if (await usesPartitions()) {
       const remote=await partitions().load();
+      if (globalThis.__shieldLedgerBaseline !== baselineBeforeRead) return;
       const current=exportOperationalState();
       // Preserve local mutations that arrived while the read was in flight.
       const base=globalThis.__shieldLedgerBaseline;
@@ -302,6 +297,7 @@ export async function hydrateOperationalState(options: { refresh?: boolean; forc
     const before = exportOperationalState();
     const payload = await loadEncryptedState();
     if (!payload && persistenceBackend() === "supabase") throw new Error("PERSISTENCE_STATE_MISSING");
+    if (globalThis.__shieldLedgerBaseline !== baselineBeforeRead) return;
     if (JSON.stringify(before) !== JSON.stringify(exportOperationalState())) return;
     if (payload) {
       const remote = decryptPrivateData(payload);

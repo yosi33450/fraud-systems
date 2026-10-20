@@ -9,7 +9,10 @@ import { syncShopifyOrderGiftCards } from "@/lib/shopify-sync.server";
 export const runtime = "nodejs";
 
 const isTransientPersistenceFailure = (error: unknown): error is Error =>
-  error instanceof Error && /^PERSISTENCE_(?:READ|WRITE)_FAILED_(?:5\d\d|429)$/.test(error.message);
+  error instanceof Error && (error.name === "AbortError"
+    || /^PERSISTENCE_(?:READ|WRITE|MODE_READ)_FAILED_(?:5\d\d|429)$/.test(error.message)
+    || /^PARTITION_RPC_.*_(?:5\d\d|429)$/.test(error.message)
+    || error.message === "PERSISTENCE_CONCURRENT_WRITE_RETRY");
 
 function verifyShopifyHmac(rawBody: string, receivedHmac: string | null, secret: string) {
   if (!receivedHmac) return false;
