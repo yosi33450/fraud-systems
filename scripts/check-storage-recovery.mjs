@@ -14,7 +14,7 @@ async function request(path,body){
  return data;
 }
 if(process.argv.includes('--backup')){
- const result=await request('/api/admin/recovery');
+ const result=await request('/api/admin/recovery?activeOnly=1');
  await mkdir('.data/recovery',{recursive:true});
  for(const source of result.sources){
   const file=`.data/recovery/cutover-${source.source}-${Date.now()}.enc.json`;

@@ -8,6 +8,7 @@ const {exportOperationalState}=await import('../lib/operational-store.ts');
 function fixture() {
   const state=exportOperationalState();
   state.orders=Array.from({length:13000},(_,i)=>({tenantId:'t',storeId:'s',shopifyOrderId:String(i),createdAt:'2026-10-19T08:00:00Z',total:i,customerEmail:`test-${i}@example.invalid`}));
+  state.webhookIds=Array.from({length:25000},(_,i)=>`webhook-${i}`);
   return state;
 }
 function harness(state) {
@@ -54,6 +55,7 @@ test('one order update writes a small bucket, not all 13000 orders; repeated rea
   const readCount=h.readRows;
   await h.store.load();assert.equal(h.readRows,readCount);
   local.orders.find(o=>o.shopifyOrderId==='100').total=999;
+  local.webhookIds.push('new-webhook');
   await h.store.save(base,local);
   assert.ok(h.writtenBytes<50000,`wrote ${h.writtenBytes} bytes`);
   assert.equal((await h.store.load()).orders.find(o=>o.shopifyOrderId==='100').total,999);

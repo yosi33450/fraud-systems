@@ -56,6 +56,7 @@ begin
   if jsonb_typeof(parts) <> 'array'
      or (select count(*) from jsonb_array_elements(parts) x where x->>'id'='op2-ready') <> 1
      or (select count(*) from jsonb_array_elements(parts) x where x->>'id' ~ '^op2-orders-[0-9]{3}$') <> 128
+     or (select count(*) from jsonb_array_elements(parts) x where x->>'id' ~ '^op2-webhooks-[0-9]{3}$') <> 32
      or exists(select 1 from jsonb_array_elements(parts) x where x->>'id' not like 'op2-%' or x->>'id' is null)
   then raise exception 'INVALID_INITIAL_PARTITIONS'; end if;
   insert into public.shield_ledger_state(id,ciphertext,iv,auth_tag,updated_at)

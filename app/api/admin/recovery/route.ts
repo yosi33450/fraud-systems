@@ -9,7 +9,7 @@ export async function GET(request: NextRequest) {
   if (!await verifySessionToken(request.cookies.get(AUTH_COOKIE)?.value, process.env.AUTH_SECRET)) {
     return NextResponse.json({error:"UNAUTHORIZED"},{status:401});
   }
-  return NextResponse.json(await inspectRecoveryState(),{headers:{"Cache-Control":"no-store"}});
+  return NextResponse.json(await inspectRecoveryState({activeOnly:request.nextUrl.searchParams.get("activeOnly")==="1"}),{headers:{"Cache-Control":"no-store"}});
 }
 export async function POST(request: NextRequest) {
   if (!await verifySessionToken(request.cookies.get(AUTH_COOKIE)?.value, process.env.AUTH_SECRET)) return NextResponse.json({error:"UNAUTHORIZED"},{status:401});

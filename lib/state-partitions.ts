@@ -6,11 +6,12 @@ import type { PersistedOperationalState } from "@/lib/operational-store";
 export const PARTITION_PREFIX = "op2-";
 export const PARTITION_MARKER = "op2-ready";
 const bucketCount = 128;
+const webhookBuckets = 32;
 export function partitionState(state: PersistedOperationalState): Map<string, unknown> {
   const parts = new Map<string, unknown>();
   const complete = {employeeSettingsByTenant: [],giftCards: [],giftCardOrders: [],chargebacks: [],...state};
   for (const [field, value] of Object.entries(complete)) {
-    if (field !== "orders") parts.set(`op2-field-${field}`, value);
+    if (field !== "orders" && field !== "webhookIds") parts.set(`op2-field-${field}`, value);
   }
   const buckets: PersistedOperationalState["orders"][] = Array.from({length: bucketCount}, () => []);
   for (const order of state.orders) {
@@ -22,6 +23,9 @@ export function partitionState(state: PersistedOperationalState): Map<string, un
     buckets[i].sort((a, b) => JSON.stringify([a.tenantId,a.storeId,a.shopifyOrderId]).localeCompare(JSON.stringify([b.tenantId,b.storeId,b.shopifyOrderId])));
     parts.set(`op2-orders-${String(i).padStart(3, "0")}`, buckets[i]);
   }
+  const webhooks: string[][]=Array.from({length:webhookBuckets},()=>[]);
+  for(const id of state.webhookIds) webhooks[createHash("sha256").update(id).digest().readUInt16BE(0)%webhookBuckets].push(id);
+  for(let i=0;i<webhookBuckets;i++) parts.set(`op2-webhooks-${String(i).padStart(3,"0")}`,webhooks[i].sort());
   return parts;
 }
 
@@ -42,10 +46,16 @@ export function assembleState(parts: Map<string, unknown>): PersistedOperational
   // Order ingestion appends records; screens perform their own date sorting.
   // Do not depend on bucket order for historical evaluation.
   orders.sort((a,b) => (a.createdAt ?? "").localeCompare(b.createdAt ?? "") || a.shopifyOrderId.localeCompare(b.shopifyOrderId));
-  return {...result, orders} as PersistedOperationalState;
+  const webhookIds: string[]=[];
+  for(let i=0;i<webhookBuckets;i++){
+    const bucket=parts.get(`op2-webhooks-${String(i).padStart(3,"0")}`);
+    if(!Array.isArray(bucket))throw new Error("PERSISTENCE_PARTITION_MISSING");
+    webhookIds.push(...bucket);
+  }
+  return {...result, orders,webhookIds} as PersistedOperationalState;
 }
 
-export const partitionPath = (id: string) => id.startsWith("op2-orders-") ? ".orders" : `.${id.slice("op2-field-".length)}`;
+export const partitionPath = (id: string) => id.startsWith("op2-orders-") ? ".orders" : id.startsWith("op2-webhooks-") ? ".webhookIds" : `.${id.slice("op2-field-".length)}`;
 
 // Migration comparison deliberately ignores physical order of the order array,
 // but includes every field of every record and every other collection.

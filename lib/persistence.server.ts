@@ -340,7 +340,7 @@ export async function hydrateOperationalState(options: { refresh?: boolean; forc
 }
 
 // Admin-only recovery inspection. Encrypted exports never expose connection tokens.
-export async function inspectRecoveryState() {
+export async function inspectRecoveryState(options: {activeOnly?: boolean} = {}) {
   const sources: Array<{source: string; payload: EncryptedState; summary: unknown}> = [];
   const add = (source: string, payload: EncryptedState) => {
     try {
@@ -353,9 +353,9 @@ export async function inspectRecoveryState() {
     const current = await loadEncryptedState();
     if (await usesPartitions()) {
       add("active",encryptPrivateData(await partitions().load()));
-      if(current) add("pre-partition-backup",current);
+      if(current && !options.activeOnly) add("pre-partition-backup",current);
     } else if (current) add("active", current);
-  if (blobConfigured() && persistenceBackend() !== "blob") {
+  if (!options.activeOnly && blobConfigured() && persistenceBackend() !== "blob") {
     try { const blob = await loadBlobState(); if (blob) add("legacy-blob", blob); } catch { /* optional recovery source */ }
   }
   return {backend: persistenceBackend(), sources};
