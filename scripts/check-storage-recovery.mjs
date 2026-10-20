@@ -7,7 +7,7 @@ if(!login.ok)throw Error(`LOGIN_${login.status}`);
 const cookie=login.headers.getSetCookie().map(v=>v.split(';')[0]).join('; ');
 async function request(path,body){
  const start=Date.now();
- const response=await fetch(base+path,{method:body?'POST':'GET',headers:{Cookie:cookie,'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{}),signal:AbortSignal.timeout(90000)});
+ const response=await fetch(base+path,{method:body?'POST':'GET',headers:{Cookie:cookie,'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{}),signal:AbortSignal.timeout(body?.action==='initialize-partitions'?240000:90000)});
  if(!response.ok)throw Error(`REQUEST_${response.status}:${path}`);
  const data=await response.json();
  console.log(JSON.stringify({path,status:response.status,durationMs:Date.now()-start}));

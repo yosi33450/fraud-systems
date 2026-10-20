@@ -4,6 +4,7 @@ import {inspectRecoveryState, hydrateOperationalState, persistOperationalState, 
 import {getFreshStoreConnection} from "@/lib/shopify-connection.server";
 import {replayCustomerOrders} from "@/lib/shopify-sync.server";
 export const dynamic = "force-dynamic";
+export const maxDuration = 300;
 export async function GET(request: NextRequest) {
   // Require the owner dashboard session, not an embedded employee token.
   if (!await verifySessionToken(request.cookies.get(AUTH_COOKIE)?.value, process.env.AUTH_SECRET)) {

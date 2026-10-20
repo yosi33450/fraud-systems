@@ -113,7 +113,7 @@ async function partitionRpc(name: string, args: unknown) {
   const response = await fetchWithTimeout(`${config.url}/rest/v1/rpc/${name}`, {
     method: "POST", headers: supabaseHeaders(config), body: JSON.stringify(args),
     cache: "no-store",
-  }, 25_000);
+  }, name === "shopshield_initialize_parts" ? 60_000 : 25_000);
   if (!response.ok) throw new Error(`PARTITION_RPC_${name}_${response.status}`);
   return response.json();
 }
@@ -124,13 +124,13 @@ function partitions() {
   });
 }
 
-async function usesPartitions() {
+async function usesPartitions(timeoutMs = 15_000) {
   if (persistenceBackend() !== "supabase") return false;
   if (globalThis.__shieldLedgerPartitionMode === true) return true;
   const config=supabaseConfiguration()!;
   const response=await fetchWithTimeout(`${config.url}/rest/v1/shield_ledger_state?id=eq.${PARTITION_MARKER}&select=id&limit=1`,{
     headers:supabaseHeaders(config),cache:"no-store",
-  });
+  },timeoutMs);
   if (!response.ok) throw new Error(`PERSISTENCE_MODE_READ_FAILED_${response.status}`);
   const ready=(await response.json() as Array<{id:string}>).length === 1;
   globalThis.__shieldLedgerPartitionMode=ready;
@@ -141,12 +141,12 @@ async function usesPartitions() {
 // of the original global row. The SQL transaction rejects stale source data.
 export async function initializePartitionedState() {
   if (persistenceBackend() !== "supabase") throw new Error("SUPABASE_REQUIRED");
-  if (await usesPartitions()) {
+  if (await usesPartitions(60_000)) {
     const state=await partitions().load();
     return {alreadyMigrated:true,orders:state.orders.length,cases:state.cases.length};
   }
   for (let attempt=0;attempt<3;attempt++) {
-    const original=await loadEncryptedState();
+    const original=await loadEncryptedState(60_000);
     if (!original) throw new Error("PERSISTENCE_STATE_MISSING");
     const state=decryptPrivateData(original);
     const split=partitionState(state);
@@ -156,10 +156,9 @@ export async function initializePartitionedState() {
     parts.push({id:PARTITION_MARKER,...encryptPrivateData({version:2,fingerprint,migratedAt:new Date().toISOString()})});
     if (await partitionRpc("shopshield_initialize_parts",{expected_iv:original.iv,parts}) === true) {
       globalThis.__shieldLedgerPartitionMode=true;
-      const restored=await partitions().load();
       // Live writes may already have advanced the new rows. The transaction
       // itself inserted exactly the verified parts; never overwrite them.
-      return {migrated:true,sourceFingerprint:fingerprint,orders:restored.orders.length,cases:restored.cases.length,employees:restored.employees.length};
+      return {migrated:true,sourceFingerprint:fingerprint,orders:state.orders.length,cases:state.cases.length,employees:state.employees.length};
     }
   }
   throw new Error("MIGRATION_BUSY_RETRY");
@@ -190,7 +189,7 @@ function persistenceBackend(): PersistenceBackend {
   return "local";
 }
 
-async function loadEncryptedState(): Promise<EncryptedState | null> {
+async function loadEncryptedState(timeoutMs = 15_000): Promise<EncryptedState | null> {
   const backend = persistenceBackend();
   if (backend === "blob") {
     return loadBlobState();
@@ -200,7 +199,7 @@ async function loadEncryptedState(): Promise<EncryptedState | null> {
       const response = await fetchWithTimeout(`${supabase.url}/rest/v1/shield_ledger_state?id=eq.${stateId}&select=ciphertext,iv,auth_tag&limit=1`, {
         headers: supabaseHeaders(supabase),
         cache: "no-store",
-      });
+      },timeoutMs);
       if (!response.ok) throw new Error(`PERSISTENCE_READ_FAILED_${response.status}`);
       const rows = await response.json() as EncryptedState[];
       return rows[0] ?? null;
