@@ -5,6 +5,8 @@ import { gunzipSync, gzipSync } from "node:zlib";
 import { get, put } from "@vercel/blob";
 import { exportOperationalState, restoreOperationalState, type PersistedOperationalState } from "@/lib/operational-store";
 import { mergeStateChanges } from "@/lib/state-merge";
+import { PartitionedPersistence } from "@/lib/partitioned-persistence";
+import { assembleState, partitionState, PARTITION_MARKER, stateFingerprint } from "@/lib/state-partitions";
 
 type EncryptedState = {
   ciphertext: string;
@@ -29,6 +31,8 @@ declare global {
   var __shieldLedgerBaseline: PersistedOperationalState | undefined;
   var __shieldLedgerRevision: string | undefined;
   var __shieldLedgerBackupDay: string | undefined;
+  var __shieldLedgerPartitioned: PartitionedPersistence | undefined;
+  var __shieldLedgerPartitionMode: boolean | undefined;
 }
 
 // The dashboard asks for a fresh snapshot in the background.  Keep a warm
@@ -107,7 +111,66 @@ async function loadBlobState(): Promise<EncryptedState | null> {
 async function waitForPendingWrite() {
   const pending = globalThis.__shieldLedgerPersistenceQueue;
   if (!pending) return;
-  await pending;
+  // A rejected save must not permanently poison every subsequent dashboard
+  // read in the same warm instance. Its unsaved local delta is still merged.
+  await pending.catch(() => undefined);
+}
+
+async function partitionRpc(name: string, args: unknown) {
+  const config = supabaseConfiguration()!;
+  const response = await fetchWithTimeout(`${config.url}/rest/v1/rpc/${name}`, {
+    method: "POST", headers: supabaseHeaders(config), body: JSON.stringify(args),
+    cache: "no-store",
+  }, 25_000);
+  if (!response.ok) throw new Error(`PARTITION_RPC_${name}_${response.status}`);
+  return response.json();
+}
+
+function partitions() {
+  return globalThis.__shieldLedgerPartitioned ??= new PartitionedPersistence({
+    rpc: partitionRpc, encrypt: encryptPrivateData, decrypt: decryptPrivateData,
+  });
+}
+
+async function usesPartitions() {
+  if (persistenceBackend() !== "supabase") return false;
+  if (globalThis.__shieldLedgerPartitionMode === true) return true;
+  const config=supabaseConfiguration()!;
+  const response=await fetchWithTimeout(`${config.url}/rest/v1/shield_ledger_state?id=eq.${PARTITION_MARKER}&select=id&limit=1`,{
+    headers:supabaseHeaders(config),cache:"no-store",
+  });
+  if (!response.ok) throw new Error(`PERSISTENCE_MODE_READ_FAILED_${response.status}`);
+  const ready=(await response.json() as Array<{id:string}>).length === 1;
+  globalThis.__shieldLedgerPartitionMode=ready;
+  return ready;
+}
+
+// Explicit owner-only cutover. No fallback to stale snapshots and no deletion
+// of the original global row. The SQL transaction rejects stale source data.
+export async function initializePartitionedState() {
+  if (persistenceBackend() !== "supabase") throw new Error("SUPABASE_REQUIRED");
+  if (await usesPartitions()) {
+    const state=await partitions().load();
+    return {alreadyMigrated:true,orders:state.orders.length,cases:state.cases.length};
+  }
+  for (let attempt=0;attempt<3;attempt++) {
+    const original=await loadEncryptedState();
+    if (!original) throw new Error("PERSISTENCE_STATE_MISSING");
+    const state=decryptPrivateData(original);
+    const split=partitionState(state);
+    if (stateFingerprint(assembleState(split)) !== stateFingerprint(state)) throw new Error("MIGRATION_ROUNDTRIP_FAILED");
+    const fingerprint=stateFingerprint(state);
+    const parts=[...split].map(([id,value]) => ({id,...encryptPrivateData(value)}));
+    parts.push({id:PARTITION_MARKER,...encryptPrivateData({version:2,fingerprint,migratedAt:new Date().toISOString()})});
+    if (await partitionRpc("shopshield_initialize_parts",{expected_iv:original.iv,parts}) === true) {
+      globalThis.__shieldLedgerPartitionMode=true;
+      const restored=await partitions().load();
+      // Live writes may already have advanced the new rows. The transaction
+      // itself inserted exactly the verified parts; never overwrite them.
+      return {migrated:true,sourceFingerprint:fingerprint,orders:restored.orders.length,cases:restored.cases.length,employees:restored.employees.length};
+    }
+  }
+  throw new Error("MIGRATION_BUSY_RETRY");
 }
 
 type PersistenceBackend = "blob" | "supabase" | "local";
@@ -215,6 +278,17 @@ export async function hydrateOperationalState(options: { refresh?: boolean; forc
     // A Vercel deployment can have several warm function instances. Their
     // in-memory snapshots must not hide newer writes made by another instance.
     await waitForPendingWrite();
+    if (await usesPartitions()) {
+      const remote=await partitions().load();
+      const current=exportOperationalState();
+      // Preserve local mutations that arrived while the read was in flight.
+      const base=globalThis.__shieldLedgerBaseline;
+      restoreOperationalState(base ? mergeStateChanges(base,current,remote) : remote);
+      globalThis.__shieldLedgerBaseline=remote;
+      globalThis.__shieldLedgerLastHydratedAt=Date.now();
+      globalThis.__shieldLedgerHydration=Promise.resolve();
+      return;
+    }
     if (!options.force && persistenceBackend() === "supabase" && globalThis.__shieldLedgerRevision) {
       const config = supabaseConfiguration()!;
       const response = await fetchWithTimeout(`${config.url}/rest/v1/shield_ledger_state?id=eq.${stateId}&select=iv&limit=1`, {headers:supabaseHeaders(config),cache:"no-store"});
@@ -227,6 +301,7 @@ export async function hydrateOperationalState(options: { refresh?: boolean; forc
     }
     const before = exportOperationalState();
     const payload = await loadEncryptedState();
+    if (!payload && persistenceBackend() === "supabase") throw new Error("PERSISTENCE_STATE_MISSING");
     if (JSON.stringify(before) !== JSON.stringify(exportOperationalState())) return;
     if (payload) {
       const remote = decryptPrivateData(payload);
@@ -240,7 +315,15 @@ export async function hydrateOperationalState(options: { refresh?: boolean; forc
   }
   if (!globalThis.__shieldLedgerHydration) {
     const hydration = (async () => {
+    if (await usesPartitions()) {
+      const remote=await partitions().load();
+      restoreOperationalState(remote);
+      globalThis.__shieldLedgerBaseline=exportOperationalState();
+      globalThis.__shieldLedgerLastHydratedAt=Date.now();
+      return;
+    }
     const payload = await loadEncryptedState();
+    if (!payload && persistenceBackend() === "supabase") throw new Error("PERSISTENCE_STATE_MISSING");
     if (payload) restoreOperationalState(decryptPrivateData(payload));
     globalThis.__shieldLedgerBaseline = exportOperationalState();
     globalThis.__shieldLedgerRevision = payload?.iv;
@@ -267,8 +350,11 @@ export async function inspectRecoveryState() {
         targets: s.cases?.filter(c => ["558020", "558026", "558034"].includes(String(c.orderNumber)))}});
     } catch { sources.push({source, payload, summary: {decryptable: false}}); }
   };
-  const current = await loadEncryptedState();
-  if (current) add("active", current);
+    const current = await loadEncryptedState();
+    if (await usesPartitions()) {
+      add("active",encryptPrivateData(await partitions().load()));
+      if(current) add("pre-partition-backup",current);
+    } else if (current) add("active", current);
   if (blobConfigured() && persistenceBackend() !== "blob") {
     try { const blob = await loadBlobState(); if (blob) add("legacy-blob", blob); } catch { /* optional recovery source */ }
   }
@@ -286,6 +372,11 @@ export async function persistOperationalState() {
     if (persistenceBackend() !== "supabase") {
       await saveEncryptedState(encryptPrivateData(local));
       globalThis.__shieldLedgerBaseline = local;
+      return;
+    }
+    if (await usesPartitions()) {
+      await partitions().save(base,local);
+      globalThis.__shieldLedgerBaseline=local;
       return;
     }
     const supabase = supabaseConfiguration()!;
