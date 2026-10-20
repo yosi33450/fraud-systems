@@ -25,6 +25,21 @@ if(process.argv.includes('--backup')){
  console.log(JSON.stringify(await request('/api/admin/recovery',{action:'verify-partitions'})));
 }else if(process.argv.includes('--migrate')){
  console.log(JSON.stringify(await request('/api/admin/recovery',{action:'initialize-partitions'})));
+}else if(process.argv.includes('--sync-recent')){
+ let after=null,scanned=0;
+ const seen=new Set();
+ for(let page=0;page<40;page++){
+  const result=await request('/api/tenants/tenant-primary/stores/01424c82-a2dc-4b09-b394-0a119def7848/sync',{
+   since:'2026-10-18T21:00:00.000Z',after,scanned,
+  });
+  if(!result.synced || !Number.isSafeInteger(result.scanned))throw Error('SYNC_FAILED');
+  scanned=result.scanned;
+  console.log(JSON.stringify({scanned,complete:result.complete,casesCreated:result.casesCreated,webhooks:result.webhooks}));
+  if(result.complete)process.exit(0);
+  if(!result.nextCursor || seen.has(result.nextCursor))throw Error('INVALID_SYNC_CURSOR');
+  seen.add(result.nextCursor);after=result.nextCursor;
+ }
+ throw Error('SYNC_PAGE_LIMIT');
 }else{
  console.log(JSON.stringify(await request('/api/diagnostics/persistence')));
  const data=await request('/api/tenants/tenant-primary/snapshot');
