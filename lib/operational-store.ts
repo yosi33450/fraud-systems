@@ -531,6 +531,27 @@ export function getDashboardSnapshot(tenantId: string): DashboardSnapshot {
   };
 }
 
+export function isTrustedNetworkIp(tenantId: string, storeId: string, ip: string) {
+  return Boolean(ip && state.stores.find(store => store.tenantId === tenantId && store.id === storeId)?.trustedNetworkIps?.includes(ip.trim()));
+}
+
+export function trustStoreNetworkIp(tenantId: string, storeId: string, ip: string) {
+  const store = tenantStore(tenantId, storeId);
+  store.trustedNetworkIps = [...new Set([...(store.trustedNetworkIps ?? []), ip.trim()])];
+  const digest = digestKey("ip", ip.trim());
+  let revoked = 0;
+  for (const report of state.reports) {
+    if (report.tenantId !== tenantId || report.keyType !== "ip" || report.status !== "active" || state.reportDigests.get(report.id) !== digest) continue;
+    if (!state.cases.some(item => item.id === report.caseId && item.tenantId === tenantId && item.storeId === storeId)) continue;
+    report.status = "revoked";
+    revoked++;
+  }
+  if (!state.reports.some(report => report.status === "active" && state.reportDigests.get(report.id) === digest)) state.globalDigests.delete(digest);
+  const result = reevaluateOpenCases(tenantId, {storeId, ip:ip.trim()});
+  state.audit.unshift({id:randomUUID(),tenantId,action:"store.network-ip.trusted",resourceType:"store",resourceId:storeId,createdAt:new Date().toISOString(),metadata:{ip:ip.trim(),revoked,reviewed:result.reviewed,resolved:result.resolved}});
+  return {revoked,reviewed:result.reviewed,resolved:result.resolved,updated:result.updated};
+}
+
 export function decideCase(tenantId: string, caseId: string, status: CaseStatus) {
   const item = state.cases.find((candidate) => candidate.tenantId === tenantId && candidate.id === caseId);
   if (!item) throw new Error("CASE_NOT_FOUND");
@@ -557,6 +578,7 @@ export function decideCase(tenantId: string, caseId: string, status: CaseStatus)
     ];
     for (const identity of identities) {
       if (!identity.value) continue;
+      if (identity.type === "ip" && isTrustedNetworkIp(tenantId, item.storeId, identity.value)) continue;
       state.globalDigests.add(digestKey(identity.type, identity.value));
       if (state.reports.some((report) => report.tenantId === tenantId && report.caseId === caseId && report.keyType === identity.type && report.status === "active")) continue;
       state.reports.unshift({
@@ -684,10 +706,10 @@ const fallbackSignalsForCase = (item: FraudCase, tenantCases: FraudCase[]): Orde
   };
 };
 
-export function reevaluateOpenCases(tenantId: string) {
+export function reevaluateOpenCases(tenantId: string, scope?: {storeId: string; ip: string}) {
   const tenantCases = state.cases.filter((item) => item.tenantId === tenantId);
   const rules = state.rulesByTenant.get(tenantId) ?? [];
-  const candidates = tenantCases.filter(canReevaluate);
+  const candidates = tenantCases.filter(item => canReevaluate(item) && (!scope || (item.storeId === scope.storeId && item.context?.ip === scope.ip)));
   const velocityFor = createVelocityLookup(state.orders, rules.flatMap((rule) => rule.conditions));
   const employeeSettings = getEmployeeSettings(tenantId);
   const preserveEmployeeEvidence = (item: FraudCase, result: ReturnType<typeof evaluateRisk>) => {
@@ -714,6 +736,19 @@ export function reevaluateOpenCases(tenantId: string) {
     };
     const signals: OrderSignals = { ...base, orderAmount: current.amount, linkedGiftCard: false,
       ...velocityFor(current) };
+    if (scope) {
+      // Re-read actual identifiers: neither stale booleans nor a generic label
+      // are proof of a current blacklist match.
+      signals.blacklist = {
+        email: Boolean(item.email && state.globalDigests.has(digestKey("email", item.email))),
+        phone: Boolean(item.context?.phone && state.globalDigests.has(digestKey("phone", item.context.phone))),
+        address: Boolean(item.context?.address && state.globalDigests.has(digestKey("address", item.context.address))),
+        customer: Boolean(item.context?.customerId && state.globalDigests.has(digestKey("customer", item.context.customerId))),
+        ip: Boolean(current.ip && !isTrustedNetworkIp(tenantId,item.storeId,current.ip) && state.globalDigests.has(digestKey("ip",current.ip))),
+      };
+    } else if (isTrustedNetworkIp(tenantId, item.storeId, current.ip)) {
+      signals.blacklist = {...signals.blacklist, ip:false};
+    }
     const timestamp = Number.isFinite(Date.parse(current.createdAt)) ? new Date(current.createdAt) : new Date();
     signals.orderLocalHour = Number(new Intl.DateTimeFormat("en-US", { hour: "2-digit", hourCycle: "h23", timeZone: "Asia/Jerusalem" }).format(timestamp));
     return { item, signals, timestamp, baseResult: preserveEmployeeEvidence(item, evaluateRisk(signals, timestamp, rules)) };
@@ -1285,7 +1320,7 @@ export function ingestShopifyOrder(input: { storeId: string; webhookId: string; 
       email: Boolean(email && state.globalDigests.has(digestKey("email", email))),
       phone: Boolean(phone && state.globalDigests.has(digestKey("phone", phone))),
       address: Boolean(address && state.globalDigests.has(digestKey("address", address))),
-      ip: Boolean(ip && state.globalDigests.has(digestKey("ip", ip))),
+      ip: Boolean(ip && !isTrustedNetworkIp(store.tenantId, store.id, ip) && state.globalDigests.has(digestKey("ip", ip))),
       customer: Boolean(customerId && state.globalDigests.has(digestKey("customer", customerId))),
     },
   };

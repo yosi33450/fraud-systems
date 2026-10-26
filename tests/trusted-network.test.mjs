@@ -1,0 +1,38 @@
+import './register-ts-alias.mjs';
+import test from 'node:test';
+import assert from 'node:assert/strict';
+const api=await import('../lib/operational-store.ts');
+const empty=api.exportOperationalState();
+const ip='192.0.2.10';
+test('office IP is revoked, stays excluded, and does not bypass other risks or other stores',()=>{
+ api.restoreOperationalState(empty);
+ const store=api.connectShopifyStore({tenantId:'test',name:'Test',domain:'test.myshopify.com',accessToken:'test',clientSecret:'test',expiresIn:10000});
+ const other=api.connectShopifyStore({tenantId:'other',name:'Other',domain:'other.myshopify.com',accessToken:'test',clientSecret:'test',expiresIn:10000});
+ function order(s,id,email,amount=100){return api.ingestShopifyOrder({storeId:s.id,webhookId:`w-${id}`,topic:'HISTORICAL_SYNC',payload:{id,name:`#${id}`,created_at:'2026-10-26T08:00:00Z',email,total_price:amount,browser_ip:ip}}).case;}
+ const first=order(store,'1','a@example.invalid',3000);
+ api.decideCase('test',first.id,'fraud');
+ const foreign=order(other,'2','b@example.invalid',3000);
+ api.decideCase('other',foreign.id,'fraud');
+ const innocent=order(store,'3','c@example.invalid');
+ assert.equal(innocent.signals.blacklist.ip,true);
+ const result=api.trustStoreNetworkIp('test',store.id,ip);
+ assert.equal(result.revoked,1);
+ let state=api.exportOperationalState();
+ assert.equal(state.cases.find(c=>c.id===innocent.id).status,'resolved');
+ assert.equal(state.cases.find(c=>c.id===first.id).status,'fraud');
+ assert.ok(state.reports.some(r=>r.tenantId==='test'&&r.keyType==='email'&&r.status==='active'));
+ assert.ok(state.reports.some(r=>r.tenantId==='other'&&r.keyType==='ip'&&r.status==='active'));
+ assert.equal(api.isTrustedNetworkIp('other',other.id,ip),false);
+ const risky=order(store,'4','d@example.invalid',3000);
+ assert.equal(risky.signals.blacklist.ip,false);
+ assert.ok(risky.score>=25);
+ api.decideCase('test',risky.id,'fraud');
+ state=api.exportOperationalState();
+ assert.equal(state.reports.filter(r=>r.tenantId==='test'&&r.keyType==='ip'&&r.status==='active').length,0);
+ const sameEmail=order(store,'5','a@example.invalid');
+ assert.equal(sameEmail.signals.blacklist.email,true);
+ assert.equal(sameEmail.signals.blacklist.ip,false);
+ api.restoreOperationalState(api.exportOperationalState());
+ assert.equal(api.isTrustedNetworkIp('test',store.id,ip),true);
+ assert.equal(api.trustStoreNetworkIp('test',store.id,ip).revoked,0);
+});

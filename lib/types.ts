@@ -3,6 +3,7 @@ export type CaseStatus = "new" | "review" | "action" | "fraud" | "false-positive
 export type UserRole = "platform-owner" | "tenant-owner" | "tenant-admin" | "analyst" | "viewer";
 
 export interface Store {
+  trustedNetworkIps?: string[];
   id: string;
   tenantId: string;
   name: string;
